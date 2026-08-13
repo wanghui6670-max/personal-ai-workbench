@@ -13,7 +13,7 @@ test('workbench loads the reversible UX enhancement layer',async()=>{
   assert.match(index,/ux-enhancements\.css/);
   assert.match(index,/ux-enhancements\.js/);
   assert.match(script,/personal-ai-workbench\.ai-panel-mode/);
-  assert.match(script,/data\.uxAction='morning-focus'/);
+  assert.match(script,/dataset\.uxAction='morning-focus'/);
   assert.match(script,/\/api\/morning\/chat/);
   assert.match(script,/模型已配置，未联网验证/);
   assert.match(styles,/data-ai-panel-mode="rail"/);
