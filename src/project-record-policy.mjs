@@ -11,9 +11,14 @@ import { nowIso } from './utils.mjs';
  * of the project analysis report.
  */
 export function machineProgress(progress = {}, record = null) {
+  const legacyBlocker=typeof progress.blocker==='string'?progress.blocker.trim():'';
+  const hasBlocker=typeof progress.hasBlocker==='boolean'
+    ?progress.hasBlocker
+    :Boolean(legacyBlocker&&legacyBlocker!=='暂无明确卡点。');
   const next = {
     percent: Number.isInteger(progress.percent) ? progress.percent : 0,
     status: typeof progress.status === 'string' && progress.status ? progress.status : '未启动',
+    hasBlocker,
     lastActivity: progress.lastActivity ?? null,
     syncedAt: progress.syncedAt ?? nowIso(),
     confidence: typeof progress.confidence === 'number' && Number.isFinite(progress.confidence) ? progress.confidence : 0
