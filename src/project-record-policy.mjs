@@ -52,10 +52,18 @@ export function narrativeRecordPointer(progress = {}) {
   };
 }
 
+/**
+ * Migration is intentionally lossless for machine fields: it removes the old
+ * narrative copies, but it does not coerce invalid machine values. Validation
+ * must still reject a corrupt backup instead of silently repairing it.
+ */
 export function stripNarrativeProgress(progress = {}) {
-  return machineProgress(progress, {
-    revisionId: progress.feishuRevisionId,
-    item: progress.feishuRecordBlockId ? { blockId: progress.feishuRecordBlockId } : null,
-    recordedAt: progress.feishuRecordedAt
-  });
+  if(!progress||typeof progress!=='object'||Array.isArray(progress))return progress;
+  const next={...progress};
+  const legacyBlocker=typeof next.blocker==='string'?next.blocker.trim():'';
+  if(!Object.hasOwn(next,'hasBlocker'))next.hasBlocker=Boolean(legacyBlocker&&legacyBlocker!=='暂无明确卡点。');
+  delete next.summary;
+  delete next.resume;
+  delete next.blocker;
+  return next;
 }
