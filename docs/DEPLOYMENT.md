@@ -55,6 +55,20 @@ SESSION_SECRET=<长随机字符串>
 
 推荐通过 Tailscale / 内网访问，而不是直接开放公网端口。
 
+### iPhone 局域网采集
+
+如果要让 iPhone 快捷指令访问原生工作台，`.env` 至少需要：
+
+```text
+HOST=0.0.0.0
+WORKBENCH_PASSWORD=<强密码>
+SESSION_SECRET=<长随机字符串>
+CAPTURE_TOKEN=<单独的采集 token>
+TRUSTED_ORIGINS=http://<Mac局域网IP>:4173
+```
+
+快捷指令请求 `http://<Mac局域网IP>:4173/api/capture`，不携带飞书凭证。工作台使用运行用户已登录的 `lark-cli` 写入和读回飞书文档。详细动作和失败判断见 [`docs/IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。局域网 IP 可能变化，变化后要同步更新快捷指令 URL 与 `TRUSTED_ORIGINS`，然后重启工作台。
+
 ## 方案 C：Docker
 
 Compose 在没有 `.env` 时也能完成配置检查：

@@ -144,7 +144,7 @@ Content-Type: application/json
 {"text":"刚刚想到的事情","source":"iphone-shortcut"}
 ```
 
-所有采集内容仍然只进入收件箱，不会自动成为任务。
+如果工作台绑定了飞书每日工作日记，`/api/capture` 会先写入飞书“收件箱”章节并读回确认，再提交本地收件箱缓存；所以快捷指令成功返回时，事项已经完成“iPhone → 飞书 → 工作台”的同步。所有采集内容仍然只进入收件箱，不会自动成为任务。
 
 详见 `docs/IPHONE_SHORTCUT.md`。
 
