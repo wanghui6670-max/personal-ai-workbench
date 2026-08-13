@@ -19,10 +19,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Syntax check control-plane and migration modules
+      - name: Syntax check control-plane, migration and browser modules
         run: |
           node --check src/domain.mjs
           node --check src/domain-core.mjs
+          node --check src/store.mjs
           node --check src/feishu.mjs
           node --check src/project-directory.mjs
           node --check src/project-record-contract.mjs
@@ -32,6 +33,7 @@ jobs:
           node --check src/mcp/registry.mjs
           node --check src/mcp/project-record-tools.mjs
           node --check scripts/migrate-project-records.mjs
+          node --check public/project-records.js
       - name: Run local contract tests
         env:
           OPENAI_API_KEY: ''
