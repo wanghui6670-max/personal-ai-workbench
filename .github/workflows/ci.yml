@@ -15,19 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '20'
-      - name: Syntax check changed control-plane modules
+          node-version: '24'
+      - name: Syntax check control-plane and migration modules
         run: |
           node --check src/domain.mjs
           node --check src/domain-core.mjs
           node --check src/feishu.mjs
+          node --check src/project-directory.mjs
+          node --check src/project-record-contract.mjs
           node --check src/project-record-policy.mjs
+          node --check src/project-sync-coordinator.mjs
           node --check src/project-identity.mjs
           node --check src/mcp/registry.mjs
           node --check src/mcp/project-record-tools.mjs
+          node --check scripts/migrate-project-records.mjs
       - name: Run local contract tests
         env:
           OPENAI_API_KEY: ''
