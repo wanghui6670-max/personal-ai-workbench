@@ -5,6 +5,18 @@ import { nowIso, todayIso } from './utils.mjs';
 import { isValidDateOnly, validateConfig, validateState, validateStateConfigReferences, validateStateInput } from './validation.mjs';
 import { stripNarrativeProgress } from './project-record-policy.mjs';
 import { normalizeInboxAcks } from './inbox-ack.mjs';
+import {
+  captureReceiptPath,
+  ensureReceiptDirectories,
+  listCaptureReceipts,
+  listProjectRecordReceipts,
+  normalizeCaptureReceiptSet,
+  normalizeProjectRecordReceipt,
+  normalizeProjectRecordReceiptSet,
+  projectRecordReceiptPath,
+  replaceCaptureReceipts,
+  replaceProjectRecordReceipts
+} from './receipt-backup.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -146,6 +158,7 @@ export class JsonStore {
     this.configFile = path.join(dataDir,'config.json');
     this.backupDir = path.join(dataDir,'backups');
     this.migrationDir = path.join(dataDir,'migrations');
+    this.captureDir = path.join(dataDir,'captures');
     this.recoveryDir = path.join(dataDir,'recovery');
     this._queue = Promise.resolve();
   }
@@ -154,7 +167,7 @@ export class JsonStore {
     await this._ensurePrivateDirectory(this.dataDir,'数据目录');
     await this._ensurePrivateDirectory(this.backupDir,'备份目录');
     await this._ensurePrivateDirectory(this.migrationDir,'迁移目录');
-    await this._ensurePrivateDirectory(this.recoveryDir,'恢复凭据目录');
+    await ensureReceiptDirectories(this.dataDir);
     const existing=await this._assertSafeLayout();
     if(!existing.state)await this._atomicWrite(this.stateFile,DEFAULT_STATE);
     if(!existing.config)await this._atomicWrite(this.configFile,DEFAULT_CONFIG);
@@ -192,11 +205,12 @@ export class JsonStore {
     if(!dataDir)throw this._unsafePath('数据目录','不存在');
     const backupDir=await this._safeLstat(this.backupDir,'备份目录','directory');
     const migrationDir=await this._safeLstat(this.migrationDir,'迁移目录','directory');
+    const captureDir=await this._safeLstat(this.captureDir,'Capture 凭据目录','directory');
     const recoveryDir=await this._safeLstat(this.recoveryDir,'恢复凭据目录','directory');
-    if(!backupDir||!migrationDir||!recoveryDir)throw this._unsafePath('工作台子目录','不存在');
+    if(!backupDir||!migrationDir||!captureDir||!recoveryDir)throw this._unsafePath('工作台子目录','不存在');
     const state=await this._safeLstat(this.stateFile,'state.json','file');
     const config=await this._safeLstat(this.configFile,'config.json','file');
-    return {state,config,backupDir,migrationDir,recoveryDir};
+    return {state,config,backupDir,migrationDir,captureDir,recoveryDir};
   }
   async _readRaw(file) {
     await this._assertSafeLayout();
@@ -246,18 +260,14 @@ export class JsonStore {
     });
   }
 
-  async _listProjectRecordReceiptsUnlocked(){
-    await this._assertSafeLayout();
-    const names=await fsp.readdir(this.recoveryDir);
-    const receipts=[];
-    for(const name of names.filter(item=>/^project-record-[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/.test(item)).sort()){
-      receipts.push(await this._readRaw(path.join(this.recoveryDir,name)));
-    }
-    return receipts;
+  async _listCaptureReceiptsUnlocked(){return listCaptureReceipts(this.dataDir);}
+  async _listProjectRecordReceiptsUnlocked(){return listProjectRecordReceipts(this.dataDir);}
+  async _readPersistedStateUnlocked(){
+    return prepareState(await this._read(this.stateFile),{migrateLegacyTodayPlan:true});
   }
 
   async readState(){
-    const state=prepareState(await this._read(this.stateFile),{migrateLegacyTodayPlan:true});
+    const state=await this._readPersistedStateUnlocked();
     const receipts=await this._listProjectRecordReceiptsUnlocked();
     const projectNames=new Map(state.projects.map(project=>[project.id,project.name]));
     for(const receipt of receipts){
@@ -272,7 +282,7 @@ export class JsonStore {
   async writeState(state){ return this._enqueue(async()=>{ const next=prepareState(state);await this._maybeDailyBackup();await this._atomicWrite(this.stateFile,next);return state; }); }
   async updateState(mutator){
     return this._enqueue(async()=>{
-      const state = prepareState(await this._read(this.stateFile),{migrateLegacyTodayPlan:true});
+      const state = await this._readPersistedStateUnlocked();
       const result = await mutator(state);
       const next = prepareState(state);
       await this._maybeDailyBackup();
@@ -295,29 +305,38 @@ export class JsonStore {
     this._queue = run.then(()=>undefined,()=>undefined);
     return run;
   }
+  async _backupPayloadUnlocked(){
+    const state=await this._readPersistedStateUnlocked();
+    const config=await this.readConfig();
+    const captureReceipts=await this._listCaptureReceiptsUnlocked();
+    const projectRecordReceipts=await this._listProjectRecordReceiptsUnlocked();
+    return {
+      backupVersion:2,
+      backedUpAt:nowIso(),
+      state,
+      config,
+      captureReceipts,
+      projectRecordReceipts
+    };
+  }
   async _maybeDailyBackup(){
     const name = `state-${todayIso()}.json`;
     const target = path.join(this.backupDir,name);
     await this._assertSafeLayout();
     if(await this._safeLstat(target,name,'file'))return;
-    const state = await this.readState();
-    const config = await this.readConfig();
-    await this._atomicWrite(target,{backedUpAt:nowIso(),state,config});
+    await this._atomicWrite(target,await this._backupPayloadUnlocked());
   }
   async _backupNowUnlocked(){
-    const state = await this.readState();
-    const config = await this.readConfig();
     const stamp = nowIso().replace(/[:.]/g,'-');
     const target = path.join(this.backupDir,`backup-${stamp}-${randomUUID()}.json`);
-    await this._atomicWrite(target,{backedUpAt:nowIso(),state,config});
+    await this._atomicWrite(target,await this._backupPayloadUnlocked());
     return target;
   }
   async backupNow(){ return this._enqueue(()=>this._backupNowUnlocked()); }
 
   async writeProjectRecordReceipt(receipt){
     const operationId=safeOperationId(receipt?.operationId);
-    const target=path.join(this.recoveryDir,`project-record-${operationId}.json`);
-    const safe={
+    const safe=normalizeProjectRecordReceipt({
       version:1,
       operationId,
       kind:String(receipt?.kind||''),
@@ -328,51 +347,78 @@ export class JsonStore {
       recordedAt:receipt?.recordedAt?String(receipt.recordedAt):nowIso(),
       projectSnapshotHash:String(receipt?.projectSnapshotHash||''),
       machineProgress:receipt?.machineProgress&&typeof receipt.machineProgress==='object'?structuredClone(receipt.machineProgress):null,
-      phase:String(receipt?.phase||'remote_saved_local_pending')
-    };
-    await this._atomicWrite(target,safe);
+      phase:String(receipt?.phase||'remote_saved_local_pending'),
+      ...(receipt?.updatedAt===undefined?{}:{updatedAt:String(receipt.updatedAt)})
+    });
+    await this._atomicWrite(projectRecordReceiptPath(this.dataDir,operationId),safe);
     return safe;
   }
   async readProjectRecordReceipt(operationId){
     const id=safeOperationId(operationId);
-    const target=path.join(this.recoveryDir,`project-record-${id}.json`);
-    try{return await this._readRaw(target);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+    try{
+      const receipts=await this._listProjectRecordReceiptsUnlocked();
+      return receipts.find(receipt=>receipt.operationId===id)||null;
+    }catch(error){
+      if(error.code==='ENOENT')return null;
+      throw error;
+    }
   }
   async deleteProjectRecordReceipt(operationId){
     const id=safeOperationId(operationId);
-    const target=path.join(this.recoveryDir,`project-record-${id}.json`);
+    const target=projectRecordReceiptPath(this.dataDir,id);
     const receipt=await this.readProjectRecordReceipt(id);
     if(!receipt)return false;
     if(receipt.phase==='remote_pending'){
-      await this._atomicWrite(target,{...receipt,phase:'remote_outcome_unknown',updatedAt:nowIso()});
+      await this._atomicWrite(target,normalizeProjectRecordReceipt({...receipt,phase:'remote_outcome_unknown',updatedAt:nowIso()}));
       return false;
     }
     const stat=await this._safeLstat(target,path.basename(target),'file');
     if(stat)await fsp.unlink(target);
     return true;
   }
+  async listCaptureReceipts(){return this._listCaptureReceiptsUnlocked();}
   async listProjectRecordReceipts(){return this._listProjectRecordReceiptsUnlocked();}
 
-  async restore({state,config,includeConfig=config!==undefined}={}){
+  async restore(options={}){
+    const {state,config,captureReceipts,projectRecordReceipts}=options;
+    const includeConfig=options.includeConfig===undefined?Object.hasOwn(options,'config'):Boolean(options.includeConfig);
+    const includeCaptureReceipts=options.includeCaptureReceipts===undefined
+      ?Object.hasOwn(options,'captureReceipts')
+      :Boolean(options.includeCaptureReceipts);
+    const includeProjectRecordReceipts=options.includeProjectRecordReceipts===undefined
+      ?Object.hasOwn(options,'projectRecordReceipts')
+      :Boolean(options.includeProjectRecordReceipts);
     validateStateInput(state,{restore:true});
     const legacy=legacyNarrativeEntries(state);
     const nextState=prepareState(state,{restore:true});
     const nextConfig=includeConfig?prepareConfig(config):null;
+    const nextCaptureReceipts=includeCaptureReceipts?normalizeCaptureReceiptSet(captureReceipts):null;
+    const nextProjectRecordReceipts=includeProjectRecordReceipts?normalizeProjectRecordReceiptSet(projectRecordReceipts):null;
     if(includeConfig)validateStateConfigReferences(nextState,nextConfig);
     return this._enqueue(async()=>{
       await this.ensure();
       if(legacy.found)await this._archiveLegacySnapshot({source:'restore',state,config:includeConfig?config:await this.readConfig(),legacy});
-      const previousState=await this.readState();
+      const previousState=await this._readPersistedStateUnlocked();
       const previousConfig=await this.readConfig();
+      const previousCaptureReceipts=await this._listCaptureReceiptsUnlocked();
+      const previousProjectRecordReceipts=await this._listProjectRecordReceiptsUnlocked();
       const safety=await this._backupNowUnlocked();
       try{
         await this._atomicWrite(this.stateFile,nextState);
         if(includeConfig)await this._atomicWrite(this.configFile,nextConfig);
+        if(includeCaptureReceipts)await replaceCaptureReceipts(this.dataDir,nextCaptureReceipts);
+        if(includeProjectRecordReceipts)await replaceProjectRecordReceipts(this.dataDir,nextProjectRecordReceipts);
       }catch(error){
         const rollbackErrors=[];
         try{await this._atomicWrite(this.stateFile,previousState);}catch(rollbackError){rollbackErrors.push(`state: ${rollbackError.message}`);}
         if(includeConfig){
           try{await this._atomicWrite(this.configFile,previousConfig);}catch(rollbackError){rollbackErrors.push(`config: ${rollbackError.message}`);}
+        }
+        if(includeCaptureReceipts){
+          try{await replaceCaptureReceipts(this.dataDir,previousCaptureReceipts);}catch(rollbackError){rollbackErrors.push(`capture receipts: ${rollbackError.message}`);}
+        }
+        if(includeProjectRecordReceipts){
+          try{await replaceProjectRecordReceipts(this.dataDir,previousProjectRecordReceipts);}catch(rollbackError){rollbackErrors.push(`project receipts: ${rollbackError.message}`);}
         }
         if(rollbackErrors.length){
           const rollbackError=new Error(`恢复失败，且回滚未完整完成（${rollbackErrors.join('；')}）`,{cause:error});
