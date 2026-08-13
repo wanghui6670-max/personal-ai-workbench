@@ -17,6 +17,8 @@ test('project page loads Feishu records through the bounded MCP read tool withou
   assert.match(script,/beforeBlockId/);
   assert.match(script,/\/api\/mcp/);
   assert.match(script,/textContent/);
+  assert.match(script,/if\(document\.getElementById\(PANEL_ID\)\)return;/);
+  assert.doesNotMatch(script,/if\(existing\)\{renderRecords\(\);return;\}/);
   assert.doesNotMatch(script,/localStorage|sessionStorage|indexedDB|document\.cookie/);
   assert.doesNotMatch(script,/innerHTML\s*=/);
 });
