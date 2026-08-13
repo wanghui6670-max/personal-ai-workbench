@@ -3,8 +3,6 @@ const STATE_SCHEMA_VERSION = 1;
 const STATE_ARRAY_FIELDS = ['inbox','todos','todayPlan','projects','confirmations','notes','activities','morningSessions'];
 const STATE_ENTITY_FIELDS = STATE_ARRAY_FIELDS.filter(field=>field!=='todayPlan');
 const STATE_ID_ENTITY_FIELDS = STATE_ENTITY_FIELDS.filter(field=>field!=='activities');
-// IDs are rendered into route, HTML attribute and selector contexts. Keep the
-// persisted representation deliberately narrower than those grammars.
 const SAFE_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 function invalid(scope, message) {
@@ -38,11 +36,17 @@ function validateOptionalBoolean(value,scope,field){
 function validateProgress(progress,scope,field){
   if(progress===undefined)return;
   if(!isRecord(progress))throw invalid(scope,`${field} 必须是对象`);
+  const allowed=new Set(['percent','status','hasBlocker','lastActivity','syncedAt','confidence','feishuRevisionId','feishuRecordBlockId','feishuRecordedAt']);
+  for(const key of Object.keys(progress)){
+    if(!allowed.has(key))throw invalid(scope,`${field}.${key} 不是允许的机器进度字段；项目分析正文必须只保存在飞书项目文档`);
+  }
   if(Object.hasOwn(progress,'percent')&&(!Number.isInteger(progress.percent)||progress.percent<0||progress.percent>100)){
     throw invalid(scope,`${field}.percent 必须是 0-100 的整数`);
   }
-  for(const key of ['status','summary','resume','blocker'])validateOptionalString(progress[key],scope,`${field}.${key}`);
+  validateOptionalString(progress.status,scope,`${field}.status`);
+  validateOptionalBoolean(progress.hasBlocker,scope,`${field}.hasBlocker`);
   for(const key of ['lastActivity','syncedAt'])validateOptionalString(progress[key],scope,`${field}.${key}`,{nullable:true});
+  for(const key of ['feishuRevisionId','feishuRecordBlockId','feishuRecordedAt'])validateOptionalString(progress[key],scope,`${field}.${key}`,{nullable:true});
   if(Object.hasOwn(progress,'confidence')&&(typeof progress.confidence!=='number'||!Number.isFinite(progress.confidence)||progress.confidence<0||progress.confidence>1)){
     throw invalid(scope,`${field}.confidence 必须是 0-1 的有限数值`);
   }
