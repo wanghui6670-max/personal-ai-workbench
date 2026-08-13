@@ -18,6 +18,33 @@ async function persistedProject(store,projectId){
   return (await store.readState()).projects.find(project=>project.id===projectId)||null;
 }
 
+/**
+ * Keep the current UI compatible without recreating a second narrative source.
+ * The strings below are static display hints, derived at read time and never
+ * persisted. Actual analysis/summary/resume content must be read from Feishu.
+ */
+export function deriveState(appRoot,state,config,aiEnabled=false){
+  const derived=core.deriveState(appRoot,state,config,aiEnabled);
+  derived.projects=derived.projects.map(project=>{
+    const machine=project.progress||{};
+    const bound=projectRecordConfigured(project);
+    return {
+      ...project,
+      progress:{
+        ...machine,
+        summary:bound?'机器进度已同步；项目分析正文保存在飞书项目文档。':'机器进度可用；项目尚未绑定飞书项目文档，分析正文不会在本地保存。',
+        blocker:machine.hasBlocker?'存在卡点，详情见飞书项目文档。':'暂无明确卡点。',
+        resume:bound?'上下文恢复摘要请从飞书项目文档读取。':'未绑定飞书项目文档，当前没有持久化的恢复摘要。'
+      }
+    };
+  });
+  const projectById=new Map(derived.projects.map(project=>[project.id,project]));
+  derived.todos=derived.todos.map(todo=>todo.projectId&&projectById.has(todo.projectId)?{...todo,project:projectById.get(todo.projectId).name}:todo);
+  derived.overdue=derived.projects.filter(project=>!project.archived&&!project.completed&&project.businessId&&project.endDate&&core.projectStatus(project)!=='已完成'&&derived.overdue.some(item=>item.id===project.id));
+  derived.unclassified=derived.projects.filter(project=>!project.archived&&!project.businessId);
+  return derived;
+}
+
 async function rewriteIdentityFor({appRoot,store,projectId}){
   const project=await persistedProject(store,projectId);
   if(!project?.businessId)return project;
