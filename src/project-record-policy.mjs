@@ -19,8 +19,8 @@ export function machineProgress(progress = {}, record = null) {
     percent: Number.isInteger(progress.percent) ? progress.percent : 0,
     status: typeof progress.status === 'string' && progress.status ? progress.status : '未启动',
     hasBlocker,
-    lastActivity: progress.lastActivity ?? null,
-    syncedAt: progress.syncedAt ?? nowIso(),
+    lastActivity: Object.hasOwn(progress,'lastActivity') ? progress.lastActivity : null,
+    syncedAt: Object.hasOwn(progress,'syncedAt') ? progress.syncedAt : null,
     confidence: typeof progress.confidence === 'number' && Number.isFinite(progress.confidence) ? progress.confidence : 0
   };
   if (record?.revisionId !== undefined && record?.revisionId !== null) next.feishuRevisionId = String(record.revisionId);
