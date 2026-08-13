@@ -14,8 +14,18 @@ try{
   const wrapped=raw!==null&&typeof raw==='object'&&!Array.isArray(raw)&&Object.hasOwn(raw,'state');
   const state=wrapped?raw.state:raw;
   const includeConfig=wrapped&&Object.hasOwn(raw,'config');
+  const includeCaptureReceipts=wrapped&&Object.hasOwn(raw,'captureReceipts');
+  const includeProjectRecordReceipts=wrapped&&Object.hasOwn(raw,'projectRecordReceipts');
   const store=new JsonStore(dataDir);
-  const safety=await store.restore({state,config:raw?.config,includeConfig});
+  const safety=await store.restore({
+    state,
+    config:raw?.config,
+    includeConfig,
+    captureReceipts:raw?.captureReceipts,
+    includeCaptureReceipts,
+    projectRecordReceipts:raw?.projectRecordReceipts,
+    includeProjectRecordReceipts
+  });
   console.log(`恢复完成。恢复前自动备份：${safety}`);
 }catch(error){
   console.error(error.message||'恢复失败。');
