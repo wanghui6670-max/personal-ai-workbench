@@ -36,7 +36,7 @@ test('AI/MCP planning does not preview a completed todo for today',async t=>{
   process.env.AI_PROVIDER_ENABLED='0';
   try{
     const registry=createWorkbenchRegistry({appRoot:root,store});
-    const plan=await registry.plan('把提交已经完成的报告加入今日');
+    const plan=await registry.plan('提交已经完成的报告加入今日');
     assert.equal(plan.kind,'clarification');
     assert.equal(plan.toolName??null,null);
     assert.match(plan.message,/已经完成.*不能加入今日/);
