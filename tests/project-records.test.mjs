@@ -49,7 +49,7 @@ test('machine progress preserves an explicit null syncedAt during legacy migrati
 
 test('machine progress validator rejects local narrative fields',()=>{
   const state={
-    schemaVersion:1,inbox:[],todos:[],todayPlan:[],todayPlanDate:null,confirmations:[],notes:[],activities:[],morningSessions:[],
+    schemaVersion:1,inbox:[],inboxAcks:[],todos:[],todayPlan:[],todayPlanDate:null,confirmations:[],notes:[],activities:[],morningSessions:[],
     projects:[{id:'p_validate',businessId:null,name:'校验项目',intro:'',createdAt:'2026-08-13',startDate:'2026-08-13',endDate:'2026-08-31',folder:'',git:'',feishu:'',completed:false,archived:false,progress:{percent:1,status:'进行中',summary:'不得留在本地'}}]
   };
   assert.throws(()=>validateState(state),/项目分析正文必须只保存在飞书项目文档/);
