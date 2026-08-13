@@ -1,0 +1,9 @@
+{
+  "name":"个人 AI 项目管理工作台",
+  "short_name":"工作台",
+  "start_url":"/",
+  "display":"standalone",
+  "background_color":"#f5f6f8",
+  "theme_color":"#101319",
+  "icons":[]
+}

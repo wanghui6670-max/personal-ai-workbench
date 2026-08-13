@@ -1,0 +1,25 @@
+services:
+  workbench:
+    build:
+      context: .
+    user: "${WORKBENCH_UID:-1000}:${WORKBENCH_GID:-1000}"
+    ports:
+      - "${WORKBENCH_BIND_ADDRESS:-127.0.0.1}:${WORKBENCH_PORT:-4173}:${WORKBENCH_PORT:-4173}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "${WORKBENCH_PORT:-4173}"
+      DATA_DIR: /data
+      WORKSPACE_ROOT: /workspace
+    volumes:
+      - type: bind
+        source: ${WORKBENCH_DATA_PATH:-./data}
+        target: /data
+      # Read-write is required: the app creates project folders and PROJECT.md files.
+      - type: bind
+        source: ${WORKBENCH_WORKSPACE_PATH:-./workspace}
+        target: /workspace
+        read_only: false
+    restart: unless-stopped

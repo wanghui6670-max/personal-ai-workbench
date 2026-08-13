@@ -1,0 +1,216 @@
+import http from 'node:http';
+import path from 'node:path';
+import fsp from 'node:fs/promises';
+import { isIP } from 'node:net';
+import { fileURLToPath } from 'node:url';
+import { JsonStore } from './store.mjs';
+import { authEnabled,isAuthenticated,login,logoutCookie,captureAuthorized,loginAttemptLimiter } from './auth.mjs';
+import { aiEnabled,aiRuntimeConfig } from './ai.mjs';
+import { sendJson,readJsonBody,serveStatic,securityHeaders,createRequestGuard,parseTrustedOrigins } from './http.mjs';
+import { ensureBusinessDirs, resolveWorkspace } from './projects.mjs';
+import { deriveState,createProject,assignProjectBusiness,syncProject,syncAllProjects,syncFeishuInbox,addInbox,processInbox,morningChat,setToday,updateTodo,updateProject,updateWorkbenchConfig,createBusiness,renameBusiness,deleteBusiness } from './domain.mjs';
+import { FeishuSourceError } from './feishu.mjs';
+import { nowIso } from './utils.mjs';
+import { addActivity } from './store.mjs';
+import { createEndpointRateLimiter,createSyncCoordinator,endpointRateLimitConfig,requestClientKey } from './rate-limit.mjs';
+import { loadWorkbenchEnv } from './env.mjs';
+import { inspectReadiness } from './health.mjs';
+import { requestSchemas,validateRequestBody } from './request-validation.mjs';
+
+const __filename=fileURLToPath(import.meta.url);const SRC_DIR=path.dirname(__filename);const APP_ROOT=path.dirname(SRC_DIR);const PUBLIC_DIR=path.join(APP_ROOT,'public');
+await loadWorkbenchEnv({root:APP_ROOT});
+const DATA_DIR=process.env.DATA_DIR?path.resolve(process.env.DATA_DIR):path.join(APP_ROOT,'data');
+
+function refuseStartup(message){console.error(message);process.exit(1);}
+function normalizeHost(value){
+  let host=String(value||'').trim();
+  if(host.startsWith('[')&&host.endsWith(']'))host=host.slice(1,-1);
+  if(!host||host.length>255||/[\s/\\\0]/.test(host))refuseStartup('拒绝启动：HOST 格式无效。');
+  if((host.includes(':')&&isIP(host)!==6)||(/^[\d.]+$/.test(host)&&isIP(host)!==4))refuseStartup('拒绝启动：HOST 格式无效。');
+  return host;
+}
+function isLoopbackHost(value){
+  const host=String(value).toLowerCase().replace(/^\[|\]$/g,'');
+  return host==='localhost'||host==='::1'||(isIP(host)===4&&host.startsWith('127.'))||(isIP(host)===6&&host.startsWith('::ffff:127.'));
+}
+function normalizePort(value){
+  const raw=String(value).trim();const port=Number(raw);
+  if(!/^\d+$/.test(raw)||!Number.isInteger(port)||port<1||port>65535)refuseStartup('拒绝启动：PORT 必须是 1 到 65535 之间的整数。');
+  return port;
+}
+async function configuredPortBeforeEnsure(){
+  if(process.env.PORT!==undefined)return process.env.PORT;
+  try{
+    const raw=JSON.parse(await fsp.readFile(path.join(DATA_DIR,'config.json'),'utf8'));
+    return raw?.port??4173;
+  }catch(error){
+    if(error?.code==='ENOENT')return 4173;
+    refuseStartup('拒绝启动：无法在安全预检中读取 data/config.json。');
+  }
+}
+
+const host=normalizeHost(process.env.HOST??'127.0.0.1');
+const port=normalizePort(await configuredPortBeforeEnsure());
+const publicBind=!isLoopbackHost(host);
+const configuredTrustedOrigins=process.env.TRUSTED_ORIGINS||'';
+let trustedOrigins;
+try{trustedOrigins=parseTrustedOrigins(configuredTrustedOrigins);}
+catch(error){refuseStartup(error.message);}
+const publicExposure=publicBind||trustedOrigins.some(origin=>!isLoopbackHost(origin.hostname));
+if(publicExposure&&!authEnabled()&&process.env.ALLOW_INSECURE_PUBLIC!=='1'){
+  refuseStartup('拒绝启动：当前绑定到公开接口但未设置 WORKBENCH_PASSWORD。请设置访问密码，或仅在明确了解风险时设置 ALLOW_INSECURE_PUBLIC=1。');
+}
+const configuredSessionSecret=String(process.env.SESSION_SECRET||'');
+if(authEnabled()&&(configuredSessionSecret.trim().length<24||configuredSessionSecret==='local-dev-session-secret-change-me')){
+  refuseStartup('拒绝启动：启用 WORKBENCH_PASSWORD 时 SESSION_SECRET 至少需要 24 个字符，且不能使用本地默认值。');
+}
+let guardRequest;
+try{guardRequest=createRequestGuard({bindHost:host,port,trustedOrigins:configuredTrustedOrigins});}
+catch(error){refuseStartup(error.message);}
+
+const store=new JsonStore(DATA_DIR);await store.ensure();
+const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,initialConfig);
+const rateLimitConfig=endpointRateLimitConfig();
+const endpointLimiter=createEndpointRateLimiter(rateLimitConfig);
+const syncCoordinator=createSyncCoordinator();
+
+function withSecurity(res){const raw=res.writeHead.bind(res);res.writeHead=(status,headers={})=>raw(status,{...securityHeaders(),...headers});return res;}
+function notFound(res){return sendJson(res,404,{error:'Not found'});}
+function unauthorized(res){return sendJson(res,401,{error:'未登录'});}
+function rateLimited(req,res,scope){
+  const result=endpointLimiter.consume(scope,requestClientKey(req));
+  if(result.allowed)return false;
+  sendJson(res,429,{error:'请求过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(result.retryAfterMs/1000)))});
+  return true;
+}
+function syncBusy(res){return sendJson(res,409,{error:'项目同步正在进行，请等待当前同步完成。'},{'Retry-After':'1'});}
+
+async function apiState(){return deriveState(APP_ROOT,await store.readState(),await store.readConfig(),aiEnabled());}
+async function requestBody(req,schema){return validateRequestBody(await readJsonBody(req),schema);}
+
+const server=http.createServer(async(req,rawRes)=>{
+  const res=withSecurity(rawRes);
+  try{
+    const guardFailure=guardRequest(req);
+    if(guardFailure)return sendJson(res,guardFailure.status,{error:guardFailure.error});
+    const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);const pathname=decodeURIComponent(url.pathname);
+
+    if(pathname==='/api/health'&&req.method==='GET'){
+      try{
+        const {workspaceRoot}=await inspectReadiness({appRoot:APP_ROOT,store});
+        const enabled=aiEnabled();
+        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?{provider:'openai',...aiRuntimeConfig()}:null};
+        if((!publicExposure&&!authEnabled())||(authEnabled()&&isAuthenticated(req)))health.workspaceRoot=workspaceRoot;
+        return sendJson(res,200,health);
+      }catch{
+        return sendJson(res,503,{ok:false,status:'not_ready'});
+      }
+    }
+    if(pathname==='/api/auth/status'&&req.method==='GET')return sendJson(res,200,{authEnabled:authEnabled(),authenticated:isAuthenticated(req)});
+    if(pathname==='/api/auth/login'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.login);const clientKey=req.socket.remoteAddress||'unknown';const allowed=loginAttemptLimiter.check(clientKey);
+      if(!allowed.allowed)return sendJson(res,429,{error:'登录尝试过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(allowed.retryAfterMs/1000)))});
+      const result=login(body.password||'');
+      if(!result.ok){
+        const failure=loginAttemptLimiter.recordFailure(clientKey);
+        if(!failure.allowed)return sendJson(res,429,{error:'登录尝试过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(failure.retryAfterMs/1000)))});
+        return sendJson(res,401,{error:'密码错误'});
+      }
+      loginAttemptLimiter.recordSuccess(clientKey);
+      return sendJson(res,200,{ok:true},result.cookie?{'Set-Cookie':result.cookie}:{});
+    }
+    if(pathname==='/api/auth/logout'&&req.method==='POST'){await requestBody(req,requestSchemas.empty);return sendJson(res,200,{ok:true},{'Set-Cookie':logoutCookie()});}
+
+    if(pathname==='/api/capture'&&req.method==='POST'){
+      if(!captureAuthorized(req))return unauthorized(res);
+      const body=await requestBody(req,requestSchemas.capture);
+      if(rateLimited(req,res,'capture'))return;
+      const item=await addInbox({store,text:body.text,source:body.source||'external'});return sendJson(res,201,{item});
+    }
+
+    if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
+
+    if(pathname==='/api/state'&&req.method==='GET')return sendJson(res,200,await apiState());
+    if(pathname==='/api/export'&&req.method==='GET')return sendJson(res,200,{exportedAt:nowIso(),state:await store.readState(),config:await store.readConfig()},{'Content-Disposition':`attachment; filename="workbench-export-${new Date().toISOString().slice(0,10)}.json"`});
+    if(pathname==='/api/backup'&&req.method==='POST'){await requestBody(req,requestSchemas.empty);const file=await store.backupNow();return sendJson(res,200,{ok:true,file});}
+
+    if(pathname==='/api/config'&&req.method==='PATCH'){
+      const body=await requestBody(req,requestSchemas.config);const config=await updateWorkbenchConfig({appRoot:APP_ROOT,store,workspaceRoot:body.workspaceRoot,settings:body.settings,dataSource:body.dataSource});
+      return sendJson(res,200,{ok:true,config:{...config,workspaceRootResolved:resolveWorkspace(APP_ROOT,config)}});
+    }
+
+    if(pathname==='/api/businesses'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.business);return sendJson(res,201,{business:await createBusiness({appRoot:APP_ROOT,store,name:body.name})});}
+    const bizMatch=pathname.match(/^\/api\/businesses\/([^/]+)$/);
+    if(bizMatch&&req.method==='PATCH'){const body=await requestBody(req,requestSchemas.business);return sendJson(res,200,{business:await renameBusiness({appRoot:APP_ROOT,store,businessId:bizMatch[1],name:body.name})});}
+    if(bizMatch&&req.method==='DELETE'){await requestBody(req,requestSchemas.empty);await deleteBusiness({store,businessId:bizMatch[1]});return sendJson(res,200,{ok:true});}
+
+    if(pathname==='/api/inbox'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inbox);return sendJson(res,201,{item:await addInbox({store,text:body.text,source:'manual'})});}
+    if(pathname==='/api/inbox/sync'&&req.method==='POST'){
+      await requestBody(req,requestSchemas.empty);
+      if(rateLimited(req,res,'sync'))return;
+      return sendJson(res,200,{sync:await syncFeishuInbox({store})});
+    }
+    if(pathname==='/api/inbox/command'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inboxCommand);return sendJson(res,200,await processInbox({store,itemId:body.itemId,command:body.command,targetProjectId:body.targetProjectId??null}));}
+
+    if(pathname==='/api/projects'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.projectCreate);const result=await createProject({appRoot:APP_ROOT,store,description:body.description,endDate:body.endDate,businessId:body.businessId??null,sourceInboxId:body.sourceInboxId});return sendJson(res,result.needsFollowup?400:201,result);
+    }
+    if(pathname==='/api/projects/sync'&&req.method==='POST'){
+      await requestBody(req,requestSchemas.empty);
+      if(rateLimited(req,res,'sync'))return;
+      const lease=syncCoordinator.tryAcquireAll();if(!lease)return syncBusy(res);
+      try{const results=await syncAllProjects({appRoot:APP_ROOT,store});return sendJson(res,200,{results});}finally{lease.release();}
+    }
+    const refreshMatch=pathname.match(/^\/api\/projects\/([^/]+)\/sync$/);
+    if(refreshMatch&&req.method==='POST'){
+      await requestBody(req,requestSchemas.empty);
+      if(rateLimited(req,res,'sync'))return;
+      const lease=syncCoordinator.tryAcquireProject(refreshMatch[1]);if(!lease)return syncBusy(res);
+      try{return sendJson(res,200,await syncProject({appRoot:APP_ROOT,store,projectId:refreshMatch[1]}));}finally{lease.release();}
+    }
+    const classifyMatch=pathname.match(/^\/api\/projects\/([^/]+)\/classify$/);
+    if(classifyMatch&&req.method==='POST'){const body=await requestBody(req,requestSchemas.classify);return sendJson(res,200,{project:await assignProjectBusiness({appRoot:APP_ROOT,store,projectId:classifyMatch[1],businessId:body.businessId})});}
+    const projectMatch=pathname.match(/^\/api\/projects\/([^/]+)$/);
+    if(projectMatch&&req.method==='PATCH'){const body=await requestBody(req,requestSchemas.projectPatch);return sendJson(res,200,{project:await updateProject({appRoot:APP_ROOT,store,projectId:projectMatch[1],patch:body})});}
+
+    if(pathname==='/api/todos/today'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.today);return sendJson(res,200,{todayPlan:await setToday({store,todoId:body.todoId,add:body.add})});}
+    const todoMatch=pathname.match(/^\/api\/todos\/([^/]+)$/);
+    if(todoMatch&&req.method==='PATCH'){const body=await requestBody(req,requestSchemas.todoPatch);return sendJson(res,200,{todo:await updateTodo({store,todoId:todoMatch[1],patch:body})});}
+
+    if(pathname==='/api/morning/chat'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.morning);
+      if(rateLimited(req,res,'morning'))return;
+      return sendJson(res,200,await morningChat({store,message:body.message,sessionId:body.sessionId??null}));
+    }
+
+    if(pathname==='/api/confirmations/clear'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.confirmationClear);await store.updateState(s=>{const c=s.confirmations.find(x=>x.id===body.id);s.confirmations=s.confirmations.filter(x=>x.id!==body.id);if(c)addActivity(s,{type:'confirmation_cleared',text:`处理待确认：${c.text}`});});return sendJson(res,200,{ok:true});
+    }
+
+    if(pathname==='/api/notes'&&req.method==='POST'){await requestBody(req,requestSchemas.note);return sendJson(res,409,{error:'新备忘必须先进入收件箱，再由你明确处理。'});}
+
+    if(pathname.startsWith('/api/'))return notFound(res);
+    if(await serveStatic(PUBLIC_DIR,pathname,res))return;
+    // SPA fallback
+    if(req.method==='GET'&&await serveStatic(PUBLIC_DIR,'/',res))return;
+    return notFound(res);
+  }catch(e){
+    console.error('[server]',e);
+    const explicitStatus=Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<=599?e.statusCode:500;
+    const publicMessage=(explicitStatus<500||e instanceof FeishuSourceError)&&typeof e?.message==='string'&&e.message?e.message:'服务器内部错误，请稍后重试。';
+    return sendJson(res,explicitStatus,{error:publicMessage});
+  }
+});
+
+const config=initialConfig;
+server.listen(port,host,()=>{
+  console.log(`\n个人 AI 项目管理工作台 v1.2.0`);
+  console.log(`http://${host==='0.0.0.0'?'127.0.0.1':host}:${port}`);
+  console.log(`Data: ${DATA_DIR}`);
+  console.log(`Workspace: ${resolveWorkspace(APP_ROOT,config)}`);
+  const aiConfig=aiRuntimeConfig();
+  console.log(`AI: ${aiEnabled()?`OpenAI configured · ${aiConfig.model} / ${aiConfig.reasoningEffort} (not live-verified)`:'local fallback'}`);
+  console.log(`Auth: ${authEnabled()?'password enabled':'disabled (localhost recommended)'}`);
+});
+
+export { server, store, APP_ROOT };

@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+node_modules/
+coverage/
+*.log
+*.tgz
+data/backups/
+data/*.tmp
+data/state.json
+data/config.json
+!data/.gitkeep
+workspace/*
+!workspace/.gitkeep
