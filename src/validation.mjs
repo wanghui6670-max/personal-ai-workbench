@@ -6,6 +6,7 @@ const STATE_ARRAY_FIELDS = ['inbox','todos','todayPlan','projects','confirmation
 const STATE_ENTITY_FIELDS = STATE_ARRAY_FIELDS.filter(field=>field!=='todayPlan');
 const STATE_ID_ENTITY_FIELDS = STATE_ENTITY_FIELDS.filter(field=>field!=='activities');
 const SAFE_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const SHA256_PATTERN=/^[a-f0-9]{64}$/;
 
 function invalid(scope, message) {
   const error = new Error(`${scope}：${message}`);
@@ -98,6 +99,7 @@ export function validateStateInput(state, {restore = false} = {}) {
       throw invalid('无效工作台状态', `${key} 必须是数组`);
     }
   }
+  if(Object.hasOwn(state,'inboxAcks')&&!Array.isArray(state.inboxAcks))throw invalid('无效工作台状态','inboxAcks 必须是数组');
   if (restore && (!Array.isArray(state.todos) || !Array.isArray(state.projects))) {
     throw invalid('无效工作台状态', '恢复数据必须包含 todos 和 projects 数组');
   }
@@ -113,6 +115,7 @@ export function validateState(state) {
   for(const field of STATE_ARRAY_FIELDS){
     if(!Array.isArray(state[field]))throw invalid(scope,`${field} 必须是数组`);
   }
+  if(!Array.isArray(state.inboxAcks))throw invalid(scope,'inboxAcks 必须是数组');
   for(const field of STATE_ENTITY_FIELDS){
     for(const [index,entity] of state[field].entries()){
       if(!isRecord(entity))throw invalid(scope,`${field}[${index}] 必须是对象`);
@@ -179,17 +182,16 @@ export function validateState(state) {
   for(const [index,item] of state.inbox.entries()){
     for(const field of ['text','source','createdAt','feishuBlockId'])validateOptionalString(item[field],scope,`inbox[${index}].${field}`);
   }
-  if(Object.hasOwn(state,'inboxAcks')){
-    if(!Array.isArray(state.inboxAcks))throw invalid(scope,'inboxAcks 必须是数组');
-    const ackIds=new Set();
-    for(const [index,ack] of state.inboxAcks.entries()){
-      if(!isRecord(ack))throw invalid(scope,`inboxAcks[${index}] 必须是对象`);
-      requireNonEmptyString(ack.blockId,scope,`inboxAcks[${index}].blockId`);
-      if(ackIds.has(ack.blockId))throw invalid(scope,`inboxAcks[${index}].blockId 不能重复`);
-      ackIds.add(ack.blockId);
-      requireNonEmptyString(ack.text,scope,`inboxAcks[${index}].text`);
-      validateOptionalString(ack.acknowledgedAt,scope,`inboxAcks[${index}].acknowledgedAt`);
-    }
+  const ackIds=new Set();
+  for(const [index,ack] of state.inboxAcks.entries()){
+    if(!isRecord(ack))throw invalid(scope,`inboxAcks[${index}] 必须是对象`);
+    requireNonEmptyString(ack.blockId,scope,`inboxAcks[${index}].blockId`);
+    if(ackIds.has(ack.blockId))throw invalid(scope,`inboxAcks[${index}].blockId 不能重复`);
+    ackIds.add(ack.blockId);
+    requireNonEmptyString(ack.contentHash,scope,`inboxAcks[${index}].contentHash`);
+    if(!SHA256_PATTERN.test(ack.contentHash))throw invalid(scope,`inboxAcks[${index}].contentHash 必须是 SHA-256 十六进制`);
+    if(Object.hasOwn(ack,'text'))throw invalid(scope,`inboxAcks[${index}] 不得保存收件箱正文`);
+    validateOptionalString(ack.acknowledgedAt,scope,`inboxAcks[${index}].acknowledgedAt`,{nullable:true});
   }
   for(const [index,note] of state.notes.entries()){
     validateOptionalString(note.text,scope,`notes[${index}].text`);
@@ -200,6 +202,8 @@ export function validateState(state) {
     for(const field of ['type','text','createdAt'])validateOptionalString(confirmation[field],scope,`confirmations[${index}].${field}`);
     validateOptionalId(confirmation.projectId,scope,`confirmations[${index}].projectId`);
     validateOptionalId(confirmation.inboxId,scope,`confirmations[${index}].inboxId`);
+    validateOptionalId(confirmation.operationId,scope,`confirmations[${index}].operationId`);
+    validateOptionalBoolean(confirmation.synthetic,scope,`confirmations[${index}].synthetic`);
   }
   for(const [index,activity] of state.activities.entries()){
     for(const field of ['type','text','at'])validateOptionalString(activity[field],scope,`activities[${index}].${field}`);
