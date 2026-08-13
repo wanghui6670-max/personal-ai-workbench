@@ -2,6 +2,7 @@ import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
+import { createProjectRecordTools } from './project-record-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -9,7 +10,7 @@ function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
 
 export function createWorkbenchRegistry({appRoot,store}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  const tools=createWorkbenchTools();
+  const tools=[...createWorkbenchTools(),...createProjectRecordTools()];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
