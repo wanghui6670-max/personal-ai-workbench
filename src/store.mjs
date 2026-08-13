@@ -121,6 +121,22 @@ function safeOperationId(value){
   return operationId;
 }
 
+function recoveryConfirmation(receipt,projectName='项目'){
+  const knownSaved=receipt.phase==='remote_saved_local_pending';
+  const text=knownSaved
+    ?`「${projectName}」有一条飞书记录已保存，但本地机器状态尚未提交。operationId=${receipt.operationId}，请重新同步完成对账。`
+    :`「${projectName}」有一条飞书写入结果无法确认。operationId=${receipt.operationId} 已保留；重新同步会先按同一 ID 查重，不会盲目追加。`;
+  return {
+    id:`cf_recovery_${receipt.operationId}`,
+    type:'project_record_recovery_pending',
+    projectId:receipt.projectId,
+    operationId:receipt.operationId,
+    text,
+    createdAt:receipt.recordedAt||nowIso(),
+    synthetic:true
+  };
+}
+
 export class JsonStore {
   constructor(dataDir) {
     this.dataDir = dataDir;
@@ -228,7 +244,27 @@ export class JsonStore {
     });
   }
 
-  async readState(){ return prepareState(await this._read(this.stateFile),{migrateLegacyTodayPlan:true}); }
+  async _listProjectRecordReceiptsUnlocked(){
+    await this._assertSafeLayout();
+    const names=await fsp.readdir(this.recoveryDir);
+    const receipts=[];
+    for(const name of names.filter(item=>/^project-record-[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/.test(item)).sort()){
+      receipts.push(await this._readRaw(path.join(this.recoveryDir,name)));
+    }
+    return receipts;
+  }
+
+  async readState(){
+    const state=prepareState(await this._read(this.stateFile),{migrateLegacyTodayPlan:true});
+    const receipts=await this._listProjectRecordReceiptsUnlocked();
+    const projectNames=new Map(state.projects.map(project=>[project.id,project.name]));
+    for(const receipt of receipts){
+      if(!['remote_pending','remote_outcome_unknown','remote_saved_local_pending'].includes(receipt.phase))continue;
+      if(state.confirmations.some(item=>item.type==='project_record_recovery_pending'&&item.operationId===receipt.operationId))continue;
+      state.confirmations.unshift(recoveryConfirmation(receipt,projectNames.get(receipt.projectId)||'项目'));
+    }
+    return validateState(state);
+  }
   async readConfig(){ return prepareConfig(await this._read(this.configFile)); }
   async writeConfig(config){ return this._enqueue(async()=>{ const next=prepareConfig(config);await this._maybeDailyBackup();await this._atomicWrite(this.configFile,next);return config; }); }
   async writeState(state){ return this._enqueue(async()=>{ const next=prepareState(state);await this._maybeDailyBackup();await this._atomicWrite(this.stateFile,next);return state; }); }
@@ -303,18 +339,17 @@ export class JsonStore {
   async deleteProjectRecordReceipt(operationId){
     const id=safeOperationId(operationId);
     const target=path.join(this.recoveryDir,`project-record-${id}.json`);
+    const receipt=await this.readProjectRecordReceipt(id);
+    if(!receipt)return false;
+    if(receipt.phase==='remote_pending'){
+      await this._atomicWrite(target,{...receipt,phase:'remote_outcome_unknown',updatedAt:nowIso()});
+      return false;
+    }
     const stat=await this._safeLstat(target,path.basename(target),'file');
     if(stat)await fsp.unlink(target);
+    return true;
   }
-  async listProjectRecordReceipts(){
-    await this._assertSafeLayout();
-    const names=await fsp.readdir(this.recoveryDir);
-    const receipts=[];
-    for(const name of names.filter(item=>/^project-record-[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/.test(item)).sort()){
-      receipts.push(await this._readRaw(path.join(this.recoveryDir,name)));
-    }
-    return receipts;
-  }
+  async listProjectRecordReceipts(){return this._listProjectRecordReceiptsUnlocked();}
 
   async restore({state,config,includeConfig=config!==undefined}={}){
     validateStateInput(state,{restore:true});
