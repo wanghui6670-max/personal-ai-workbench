@@ -28,3 +28,17 @@ test('morning focus remains discussion-only and stores no conversation in browse
   assert.doesNotMatch(script,/sessionStorage|indexedDB/i);
   assert.match(script,/localStorage\.setItem\(PANEL_MODE_KEY,next\)/);
 });
+
+test('critical actions keep an in-page receipt and AI results hide raw JSON behind details',async()=>{
+  const [script,styles]=await Promise.all([
+    read('public/ux-enhancements.js'),
+    read('public/ux-enhancements.css')
+  ]);
+  assert.match(script,/window\.fetch=async function observedFetch/);
+  assert.match(script,/ux-action-receipt/);
+  assert.match(script,/查看技术详情/);
+  assert.match(script,/飞书收件箱已读回/);
+  assert.match(styles,/\.ux-action-receipt/);
+  assert.match(styles,/\.ux-result-summary/);
+  assert.match(styles,/\.ux-technical-details/);
+});
