@@ -351,7 +351,7 @@ test('completed project restores its exact prior machine progress when reopened'
   assert.match(projectMd,/分析与总结真源：飞书云文档/);
 });
 
-test('malformed PROJECT.md no longer rolls back a successful sync machine state',async t=>{
+test('malformed PROJECT.md no longer rolls back machine state or explicit project edits',async t=>{
   withoutOpenAi(t);
   const {appRoot,store,config}=await fixture(t);
   const p=project({id:'p_project_md_failure',name:'写入失败项目',folder:'写入失败项目'});
@@ -362,13 +362,16 @@ test('malformed PROJECT.md no longer rolls back a successful sync machine state'
   await fsp.writeFile(target,malformed,'utf8');
 
   const result=await syncProject({appRoot,store,projectId:p.id});
-  const state=await store.readState();
+  let state=await store.readState();
   assert.ok(result.machineProgress);
   assert.ok(state.activities.some(item=>item.type==='project_synced'&&item.projectId===p.id));
   assert.ok(state.confirmations.some(item=>item.type==='project_identity_update_failed'&&item.projectId===p.id));
   assert.equal(await fsp.readFile(target,'utf8'),malformed);
 
-  const before=await store.readState();
-  await assert.rejects(updateProject({appRoot,store,projectId:p.id,patch:{intro:'不应提交的新介绍'}}),/托管区块不完整/);
-  assert.deepEqual(await store.readState(),before);
+  const updated=await updateProject({appRoot,store,projectId:p.id,patch:{intro:'显式更新仍应提交'}});
+  state=await store.readState();
+  assert.equal(updated.intro,'显式更新仍应提交');
+  assert.equal(state.projects.find(item=>item.id===p.id).intro,'显式更新仍应提交');
+  assert.ok(state.confirmations.some(item=>item.type==='project_identity_update_failed'&&item.projectId===p.id));
+  assert.equal(await fsp.readFile(target,'utf8'),malformed);
 });
