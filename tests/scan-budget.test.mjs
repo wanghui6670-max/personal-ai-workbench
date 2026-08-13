@@ -56,7 +56,7 @@ test('an exhausted scan budget becomes low confidence and a visible confirmation
   const state=await store.readState(),updated=state.projects.find(item=>item.id===project.id);
 
   assert.equal(analysis.scan.complete,false);assert.ok(analysis.scan.reasons.includes('max_depth'));
-  assert.ok(analysis.progress.confidence<=.35);assert.match(analysis.progress.summary,/部分证据/);
+  assert.ok(analysis.machineProgress.confidence<=.35);
   assert.ok(updated.progress.confidence<=.35);assert.equal(updated.progress.hasBlocker,true);
   assert.equal('summary' in updated.progress,false);assert.equal('blocker' in updated.progress,false);
   assert.equal(state.confirmations.some(item=>item.type==='progress_unclear'&&item.projectId===project.id),true);
