@@ -2,6 +2,7 @@ import { addActivity } from './store.mjs';
 import { createFeishuJournalClient, FeishuSourceError, sourceConfigured } from './feishu.mjs';
 import { newId, nowIso, compactText } from './utils.mjs';
 import { inboxContentHash, inboxAckMatches, normalizeInboxAcks } from './inbox-ack.mjs';
+import { normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
 
 const defaultFeishuJournalClient=createFeishuJournalClient();
 
@@ -17,6 +18,12 @@ function feishuSyncSummary(config,extra={}){
     importedCount:Number.isInteger(source?.lastImportedCount)?source.lastImportedCount:0,
     ...extra
   };
+}
+
+function normalizeRemoteItem(item){
+  if(item?.captureId)return{...item,text:String(item.text??'').trim(),captureId:normalizeCaptureId(item.captureId)};
+  const parsed=parseCaptureMarker(item?.text);
+  return{...item,text:parsed.text,captureId:parsed.captureId};
 }
 
 export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
@@ -42,7 +49,8 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     throw error;
   }
 
-  const remoteByBlock=new Map(fetched.items.map(item=>[item.blockId,item]));
+  const remoteItems=fetched.items.map(normalizeRemoteItem);
+  const remoteByBlock=new Map(remoteItems.map(item=>[item.blockId,item]));
   let imported=0;
   let removed=0;
   let updated=0;
@@ -53,7 +61,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
       state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item])
     );
 
-    for(const remote of fetched.items){
+    for(const remote of remoteItems){
       const contentHash=inboxContentHash(remote.text);
       const local=localByBlock.get(remote.blockId);
       const priorAck=ackByBlock.get(remote.blockId);
@@ -62,6 +70,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
           local.text=remote.text;
           updated+=1;
         }
+        if(remote.captureId&&!local.captureId)local.captureId=remote.captureId;
         if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
         else{
           const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
@@ -77,6 +86,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         text:remote.text,
         source:'feishu_doc',
         feishuBlockId:remote.blockId,
+        ...(remote.captureId?{captureId:remote.captureId}:{}),
         createdAt:nowIso()
       };
       state.inbox.unshift(item);
@@ -110,7 +120,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
       current.dataSource.lastSyncAt=nowIso();
       current.dataSource.lastSyncStatus='ok';
       current.dataSource.lastSyncError=null;
-      current.dataSource.lastImportedCount=fetched.items.length;
+      current.dataSource.lastImportedCount=remoteItems.length;
     }
     return structuredClone(current);
   });
@@ -119,33 +129,45 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     imported,
     removed,
     updated,
-    remoteCount:fetched.items.length,
+    remoteCount:remoteItems.length,
     sectionFound:fetched.sectionFound
   });
 }
 
-export async function addInbox({store,text,source='manual',client=defaultFeishuJournalClient}){
+export async function addInbox({
+  store,
+  text,
+  source='manual',
+  captureId=null,
+  client=defaultFeishuJournalClient
+}){
   if(!text?.trim())throw new Error('请输入内容');
   const normalized=text.trim();
+  const normalizedCaptureId=captureId?normalizeCaptureId(captureId):null;
   const config=await store.readConfig();
   let remote=null;
   let resolvedSource=source;
   if(source!=='feishu_doc'&&sourceConfigured(config.dataSource)){
-    remote=await client.appendAndFetch(config.dataSource,normalized);
+    remote=await client.appendAndFetch(config.dataSource,normalized,{
+      ...(normalizedCaptureId?{captureId:normalizedCaptureId}:{})
+    });
     resolvedSource='feishu_doc';
   }
 
+  const resolvedCaptureId=remote?.item?.captureId||normalizedCaptureId;
   const item={
     id:newId('in'),
     text:normalized,
     source:resolvedSource,
     createdAt:nowIso(),
-    ...(remote?.item?.blockId?{feishuBlockId:remote.item.blockId}:{})
+    ...(remote?.item?.blockId?{feishuBlockId:remote.item.blockId}:{}),
+    ...(resolvedCaptureId?{captureId:resolvedCaptureId}:{})
   };
   await store.updateState(state=>{
     state.inboxAcks=normalizeInboxAcks(state.inboxAcks);
-    const existing=remote?.item?.blockId&&state.inbox.find(
-      candidate=>candidate.feishuBlockId===remote.item.blockId
+    const existing=state.inbox.find(candidate=>
+      (remote?.item?.blockId&&candidate.feishuBlockId===remote.item.blockId)||
+      (resolvedCaptureId&&candidate.captureId===resolvedCaptureId)
     );
     if(existing){
       Object.assign(existing,item,{id:existing.id});
