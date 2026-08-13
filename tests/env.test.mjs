@@ -192,6 +192,23 @@ test('Luna xhigh is the documented default and doctor reports configuration with
   assert.doesNotMatch(doctorSource,/\bfetch\s*\(|https?:\/\//,'doctor must not contact OpenAI or another network endpoint');
 });
 
+test('the safe dotenv parser accepts the two-model provider fields',()=>{
+  const parsed=parseWorkbenchEnv([
+    'AI_PROVIDER_MODEL=gpt-5.6-luna',
+    'AI_PROVIDER_API_KEY=primary-key',
+    'AI_PROVIDER_GROK_MODEL=grok-4.6',
+    'AI_PROVIDER_GROK_API_KEY=secondary-key',
+    'AI_PROVIDER_ACTIVE_MODEL=grok-4.6'
+  ].join('\n'));
+  assert.deepEqual(parsed.values,{
+    AI_PROVIDER_MODEL:'gpt-5.6-luna',
+    AI_PROVIDER_API_KEY:'primary-key',
+    AI_PROVIDER_GROK_MODEL:'grok-4.6',
+    AI_PROVIDER_GROK_API_KEY:'secondary-key',
+    AI_PROVIDER_ACTIVE_MODEL:'grok-4.6'
+  });
+});
+
 test('backup and restore honor DATA_DIR from the safe project .env',async t=>{
   const sandbox=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-backup-restore-'));
   t.after(()=>fsp.rm(sandbox,{recursive:true,force:true}));

@@ -75,6 +75,8 @@ export OPENAI_MODEL="gpt-5.6-luna"
 
 如需接入已经审查过的兼容服务，管理员可选择 `third_party_responses` 或 `third_party_chat_completions`，并按 [`docs/AI_PROVIDER.md`](docs/AI_PROVIDER.md) 配置固定 endpoint、origin allowlist、模型和凭证。第三方 Profile 默认关闭；不满足 `xhigh`、strict schema 或 no-store 能力时，程序默认拒绝调用，只有显式批准的降级才会标记为 `degraded`。配置和合同测试通过不等于真实 endpoint 已联网验收。
 
+同一兼容网关可以同时配置 `gpt-5.6-luna` 与 `grok-4.6`；用 `AI_PROVIDER_ACTIVE_MODEL` 明确选择当前请求，程序不会自动云切换，两个模型的运行状态只以非敏感模型 ID展示。
+
 ## 你的真实项目目录
 
 在“设置”里把工作区根目录改成你的真实项目根目录，例如：

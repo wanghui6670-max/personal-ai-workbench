@@ -7,7 +7,7 @@
 ## 状态
 
 - `GET /api/health` 只读 readiness 检查。它会读取并校验 state/config，检查数据目录、备份目录、工作区和所有业务目录的类型、symlink 边界与访问权限。就绪时返回 `200`，其中 `version` 为当前应用版本 `1.2.0`；未就绪时只返回 `503 {"ok":false,"status":"not_ready"}`，不回显路径、数据或底层错误。公开未登录请求不返回 `workspaceRoot`
-- `GET /api/state` 完整前端状态；AI 启用时 `aiConfig` 只暴露非敏感的 `provider`、`profileId`、`adapter`、`model`、`reasoningEffort`、`structuredOutputMode`、`configured`、`enabled` 和 `degraded`，不返回 endpoint 或凭证
+- `GET /api/state` 完整前端状态；AI 启用时 `aiConfig` 只暴露非敏感的 `provider`、`profileId`、`adapter`、`model`、`activeModel`、`availableModels`、`configuredModels`、`reasoningEffort`、`structuredOutputMode`、`configured`、`enabled` 和 `degraded`，不返回 endpoint 或凭证
 - `GET /api/export` 导出 JSON
 - `POST /api/backup` 创建备份
 
@@ -15,7 +15,7 @@
 ## AI Provider
 
 - 默认 Profile 是 `openai_luna`，继续使用 `OPENAI_API_KEY` 和可选 `OPENAI_MODEL`。
-- 第三方接入由部署管理员通过 `AI_PROVIDER_*` 环境变量配置；当前程序内置 `openai_responses_compatible` 与 `openai_chat_completions_compatible` 两类 Adapter。
+- 第三方接入由部署管理员通过 `AI_PROVIDER_*` 环境变量配置；当前程序内置 `openai_responses_compatible` 与 `openai_chat_completions_compatible` 两类 Adapter。一个网关可登记 `gpt-5.6-luna` 与 `grok-4.6` 两个模型，但通过 `AI_PROVIDER_ACTIVE_MODEL` 明确选择当前请求使用的模型，不自动云切换。
 - 没有用于写入任意 Provider URL、Header 或 API key 的业务 API。配置无效、工作流不在白名单、网络区域不符或能力降级未批准时，AI 调用 fail-closed 并由现有业务函数回退本地规则。
 - 具体配置和验证命令见 `docs/AI_PROVIDER.md`。
 

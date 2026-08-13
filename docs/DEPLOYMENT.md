@@ -156,6 +156,7 @@ COOKIE_SECURE=1
 - `OPENAI_MODEL`：默认 `gpt-5.6-luna`；推理档位固定为 `xhigh`
 - `OPENAI_SEND_FILE_CONTENT=1`：默认 Luna Profile 的兼容开关，显式允许发送 `PROJECT.md` 和可读文件正文；默认关闭
 - `AI_PROVIDER_*`：第三方 Provider 的固定适配配置；完整字段、降级审批和安全边界见 [`docs/AI_PROVIDER.md`](AI_PROVIDER.md)
+- `AI_PROVIDER_GROK_MODEL` / `AI_PROVIDER_GROK_API_KEY`：同一网关下第二模型 `grok-4.6` 及其凭证；配合 `AI_PROVIDER_ACTIVE_MODEL` 选择当前请求模型，默认不自动切换
 - `ALLOW_INSECURE_PUBLIC=1`：允许无密码绑定公开接口，不建议
 
 ## 恢复数据

@@ -409,6 +409,48 @@ test('runtime config never exposes endpoint or credential material',()=>{
   assert.equal(JSON.stringify(config).includes('127.0.0.1'),false);
 });
 
+test('third-party profile exposes both configured models and selects the active model',()=>{
+  const env={
+    ...localEnv('third_party_responses'),
+    AI_PROVIDER_API_KEY:'primary-key',
+    AI_PROVIDER_GROK_MODEL:'grok-4.6',
+    AI_PROVIDER_GROK_API_KEY:'grok-key',
+    AI_PROVIDER_ACTIVE_MODEL:'grok-4.6',
+    AI_PROVIDER_ALLOW_ANONYMOUS:'0'
+  };
+  const config=aiRuntimeConfig(env);
+  assert.equal(config.model,'grok-4.6');
+  assert.equal(config.activeModel,'grok-4.6');
+  assert.deepEqual(config.availableModels,['unit-model','grok-4.6']);
+  assert.deepEqual(config.configuredModels,['unit-model','grok-4.6']);
+  assert.equal(JSON.stringify(config).includes('grok-key'),false);
+});
+
+test('active model selects its matching credential without automatic fallback',async()=>{
+  for(const [activeModel,expectedCredential] of [['gpt-5.6-luna','primary-key'],['grok-4.6','grok-key']]){
+    const env={
+      ...localEnv('third_party_responses'),
+      AI_PROVIDER_MODEL:'gpt-5.6-luna',AI_PROVIDER_API_KEY:'primary-key',
+      AI_PROVIDER_GROK_MODEL:'grok-4.6',AI_PROVIDER_GROK_API_KEY:'grok-key',
+      AI_PROVIDER_ACTIVE_MODEL:activeModel,AI_PROVIDER_ALLOW_ANONYMOUS:'0'
+    };
+    let captured;
+    await runStructuredDecision(invokeOptions(env,fakeJsonFetch(responsePayload(),(_url,options)=>{captured=options;})));
+    assert.equal(captured.headers.Authorization,`Bearer ${expectedCredential}`);
+    assert.equal(JSON.parse(captured.body).model,activeModel);
+  }
+});
+
+test('active model must be one of the configured model IDs',()=>{
+  const env={...localEnv('third_party_responses'),AI_PROVIDER_ACTIVE_MODEL:'missing-model'};
+  assert.throws(()=>aiRuntimeConfig(env),error=>error?.code==='AI_PROVIDER_PROFILE_INVALID');
+});
+
+test('grok credential cannot be supplied without its model ID',()=>{
+  const env={...localEnv('third_party_responses'),AI_PROVIDER_GROK_API_KEY:'grok-key'};
+  assert.throws(()=>aiRuntimeConfig(env),error=>error?.code==='AI_PROVIDER_PROFILE_INVALID');
+});
+
 test('third-party base URL rejects embedded credentials and query parameters',async()=>{
   const withCredentials={
     ...localEnv('third_party_responses'),

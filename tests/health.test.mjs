@@ -10,7 +10,7 @@ function serverEnv(overrides={}){
   return{
     ...process.env,
     WORKBENCH_PASSWORD:'',SESSION_SECRET:'',CAPTURE_TOKEN:'',TRUSTED_ORIGINS:'',
-    ALLOW_INSECURE_PUBLIC:'',COOKIE_SECURE:'',OPENAI_API_KEY:'',
+    ALLOW_INSECURE_PUBLIC:'',COOKIE_SECURE:'',OPENAI_API_KEY:'',AI_PROVIDER_ENABLED:'',
     ...overrides
   };
 }

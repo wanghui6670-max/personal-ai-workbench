@@ -32,7 +32,32 @@ OPENAI_MODEL=gpt-5.6-luna
 
 `OPENAI_MODEL` 为既有兼容入口。生产环境若要求模型绝对固定，应不要覆盖它。
 
-## 3. 第三方 Responses-compatible
+## 3. 同一网关配置两个模型
+
+同一个第三方网关可以同时登记两套模型和密钥，但每次请求只使用一个明确的 active model。程序不会因为一次请求失败就自动把内容发送给另一家模型；Provider 失败仍按产品规则回退本地判断。
+
+```dotenv
+AI_PROVIDER_PROFILE=third_party_responses
+AI_PROVIDER_ENABLED=1
+AI_PROVIDER_BASE_URL=https://gateway.example.invalid/v1
+AI_PROVIDER_ALLOWED_ORIGINS=https://gateway.example.invalid
+AI_PROVIDER_NETWORK_ZONE=public_https
+AI_PROVIDER_MODEL=gpt-5.6-luna
+AI_PROVIDER_API_KEY=<OpenAI 组密钥>
+AI_PROVIDER_GROK_MODEL=grok-4.6
+AI_PROVIDER_GROK_API_KEY=<Grok 组密钥>
+AI_PROVIDER_ACTIVE_MODEL=gpt-5.6-luna
+```
+
+字段含义：
+
+- `AI_PROVIDER_MODEL` / `AI_PROVIDER_API_KEY`：主模型及其凭证；
+- `AI_PROVIDER_GROK_MODEL` / `AI_PROVIDER_GROK_API_KEY`：第二模型及其凭证；
+- `AI_PROVIDER_ACTIVE_MODEL`：必须精确匹配已登记的模型 ID，决定当前请求使用哪套凭证；留空时使用主模型。
+
+健康接口和工作台设置只显示模型 ID、可用模型和当前 active model，不显示 endpoint 或密钥。切换 active model 后必须重启服务，再用非生产数据做 smoke test。
+
+## 4. 第三方 Responses-compatible
 
 管理员部署示例：
 
@@ -64,7 +89,7 @@ ${AI_PROVIDER_BASE_URL}/responses
 
 只宣传“OpenAI compatible”不等于满足该合同。
 
-## 4. 第三方 Chat-Completions-compatible
+## 5. 第三方 Chat-Completions-compatible
 
 管理员部署示例：
 
@@ -102,7 +127,7 @@ AI_PROVIDER_CHAT_TOKEN_FIELD=max_tokens
 
 允许值仅为 `max_completion_tokens` 或 `max_tokens`。
 
-## 5. 本机兼容服务
+## 6. 本机兼容服务
 
 只有明确的 loopback Profile 可以无凭证运行：
 
@@ -118,7 +143,7 @@ AI_PROVIDER_ALLOW_ANONYMOUS=1
 
 `AI_PROVIDER_ALLOW_ANONYMOUS=1` 不允许与公网 zone 一起使用。`local_loopback` 只接受 `localhost`、`127.0.0.0/8` 或 `::1`。
 
-## 6. 工作流 allowlist
+## 7. 工作流 allowlist
 
 默认允许三个工作流：
 
@@ -134,7 +159,7 @@ AI_PROVIDER_WORKFLOWS=project_creation,morning_dialogue
 
 未知工作流或未获准工作流会 fail-closed。
 
-## 7. 显式降级
+## 8. 显式降级
 
 默认不得静默降低 reasoning、structured output 或 no-store 能力。确有审查结论时，必须成对设置模式与批准开关。
 
@@ -167,7 +192,7 @@ AI_PROVIDER_ALLOW_NO_STORE_DOWNGRADE=1
 
 只有在数据保留、训练使用、区域和合规政策已单独批准后才应设置。该开关不会降低脱敏与输入最小化要求。
 
-## 8. 其他运行限制
+## 9. 其他运行限制
 
 ```dotenv
 AI_PROVIDER_TIMEOUT_MS=120000
@@ -186,7 +211,7 @@ AI_SEND_FILE_CONTENT=0
 - Provider 原始错误正文、Authorization、input、完整输出和 analysis 不写入业务 state；
 - `AI_SEND_FILE_CONTENT=1` 才发送 `PROJECT.md`/文件片段；旧 `OPENAI_SEND_FILE_CONTENT=1` 仅在默认 `openai_luna` Profile 下作为兼容别名。
 
-## 9. 验证状态
+## 10. 验证状态
 
 配置完成不等于真实 API 验证完成。上线前至少需要：
 

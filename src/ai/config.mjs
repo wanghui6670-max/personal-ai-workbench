@@ -146,11 +146,12 @@ function resolveRetention(env){
   throw aiProviderError('AI_PROVIDER_CAPABILITY_MISMATCH','第三方 Provider 不满足 no-store 要求');
 }
 
-function baseProfile({id,provider,adapter,model,credential,endpoint,workflowAllowlist,reasoning,structuredOutput,retention,enabled,configured,env}){
+function baseProfile({id,provider,adapter,model,credential,endpoint,workflowAllowlist,reasoning,structuredOutput,retention,enabled,configured,env,availableModels=[],configuredModels=[]}){
   const chatTokenField=adapter==='openai_chat_completions_compatible'?(clean(env.AI_PROVIDER_CHAT_TOKEN_FIELD)||'max_completion_tokens'):'max_completion_tokens';
   if(adapter==='openai_chat_completions_compatible'&&!['max_completion_tokens','max_tokens'].includes(chatTokenField))throw profileError('AI_PROVIDER_CHAT_TOKEN_FIELD 只允许 max_completion_tokens 或 max_tokens');
   return {
     id,provider,adapter,model,credential,endpoint,workflowAllowlist,reasoning,structuredOutput,retention,
+    availableModels,configuredModels,
     enabled,configured,
     timeoutMs:boundedInteger(env.AI_PROVIDER_TIMEOUT_MS,AI_DEFAULT_TIMEOUT_MS,1_000,300_000,'AI_PROVIDER_TIMEOUT_MS'),
     maxResponseBytes:boundedInteger(env.AI_PROVIDER_MAX_RESPONSE_BYTES,AI_DEFAULT_MAX_RESPONSE_BYTES,16_384,8_000_000,'AI_PROVIDER_MAX_RESPONSE_BYTES'),
@@ -170,7 +171,9 @@ function resolveOpenAIProfile(env){
     reasoning:{requestedLevel:AI_REASONING_LEVEL,mode:'xhigh',degraded:false},
     structuredOutput:{mode:'strict_native',degraded:false},
     retention:{mode:'send',sendNoStore:true,degraded:false},
-    enabled:Boolean(credential),configured:Boolean(credential),env
+    enabled:Boolean(credential),configured:Boolean(credential),env,
+    availableModels:[assertNoHeaderControls(clean(env.OPENAI_MODEL)||OPENAI_DEFAULT_MODEL,'OPENAI_MODEL')],
+    configuredModels:credential?[assertNoHeaderControls(clean(env.OPENAI_MODEL)||OPENAI_DEFAULT_MODEL,'OPENAI_MODEL')]:[]
   });
 }
 
@@ -179,19 +182,35 @@ function resolveThirdPartyProfile(env,id){
   const provider=id==='third_party_responses'?'responses-compatible':'chat-completions-compatible';
   const enabled=enabledFlag(env.AI_PROVIDER_ENABLED);
   const baseUrlValue=clean(env.AI_PROVIDER_BASE_URL);
-  const model=assertNoHeaderControls(clean(env.AI_PROVIDER_MODEL),'AI_PROVIDER_MODEL');
-  const credential=assertNoHeaderControls(clean(env.AI_PROVIDER_API_KEY),'AI_PROVIDER_API_KEY');
+  const primaryModel=assertNoHeaderControls(clean(env.AI_PROVIDER_MODEL),'AI_PROVIDER_MODEL');
+  const primaryCredential=assertNoHeaderControls(clean(env.AI_PROVIDER_API_KEY),'AI_PROVIDER_API_KEY');
+  const grokModel=assertNoHeaderControls(clean(env.AI_PROVIDER_GROK_MODEL),'AI_PROVIDER_GROK_MODEL');
+  const grokCredential=assertNoHeaderControls(clean(env.AI_PROVIDER_GROK_API_KEY),'AI_PROVIDER_GROK_API_KEY');
+  const requestedActiveModel=assertNoHeaderControls(clean(env.AI_PROVIDER_ACTIVE_MODEL),'AI_PROVIDER_ACTIVE_MODEL');
   const networkZone=clean(env.AI_PROVIDER_NETWORK_ZONE)||'public_https';
   const allowAnonymous=enabledFlag(env.AI_PROVIDER_ALLOW_ANONYMOUS);
   const allowedOrigins=commaList(env.AI_PROVIDER_ALLOWED_ORIGINS).map(normalizeOrigin);
   if(!['public_https','local_loopback'].includes(networkZone))throw profileError('AI Provider network zone 无效');
   if(allowAnonymous&&networkZone!=='local_loopback')throw profileError('匿名第三方 Provider 只允许 local_loopback');
+  const modelEntries=[
+    {model:primaryModel,credential:primaryCredential,key:'primary'},
+    {model:grokModel,credential:grokCredential,key:'grok'}
+  ].filter(entry=>entry.model);
+  const availableModels=modelEntries.map(entry=>entry.model);
+  if(new Set(availableModels).size!==availableModels.length)throw profileError('AI Provider 双模型配置中的模型 ID 必须唯一');
+  if(grokCredential&&!grokModel)throw profileError('AI_PROVIDER_GROK_API_KEY 已设置但 AI_PROVIDER_GROK_MODEL 为空');
+  const activeModel=requestedActiveModel||primaryModel||grokModel;
+  if(activeModel&&!availableModels.includes(activeModel))throw profileError('AI_PROVIDER_ACTIVE_MODEL 必须匹配已配置的模型 ID');
+  const selected=modelEntries.find(entry=>entry.model===activeModel);
+  const model=selected?.model||activeModel||null;
+  const credential=selected?.credential||'';
+  const configuredModels=modelEntries.filter(entry=>entry.credential||allowAnonymous).map(entry=>entry.model);
   const configured=Boolean(baseUrlValue&&model&&(credential||allowAnonymous));
   if(!enabled){
     return baseProfile({
       id,provider,adapter,model:model||null,credential:null,endpoint:null,workflowAllowlist:resolveWorkflowAllowlist(env.AI_PROVIDER_WORKFLOWS),
       reasoning:{requestedLevel:AI_REASONING_LEVEL,mode:'xhigh',degraded:false},structuredOutput:{mode:'strict_native',degraded:false},retention:{mode:'send',sendNoStore:true,degraded:false},
-      enabled:false,configured,env
+      enabled:false,configured,env,availableModels,configuredModels
     });
   }
   if(!configured)throw aiProviderError('AI_PROVIDER_NOT_CONFIGURED','第三方 AI Provider 尚未完整配置');
@@ -203,7 +222,7 @@ function resolveThirdPartyProfile(env,id){
     endpoint:{id:`${id}_endpoint`,baseUrl:url.href.replace(/\/$/,''),origin:url.origin,networkZone,trustedBuiltIn:false},
     workflowAllowlist:resolveWorkflowAllowlist(env.AI_PROVIDER_WORKFLOWS),
     reasoning:resolveReasoning(env),structuredOutput:resolveStructuredOutput(env,adapter),retention:resolveRetention(env),
-    enabled:true,configured:true,env
+    enabled:true,configured:true,env,availableModels,configuredModels
   });
 }
 
@@ -252,6 +271,9 @@ export function providerRuntimeConfig({env=process.env,profileId}={}){
     profileId:profile.id,
     adapter:profile.adapter,
     model:profile.model,
+    activeModel:profile.model,
+    availableModels:profile.availableModels,
+    configuredModels:profile.configuredModels,
     reasoningEffort:profile.reasoning.requestedLevel,
     structuredOutputMode:profile.structuredOutput.mode,
     configured:profile.configured,
