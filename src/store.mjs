@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { nowIso, todayIso } from './utils.mjs';
 import { isValidDateOnly, validateConfig, validateState, validateStateConfigReferences, validateStateInput } from './validation.mjs';
+import { stripNarrativeProgress } from './project-record-policy.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -26,6 +27,20 @@ const DEFAULT_STATE = {
   activities: [], morningSessions: []
 };
 
+function normalizeProject(project){
+  if(!project||typeof project!=='object'||Array.isArray(project))return project;
+  const next={...project};
+  if(project.progress)next.progress=stripNarrativeProgress(project.progress);
+  if(project.progressBeforeCompletion)next.progressBeforeCompletion=stripNarrativeProgress(project.progressBeforeCompletion);
+  return next;
+}
+
+function normalizeActivity(activity){
+  if(!activity||typeof activity!=='object'||Array.isArray(activity))return activity;
+  if(activity.type!=='project_synced')return activity;
+  return {...activity,text:'项目进度已同步；分析与总结正文保存在飞书项目文档。'};
+}
+
 function normalizeState(state={}, {migrateLegacyTodayPlan=false}={}) {
   const todayPlan=Array.isArray(state.todayPlan)?state.todayPlan:[];
   const legacyUndatedTodayPlan=migrateLegacyTodayPlan&&!Object.hasOwn(state,'todayPlanDate')&&todayPlan.length>0;
@@ -37,10 +52,10 @@ function normalizeState(state={}, {migrateLegacyTodayPlan=false}={}) {
     todos: Array.isArray(state.todos)?state.todos:[],
     todayPlan: legacyUndatedTodayPlan?[]:todayPlan,
     todayPlanDate: isValidDateOnly(state.todayPlanDate)?state.todayPlanDate:null,
-    projects: Array.isArray(state.projects)?state.projects:[],
+    projects: Array.isArray(state.projects)?state.projects.map(normalizeProject):[],
     confirmations: Array.isArray(state.confirmations)?state.confirmations:[],
     notes: Array.isArray(state.notes)?state.notes:[],
-    activities: Array.isArray(state.activities)?state.activities:[],
+    activities: Array.isArray(state.activities)?state.activities.map(normalizeActivity):[],
     morningSessions: Array.isArray(state.morningSessions)?state.morningSessions:[]
   };
 }
