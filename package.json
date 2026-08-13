@@ -10,7 +10,8 @@
     "test": "node --test tests/*.test.mjs",
     "doctor": "node scripts/doctor.mjs",
     "backup": "node scripts/backup.mjs",
-    "restore": "node scripts/restore.mjs"
+    "restore": "node scripts/restore.mjs",
+    "migrate:project-records": "node scripts/migrate-project-records.mjs"
   },
   "engines": {
     "node": ">=20"
