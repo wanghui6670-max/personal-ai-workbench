@@ -62,7 +62,7 @@ const dataSource={
 export const requestSchemas={
   empty:{fields:{}},
   login:{fields:{password:nonEmptyString},required:['password'],allowEmpty:false},
-  capture:{fields:{text:nonEmptyString,source:nonEmptyString},required:['text'],allowEmpty:false},
+  capture:{fields:{captureId:nonEmptyString,text:nonEmptyString,source:nonEmptyString},required:['text'],allowEmpty:false},
   config:{fields:{workspaceRoot:nonEmptyString,settings,dataSource},allowEmpty:false},
   business:{fields:{name:nonEmptyString},required:['name'],allowEmpty:false},
   inbox:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false},
