@@ -32,6 +32,7 @@ jobs:
           node --check src/capture-contract.mjs
           node --check src/capture-receipts.mjs
           node --check src/capture-domain.mjs
+          node --check src/receipt-backup.mjs
           node --check src/feishu.mjs
           node --check src/feishu-capture.mjs
           node --check src/project-directory.mjs
