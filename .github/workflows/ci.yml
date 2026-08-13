@@ -25,6 +25,7 @@ jobs:
           node --check src/request-validation.mjs
           node --check src/domain.mjs
           node --check src/domain-core.mjs
+          node --check src/today-domain.mjs
           node --check src/workbench-core.mjs
           node --check src/store.mjs
           node --check src/inbox-ack.mjs
@@ -45,6 +46,7 @@ jobs:
           node --check scripts/migrate-project-records.mjs
           node --check scripts/test-by-file.mjs
           node --check public/project-records.js
+          node --check public/ux-enhancements.js
       - name: Run contract tests with concise per-file diagnostics
         env:
           OPENAI_API_KEY: ''
