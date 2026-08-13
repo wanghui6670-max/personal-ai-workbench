@@ -1,15 +1,5 @@
 import { nowIso } from './utils.mjs';
 
-/**
- * Project progress has two deliberately separate shapes:
- *
- * 1. machine progress: tiny operational state persisted in state.json;
- * 2. narrative progress: human-readable analysis written only to the bound
- *    Feishu project document.
- *
- * This prevents PROJECT.md/state/activity logs from becoming competing copies
- * of the project analysis report.
- */
 export function machineProgress(progress = {}, record = null) {
   const legacyBlocker=typeof progress.blocker==='string'?progress.blocker.trim():'';
   const hasBlocker=typeof progress.hasBlocker==='boolean'
@@ -26,6 +16,8 @@ export function machineProgress(progress = {}, record = null) {
   if (record?.revisionId !== undefined && record?.revisionId !== null) next.feishuRevisionId = String(record.revisionId);
   if (record?.item?.blockId) next.feishuRecordBlockId = String(record.item.blockId);
   if (record?.recordedAt) next.feishuRecordedAt = String(record.recordedAt);
+  const operationId=record?.operationId||record?.item?.operationId;
+  if(operationId)next.feishuOperationId=String(operationId);
   return next;
 }
 
@@ -48,15 +40,11 @@ export function narrativeRecordPointer(progress = {}) {
   return {
     revisionId: progress.feishuRevisionId ?? null,
     blockId: progress.feishuRecordBlockId ?? null,
-    recordedAt: progress.feishuRecordedAt ?? null
+    recordedAt: progress.feishuRecordedAt ?? null,
+    operationId: progress.feishuOperationId ?? null
   };
 }
 
-/**
- * Migration is intentionally lossless for machine fields: it removes the old
- * narrative copies, but it does not coerce invalid machine values. Validation
- * must still reject a corrupt backup instead of silently repairing it.
- */
 export function stripNarrativeProgress(progress = {}) {
   if(!progress||typeof progress!=='object'||Array.isArray(progress))return progress;
   const next={...progress};
