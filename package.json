@@ -8,6 +8,7 @@
     "start": "node src/server.mjs",
     "dev": "NODE_ENV=development node --watch src/server.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:files": "node scripts/test-by-file.mjs",
     "doctor": "node scripts/doctor.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
