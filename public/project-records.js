@@ -163,8 +163,7 @@ async function ensurePanel(){
     records=[];
     nextCursor=null;
   }
-  const existing=document.getElementById(PANEL_ID);
-  if(existing){renderRecords();return;}
+  if(document.getElementById(PANEL_ID))return;
   const asides=[...document.querySelectorAll('.main .grid > aside.card.pad')];
   const target=asides[0];
   if(!target)return;
