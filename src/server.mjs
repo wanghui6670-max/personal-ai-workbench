@@ -16,6 +16,8 @@ import { createEndpointRateLimiter,createSyncCoordinator,endpointRateLimitConfig
 import { loadWorkbenchEnv } from './env.mjs';
 import { inspectReadiness } from './health.mjs';
 import { requestSchemas,validateRequestBody } from './request-validation.mjs';
+import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/registry.mjs';
+import { newId } from './utils.mjs';
 
 const __filename=fileURLToPath(import.meta.url);const SRC_DIR=path.dirname(__filename);const APP_ROOT=path.dirname(SRC_DIR);const PUBLIC_DIR=path.join(APP_ROOT,'public');
 await loadWorkbenchEnv({root:APP_ROOT});
@@ -70,6 +72,10 @@ catch(error){refuseStartup(error.message);}
 
 const store=new JsonStore(DATA_DIR);await store.ensure();
 const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,initialConfig);
+const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store});
+const aiPlans=new Map();
+const AI_PLAN_TTL_MS=10*60*1000;
+function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
 const rateLimitConfig=endpointRateLimitConfig();
 const endpointLimiter=createEndpointRateLimiter(rateLimitConfig);
 const syncCoordinator=createSyncCoordinator();
@@ -129,6 +135,41 @@ const server=http.createServer(async(req,rawRes)=>{
     }
 
     if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
+
+    if(pathname==='/api/ai/tools'&&req.method==='GET')return sendJson(res,200,{tools:mcpRegistry.list(),mcpTransport:'/api/mcp'});
+    if(pathname==='/api/ai/plan'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.aiPlan);pruneAiPlans();
+      const planned=await mcpRegistry.plan(body.message,{view:body.view||'today',id:body.id||null});
+      const planId=newId('plan');
+      const plan={id:planId,createdAt:Date.now(),message:body.message,toolName:planned.toolName||null,args:planned.args||{},reason:planned.reason||'',kind:planned.kind,confirmationRequired:Boolean(planned.confirmationRequired),messageReply:planned.message||null,planner:planned.planner||'local_fallback',plannerModel:planned.plannerModel||null,analysis:planned.analysis||null};
+      aiPlans.set(planId,plan);
+      return sendJson(res,200,{plan:{...plan,state:planned.state,tool:planned.tool}});
+    }
+    if(pathname==='/api/ai/execute'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.aiExecute);pruneAiPlans();
+      const plan=aiPlans.get(body.planId);if(!plan)throw Object.assign(new Error('AI 操作预览已过期，请重新描述。'),{statusCode:409});
+      if(!body.confirmed&&plan.confirmationRequired)throw Object.assign(new Error('这项操作会改变工作台，必须先确认。'),{statusCode:409});
+      if(!plan.toolName){aiPlans.delete(body.planId);const current=await apiState();return sendJson(res,200,{ok:true,reply:plan.messageReply,state:current,plan});}
+      const outcome=await mcpRegistry.call(plan.toolName,plan.args,{confirmed:body.confirmed===true||!plan.confirmationRequired});
+      aiPlans.delete(body.planId);
+      return sendJson(res,200,{ok:true,tool:outcome.tool,result:outcome.result,state:outcome.state,readback:true,plan});
+    }
+    if(pathname==='/api/mcp'&&req.method==='POST'){
+      const body=await requestBody(req,requestSchemas.mcp);const id=Object.hasOwn(body,'id')?body.id:null;
+      try{
+        if(body.jsonrpc!=='2.0')throw Object.assign(new Error('jsonrpc 必须是 2.0。'),{code:'MCP_INVALID_REQUEST'});
+        const params=body.params&&typeof body.params==='object'?body.params:{};
+        if(body.method==='initialize')return sendJson(res,200,jsonRpcResult(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'personal-ai-workbench',version:'1.2.0'}}));
+        if(body.method==='notifications/initialized')return sendJson(res,200,jsonRpcResult(id,{}));
+        if(body.method==='tools/list')return sendJson(res,200,jsonRpcResult(id,{tools:mcpRegistry.list()}));
+        if(body.method==='tools/call'){
+          if(typeof params.name!=='string'||!params.name.trim())throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
+          const outcome=await mcpRegistry.call(params.name,params.arguments||{},{confirmed:params.confirmed===true});
+          return sendJson(res,200,jsonRpcResult(id,{content:[{type:'text',text:JSON.stringify(outcome.result)}],structuredContent:{result:outcome.result,state:outcome.state,readback:true}}));
+        }
+        throw Object.assign(new Error(`未知 MCP 方法：${body.method}`),{code:'MCP_METHOD_NOT_FOUND'});
+      }catch(error){return sendJson(res,200,jsonRpcError(id,error));}
+    }
 
     if(pathname==='/api/state'&&req.method==='GET')return sendJson(res,200,await apiState());
     if(pathname==='/api/export'&&req.method==='GET')return sendJson(res,200,{exportedAt:nowIso(),state:await store.readState(),config:await store.readConfig()},{'Content-Disposition':`attachment; filename="workbench-export-${new Date().toISOString().slice(0,10)}.json"`});

@@ -28,16 +28,16 @@ function validateValue(value,spec,field){
   }
 }
 
-export function validateRequestBody(body,{fields={},required=[],allowEmpty=true,label='请求体'}={}){
+export function validateRequestBody(body,{fields={},required=[],allowEmpty=true,label='请求体',allowUnknown=false}={}){
   if(!isPlainObject(body))throw badRequest(`${label}必须是 JSON 对象。`);
   const keys=Object.keys(body);
-  const unknown=keys.find(key=>!Object.hasOwn(fields,key));
+  const unknown=allowUnknown?null:keys.find(key=>!Object.hasOwn(fields,key));
   if(unknown)throw badRequest(`${label}包含不支持的字段：${unknown}。`);
   if(!allowEmpty&&!keys.length)throw badRequest(`${label}不能为空。`);
   for(const field of required){
     if(!Object.hasOwn(body,field))throw badRequest(`${field} 为必填字段。`);
   }
-  for(const key of keys)validateValue(body[key],fields[key],key);
+  for(const key of keys){if(allowUnknown&&!Object.hasOwn(fields,key))continue;validateValue(body[key],fields[key],key);}
   return body;
 }
 
@@ -74,5 +74,8 @@ export const requestSchemas={
   todoPatch:{fields:{title:nonEmptyString,context:string,dueDate:nonEmptyString,done:boolean},allowEmpty:false},
   morning:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString},required:['message'],allowEmpty:false},
   confirmationClear:{fields:{id:nonEmptyString},required:['id'],allowEmpty:false},
-  note:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false}
+  note:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false},
+  aiPlan:{fields:{message:nonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
+  aiExecute:{fields:{planId:nonEmptyString,confirmed:boolean},required:['planId','confirmed'],allowEmpty:false},
+  mcp:{fields:{jsonrpc:nonEmptyString,id:{type:'string',nullable:true},method:nonEmptyString,params:{type:'object',schema:{fields:{},allowUnknown:true},nullable:true}},required:['jsonrpc','method'],allowEmpty:false}
 };

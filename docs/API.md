@@ -4,6 +4,19 @@
 
 所有 `POST`、`PATCH`、`DELETE` 请求都必须发送 `Content-Type: application/json`。浏览器请求如果带 `Origin`，该值必须属于默认本机 origin 或 `TRUSTED_ORIGINS`；命令行/API 客户端可以不发 `Origin`。所有请求仍会校验实际 `Host`，不会采信 `X-Forwarded-*` 头。
 
+## AI-native 双面板与 MCP 工具层
+
+左侧是人的工作面板，右侧是 AI 工作区。两侧共享同一份持久化状态；AI 不直接改 DOM，也不获得任意命令、HTTP 或文件系统权限。浏览器先调用 `POST /api/ai/plan` 生成工具预览，状态变更工具必须由用户确认，再调用 `POST /api/ai/execute`；执行后服务端会重新读取 `/api/state` 并把读回状态返回给前端。
+
+- `GET /api/ai/tools`：读取白名单工具元数据。
+- `POST /api/ai/plan`：请求体 `{"message":"查看收件箱","view":"today","id":null}`（`view/id` 是当前左侧面板上下文，可省略），返回 `planId`、候选工具、参数、影响说明、`confirmationRequired`、`planner` 和 `plannerModel`。已启用模型时，规划走 `ai_console` 结构化工作流；未配置或失败时 `planner=local_fallback`。计划只保留在内存，10 分钟后过期。
+- `POST /api/ai/execute`：请求体 `{"planId":"...","confirmed":true}`。未确认的状态变更会被拒绝；成功响应包含 `readback:true` 和重新派生的 `state`。
+- `POST /api/mcp`：MCP-compatible JSON-RPC 入口，支持 `initialize`、`notifications/initialized`、`tools/list`、`tools/call`。`tools/call` 的写工具需要在 params 中明确传 `confirmed:true`。
+
+工具覆盖状态读取、收件箱、项目、待办、今日计划、飞书同步、工作日志、待确认、业务板块、设置和备份。工具统一复用领域层，所以收件箱入口、待办截止日期、今日人工确认、项目结束日期和本地项目目录等规则仍然有效。
+
+其中 `panel_navigate` 是左侧面板的导航桥：AI 可以请求切换到今日、收件箱、待办、日志、缓冲区、业务板块或具体项目，也可以打开设置/新建项目弹层。它是只读导航动作，执行后仍会返回共享状态读回；业务状态改变必须调用对应实体工具并经过确认门。
+
 ## 状态
 
 - `GET /api/health` 只读 readiness 检查。它会读取并校验 state/config，检查数据目录、备份目录、工作区和所有业务目录的类型、symlink 边界与访问权限。就绪时返回 `200`，其中 `version` 为当前应用版本 `1.2.0`；未就绪时只返回 `503 {"ok":false,"status":"not_ready"}`，不回显路径、数据或底层错误。公开未登录请求不返回 `workspaceRoot`

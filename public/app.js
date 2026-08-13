@@ -1,5 +1,5 @@
 const app=document.querySelector('#app');const toastEl=document.querySelector('#toast');
-let state=null,auth={authEnabled:false,authenticated:true},modal='',route={view:'today',id:null},morning={sessionId:null,messages:[],candidates:[]},busy=false,projectCreateBusy=false,sidebarOpen=false;
+let state=null,auth={authEnabled:false,authenticated:true},modal='',route={view:'today',id:null},morning={sessionId:null,messages:[],candidates:[]},ai={messages:[],plan:null,busy:false},busy=false,projectCreateBusy=false,sidebarOpen=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const attr=esc;
@@ -14,6 +14,27 @@ window.addEventListener('hashchange',()=>{parseRoute();render();});
 
 async function boot(){try{auth=await api('/api/auth/status');if(auth.authEnabled&&!auth.authenticated)return render();await reload();}catch(e){app.innerHTML=`<div class="boot">${esc(e.message)}</div>`;}}
 async function reload(){state=await api('/api/state');if(state.morningSession&&morning.messages.length===0){morning.sessionId=state.morningSession.id;morning.messages=state.morningSession.messages||[];}render();}
+
+function aiMessage(role,text){return {role,text:String(text||''),at:new Date().toISOString()};}
+function aiToolLabel(tool){return tool?.name||'工作台工具';}
+function aiPlanHtml(){
+  const plan=ai.plan;if(!plan)return'';
+  if(plan.kind==='clarification')return `<div class="ai-note"><div class="ai-note-label">需要你补充</div>${esc(plan.messageReply||'我需要你补充一个明确目标。')}</div>`;
+  if(!plan.toolName)return'';
+  const args=plan.args&&Object.keys(plan.args).length?JSON.stringify(plan.args,null,2):'{}';
+  const analysis=plan.analysis||{};
+  const evidence=Array.isArray(analysis.evidence)?analysis.evidence:[],conflicts=Array.isArray(analysis.conflicts)?analysis.conflicts:[],gaps=Array.isArray(analysis.gaps)?analysis.gaps:[];
+  const analysisHtml=plan.planner==='model'&& (evidence.length||conflicts.length||gaps.length) ? `<div class="ai-analysis"><div class="ai-analysis-title">判断依据（本次）</div>${evidence.length?`<div><span class="ai-analysis-label">证据</span>${evidence.map(item=>`<div class="ai-analysis-row">${esc(item.observation)}</div>`).join('')}</div>`:''}${conflicts.length?`<div><span class="ai-analysis-label warn">冲突</span>${conflicts.map(item=>`<div class="ai-analysis-row warn">${esc(item)}</div>`).join('')}</div>`:''}${gaps.length?`<div><span class="ai-analysis-label gap">缺口</span>${gaps.map(item=>`<div class="ai-analysis-row gap">${esc(item)}</div>`).join('')}</div>`:''}<div class="ai-analysis-foot">只显示可审计摘要，不显示隐藏思维过程。</div></div>`:'';
+  const result=plan.result?`<div class="ai-result"><div class="ai-result-label">工具结果 · 已读回</div><pre>${esc(JSON.stringify(plan.result,null,2))}</pre></div>`:'';
+  const action=plan.result?'<div class="ai-plan-read">工具已执行，结果和左侧状态均已读回。</div>':(plan.confirmationRequired?`<div class="ai-plan-warning">这是状态变更操作。未确认前不会写入左侧面板。</div><div class="toolbar"><button class="btn small" data-action="ai-cancel-plan">取消</button><button class="btn small primary" data-action="ai-confirm-plan">确认并执行</button></div>`:`<div class="ai-plan-read">只读工具，将直接读取并回显当前面板状态。</div>`);
+  return `<div class="ai-plan"><div class="ai-plan-head"><span class="ai-tool-badge">MCP TOOL</span><strong>${esc(aiToolLabel(plan.tool))}</strong><span class="ai-planner-badge">${plan.planner==='model'?`模型 · ${esc(plan.plannerModel||'active')}`:'本地安全回退'}</span></div><div class="ai-plan-reason">${esc(plan.reason||'准备调用工作台工具。')}</div>${analysisHtml}<div class="ai-args-label">工具参数</div><pre>${esc(args)}</pre>${action}${result}</div>`;
+}
+function aiConsole(){
+  const messages=ai.messages.length?ai.messages.map(message=>`<div class="bubble ${message.role==='user'?'user':'ai'}">${esc(message.text)}</div>`).join(''):'<div class="ai-welcome"><div class="ai-orb">✦</div><strong>AI 工作区</strong><p>我通过白名单 MCP 工具读取和操作左侧面板。所有写入动作先给你看影响范围，再由你确认。</p><div class="ai-suggestions"><button class="btn small" data-ai-suggest="查看收件箱">查看收件箱</button><button class="btn small" data-ai-suggest="查看待办">查看待办</button><button class="btn small" data-ai-suggest="查看最近工作日志">看最近现场</button></div></div>';
+  const runtime=state?.aiConfig;
+  const modelStatus=state?.aiEnabled?`模型已接入 · ${runtime?.model||'active'}`:'本地安全回退 · 未配置模型';
+  return `<aside class="ai-panel"><div class="ai-panel-top"><div><div class="ai-kicker">AI CONTROL PLANE</div><div class="ai-title">AI 工作区</div><div class="ai-subtitle">MCP 工具 · 共享状态 · 人工确认</div></div><span class="ai-live-dot">${state?.aiEnabled?'MODEL':'LOCAL'}</span></div><div class="ai-context"><span class="pill blue">当前：${esc(route.view==='today'?'今日工作台':route.view)}</span><span class="pill">状态源：state.json</span><span class="pill">${esc(modelStatus)}</span><span class="pill">工具白名单</span></div><div class="ai-capabilities"><span>可读左侧面板</span><span>可操作业务实体</span><span>执行后读回</span></div><div class="ai-chat" id="ai-chat-box">${messages}</div>${aiPlanHtml()}<form class="ai-input" id="ai-form"><input id="ai-input" autocomplete="off" placeholder="让 AI 查看或操作工作台…"><button class="btn primary" ${ai.busy?'disabled':''}>发送</button></form><div class="ai-foot">AI 只提出 MCP 工具调用；工具参数本地校验，写入必须确认，执行后重新读回左侧。</div></aside>`;
+}
 
 function icon(label){return `<span aria-hidden="true">${label}</span>`;}
 function navLink(hash,label,count='',key=''){const active=route.view===key;return `<a class="${active?'active':''}" href="#${hash}">${label}${count!==''?`<span class="count">${count}</span>`:''}</a>`;}
@@ -34,7 +55,7 @@ function sidebar(){
   </nav></aside>`;
 }
 function topbar(title,desc='',actions=''){const source=state?.config?.dataSource;return `<header class="topbar"><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost mobile-toggle" data-action="toggle-side">☰</button><div class="top-left"><h1>${esc(title)}</h1><p>${esc(desc)}</p></div></div><div class="actions"><button class="btn desktop-only" data-action="sync-all">同步所有项目进度</button><button class="btn desktop-only" data-action="sync-feishu">${source?.provider==='feishu_doc'?'同步飞书收件箱':'配置飞书收件箱'}</button><button class="btn primary" data-action="new-project">新建项目</button><button class="btn" data-action="settings">设置</button>${actions}</div></header>`;}
-function shell(content,title,desc='',actions=''){return `<div class="layout">${sidebar()}<section class="content">${topbar(title,desc,actions)}<main class="main"><form class="capture" id="capture-form"><input id="capture-input" autocomplete="off" placeholder="随时记下来：所有新事项先进入收件箱，不立即处理…"><button class="btn primary">记到收件箱</button></form>${content}</main></section></div>${modal}`;}
+function shell(content,title,desc='',actions=''){return `<div class="layout"><div class="human-side">${sidebar()}<section class="content">${topbar(title,desc,actions)}<main class="main"><form class="capture" id="capture-form"><input id="capture-input" autocomplete="off" placeholder="随时记下来：所有新事项先进入收件箱，不立即处理…"><button class="btn primary">记到收件箱</button></form>${content}</main></section></div>${aiConsole()}</div>${modal}`;}
 
 function duePill(due){if(!due)return'';const delta=Math.ceil((new Date(`${due}T23:59:59`)-new Date())/86400000);if(delta<0)return`<span class="pill red">已过期 ${Math.abs(delta)} 天</span>`;if(delta===0)return`<span class="pill amber">今天截止</span>`;if(delta<=2)return`<span class="pill amber">${delta} 天后截止</span>`;return`<span class="pill">截止 ${fmtDate(due)}</span>`;}
 function statusPill(p){if(p.archived)return`<span class="pill">已归档</span>`;if(p.completed)return`<span class="pill green">已完成</span>`;if(p.status==='未启动')return`<span class="pill">未启动</span>`;return`<span class="pill blue">${esc(p.status||'进行中')}</span>`;}
@@ -45,7 +66,7 @@ function todayView(){
   const today=state.todayTodos;return shell(`<div class="stat-row"><div class="stat"><div class="n">${state.stats.today}</div><div class="l">今天你亲自安排的任务</div></div><div class="stat"><div class="n">${state.stats.inbox}</div><div class="l">收件箱</div></div><div class="stat"><div class="n">${state.stats.activeProjects}</div><div class="l">进行中的项目</div></div><div class="stat"><div class="n">${state.stats.confirmations+state.stats.overdue}</div><div class="l">需要你留意的事项</div></div></div>
   <div class="grid"><section class="card pad"><div class="card-head"><div><div class="card-title">今天要做什么</div><div class="card-desc">只有你明确加入的待办才会出现在这里。AI 不会自作主张。</div></div></div>${today.length?today.map(t=>todoHtml(t)).join(''):`<div class="empty"><strong>今天还没有正式安排任务。</strong><br>先和右侧 AI 过一下最近 3 天，再由你决定。</div>`}
   <div class="section-title">最近工作现场</div>${state.activities.slice(0,6).map(a=>`<div class="activity"><div class="time">${fmtTime(a.at)}</div><div class="text">${esc(a.text)}</div></div>`).join('')||'<div class="empty">还没有工作日志。</div>'}</section>
-  <aside class="card pad"><div class="card-head"><div><div class="card-title">早晨对焦</div><div class="card-desc">看最近 3 天 + 临近截止事项，和 AI 聊清楚后再由你拍板。</div></div><button class="btn small" data-action="morning-start">重新分析</button></div><div class="chat" id="chat-box">${morning.messages.length?morning.messages.map(m=>`<div class="bubble ${m.role==='user'?'user':'ai'}">${esc(m.text)}</div>`).join(''):`<div class="empty">点击“重新分析”，AI 会先把值得讨论的事项提出来，但不会自动安排。</div>`}</div><form class="chat-input" id="morning-form"><input id="morning-input" placeholder="例如：今天我上午只有两个小时，先帮我看看怎么取舍"><button class="btn primary">发送</button></form>${morning.candidates.length?`<div class="section-title">对话候选</div>${morning.candidates.slice(0,8).map(c=>candidateHtml(c)).join('')}`:''}</aside></div>
+  <aside class="card pad human-decision-card"><div class="card-head"><div><div class="card-title">人工决策区</div><div class="card-desc">右侧 AI 只提出证据和工具动作；这里由你决定什么进入今日工作台。</div></div><span class="pill blue">你拍板</span></div><div class="decision-rule"><strong>今日不是 AI 的计划表</strong><p>AI 可以帮你读取收件箱、待办、项目和日志，也可以预览一个动作；只有你明确确认后，事项才会改变左侧状态。</p></div><div class="section-title">当前需要你留意</div><div class="human-attention"><span class="pill amber">待确认 ${state.stats.confirmations}</span><span class="pill red">逾期项目 ${state.stats.overdue}</span><span class="pill">待归类 ${state.stats.unclassified}</span></div><div class="section-title">建议从右侧开始</div><div class="empty">试试“帮我过一下今天”“查看收件箱”或“把某个待办加入今日”。AI 会先展示 MCP 工具和影响范围，不会越权执行。</div></aside></div>
   <section class="card pad" style="margin-top:16px"><div class="card-head"><div><div class="card-title">所有项目进度</div><div class="card-desc">按当前进度从高到低看全局。这里展示，不替你安排。</div></div></div>${state.projects.filter(p=>!p.archived).sort((a,b)=>(b.progress?.percent||0)-(a.progress?.percent||0)).map(projectCard).join('')||'<div class="empty">还没有项目。</div>'}</section>`,'今日工作台','早上 1–5 分钟对焦；今天做什么，由你最后决定。');
 }
 function candidateHtml(c){if(c.kind==='todo'){const t=state.todos.find(x=>x.id===c.id);if(!t)return'';const inToday=state.todayPlan.includes(t.id);return `<div class="candidate"><div class="top"><div><div class="name">${esc(t.title)}</div><div class="summary">${esc(c.reason)}</div></div><button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(t.id)}" data-add="${inToday?'0':'1'}">${inToday?'已在今日':'加入今日'}</button></div></div>`;}const p=state.projects.find(x=>x.id===c.id);return p?`<div class="candidate"><div class="name"><a href="#project/${routePart(p.id)}">${esc(p.name)}</a></div><div class="summary">${esc(c.reason)}</div></div>`:'';}
@@ -92,8 +113,38 @@ async function createProjectFromModal(el,description,endDate,sourceInboxId){if(p
   modal=newProjectModal(description,endDate,sourceInboxId,`来源状态异常：项目和收件箱都没有找到这个来源${postError?`（${postError.message}）`:''}。请先核对收件箱或待确认，不要重新采集。`);render();toast('来源状态异常，请先核对，不要重复采集',true);
  }catch(error){projectCreateBusy=false;modal=newProjectModal(description,endDate,sourceInboxId,sourceInboxId?`创建流程中断：${error.message} 请沿用这个收件箱来源重试。`:'');render();toast(error.message,true);}}
 
+async function aiSubmitMessage(message){
+  const text=String(message||'').trim();if(!text||ai.busy)return;
+  ai.busy=true;ai.messages.push(aiMessage('user',text));render();
+  try{
+    const response=await api('/api/ai/plan',{method:'POST',body:JSON.stringify({message:text,view:route.view,id:route.id})});
+    const plan=response.plan||{};ai.plan=plan;
+    if(plan.kind==='clarification'){ai.messages.push(aiMessage('assistant',plan.messageReply||'我需要你补充明确目标。'));ai.plan=plan;}
+    else if(plan.toolName&&!plan.confirmationRequired){
+      const executed=await api('/api/ai/execute',{method:'POST',body:JSON.stringify({planId:plan.id,confirmed:true})});
+      state=executed.state||state;if(plan.toolName==='panel_navigate')applyPanelNavigation(executed.result?.navigation);ai.plan={...plan,result:executed.result,readback:executed.readback};ai.messages.push(aiMessage('assistant',`已通过 ${plan.toolName} 读取，工具结果和左侧状态都已读回。`));
+    }else ai.messages.push(aiMessage('assistant',plan.toolName?`我准备调用 ${plan.toolName}。请检查参数和影响范围后确认。`:(plan.messageReply||'我需要你补充明确目标。')));
+  }catch(error){ai.messages.push(aiMessage('assistant',`这次没有执行：${error.message}`));ai.plan=null;}
+  ai.busy=false;render();
+}
+function applyPanelNavigation(navigation){
+  if(!navigation||typeof navigation!=='object')return;
+  if(navigation.view){route={view:navigation.view,id:navigation.id||null};location.hash=`#${navigation.view}${navigation.id?`/${routePart(navigation.id)}`:''}`;}
+  if(navigation.modal==='settings')modal=settingsModal();
+  else if(navigation.modal==='new_project')modal=newProjectModal();
+  render();
+}
+async function aiConfirmPlan(){
+  if(!ai.plan||ai.busy)return;const plan=ai.plan;ai.busy=true;render();
+  try{const executed=await api('/api/ai/execute',{method:'POST',body:JSON.stringify({planId:plan.id,confirmed:true})});state=executed.state||state;if(plan.toolName==='panel_navigate')applyPanelNavigation(executed.result?.navigation);ai.messages.push(aiMessage('assistant',`已执行 ${plan.toolName}，并重新读取左侧状态。`));ai.plan={...plan,result:executed.result,readback:executed.readback};toast('AI 操作已执行，左侧面板已读回');}
+  catch(error){ai.messages.push(aiMessage('assistant',`执行失败：${error.message}`));}
+  ai.busy=false;render();
+}
+
 async function runAction(el){const action=el.dataset.action;try{
  if(action==='toggle-side'){sidebarOpen=!sidebarOpen;render();return;}
+ if(action==='ai-confirm-plan'){await aiConfirmPlan();return;}
+ if(action==='ai-cancel-plan'){if(ai.plan){ai.messages.push(aiMessage('assistant','已取消这次工具调用，左侧状态没有改变。'));ai.plan=null;render();}return;}
  if(action==='settings'){modal=settingsModal();render();return;}if(action==='close-modal'){if(projectCreateBusy)return;modal='';render();return;}if(action==='new-project'){projectCreateBusy=false;modal=newProjectModal();render();return;}
  if(action==='open-command'){showCommand(el.dataset.id);return;}
  if(action==='run-command'){const id=el.dataset.id,cmd=document.querySelector(`#cmd-input-${CSS.escape(id)}`).value.trim();if(!cmd)return;const r=await api('/api/inbox/command',{method:'POST',body:JSON.stringify({itemId:id,command:cmd})});if(r.needsProjectCreation){modal=newProjectModal(r.description,r.parsedEndDate||'',r.itemId||id);render();return;}if(r.needsProjectSelection){showProjectChoices(id,cmd,r.projectCandidates||[]);toast(r.question,true);return;}if(r.needsFollowup){toast(r.question,true);return;}toast(r.message||'已处理');await reload();return;}
@@ -121,11 +172,16 @@ async function runAction(el){const action=el.dataset.action;try{
  if(action==='delete-business'){if(!confirm('确认删除这个业务板块？只有板块下没有项目时才能删除。'))return;await api(`/api/businesses/${routePart(el.dataset.id)}`,{method:'DELETE'});toast('业务板块已删除');await reload();modal=settingsModal();render();return;}
  }catch(e){busy=false;toast(e.message,true);await reload().catch(()=>{});}}
 
-document.addEventListener('click',e=>{const el=e.target.closest?.('[data-action]');if(!el)return;if(el.classList.contains('overlay')&&e.target!==el)return;e.preventDefault();runAction(el);});
+document.addEventListener('click',e=>{
+ const suggestion=e.target.closest?.('[data-ai-suggest]');
+ if(suggestion?.dataset?.aiSuggest){e.preventDefault();aiSubmitMessage(suggestion.dataset.aiSuggest);return;}
+ const el=e.target.closest?.('[data-action]');if(!el)return;if(el.classList.contains('overlay')&&e.target!==el)return;e.preventDefault();runAction(el);
+});
 document.addEventListener('submit',async e=>{try{
  if(e.target.id==='login-form'){e.preventDefault();const password=document.querySelector('#login-password').value;await api('/api/auth/login',{method:'POST',body:JSON.stringify({password})});auth.authenticated=true;await reload();return;}
  if(e.target.id==='capture-form'){e.preventDefault();const input=document.querySelector('#capture-input'),text=input.value.trim();if(!text)return;await api('/api/inbox',{method:'POST',body:JSON.stringify({text})});input.value='';toast('已进入收件箱');await reload();return;}
  if(e.target.id==='morning-form'){e.preventDefault();const input=document.querySelector('#morning-input'),text=input.value.trim();if(!text)return;morning.messages.push({role:'user',text});render();const r=await api('/api/morning/chat',{method:'POST',body:JSON.stringify({message:text,sessionId:morning.sessionId})});morning.sessionId=r.sessionId;morning.messages.push({role:'assistant',text:r.reply});morning.candidates=r.candidates||morning.candidates;render();return;}
+ if(e.target.id==='ai-form'){e.preventDefault();const input=document.querySelector('#ai-input'),text=input.value.trim();if(!text)return;input.value='';await aiSubmitMessage(text);return;}
  }catch(err){toast(err.message,true);}});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.classList.contains('command-input')){e.preventDefault();const id=e.target.id.replace('cmd-input-','');const btn=document.querySelector(`[data-action="run-command"][data-id="${CSS.escape(id)}"]`);if(btn)runAction(btn);}});
 
