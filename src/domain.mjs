@@ -8,12 +8,14 @@ import { createFeishuProjectRecordClient, projectRecordConfigured } from './feis
 import { machineProgress, narrativeFromProgress } from './project-record-policy.mjs';
 import { rewriteProjectIdentity } from './project-identity.mjs';
 import { newId, nowIso } from './utils.mjs';
+import { isValidDateOnly } from './validation.mjs';
 
 const defaultProjectRecordClient=createFeishuProjectRecordClient();
 const PROJECT_RECORD_CONFIRMATION_TYPES=new Set(['project_feishu_missing','project_record_write_failed','project_identity_update_failed']);
 
 function sameStoredValue(left,right){return JSON.stringify(left)===JSON.stringify(right);}
 function projectBusinessName(config,project){return businessById(config,project.businessId)?.name||'待归类';}
+function badRequest(message){return Object.assign(new Error(message),{statusCode:400,code:'INVALID_REQUEST'});}
 
 async function persistedProject(store,projectId){
   return (await store.readState()).projects.find(project=>project.id===projectId)||null;
@@ -83,9 +85,53 @@ export async function assignProjectBusiness(args){
   return await rewriteIdentityFor({appRoot:args.appRoot,store:args.store,projectId:result.id})||result;
 }
 
-export async function updateProject(args){
-  const result=await core.updateProject(args);
-  return await rewriteIdentityFor({appRoot:args.appRoot,store:args.store,projectId:result.id})||result;
+/**
+ * Project edits never create local narrative progress. Completion/reopen only
+ * changes the machine progress envelope; PROJECT.md is updated as identity
+ * metadata on a best-effort basis and any failure becomes a confirmation.
+ */
+export async function updateProject({appRoot,store,projectId,patch}){
+  if(typeof projectId!=='string'||!projectId.trim())throw badRequest('projectId 必须是非空字符串。');
+  if(!patch||typeof patch!=='object'||Array.isArray(patch)||!Object.keys(patch).length)throw badRequest('项目更新内容不能为空。');
+  const allowed=new Set(['intro','git','feishu','completed','archived','endDate']);
+  const unknown=Object.keys(patch).find(key=>!allowed.has(key));
+  if(unknown)throw badRequest(`项目更新内容包含不支持的字段：${unknown}。`);
+  for(const field of ['intro','git','feishu'])if(Object.hasOwn(patch,field)&&typeof patch[field]!=='string')throw badRequest(`${field} 必须是字符串。`);
+  for(const field of ['completed','archived'])if(Object.hasOwn(patch,field)&&typeof patch[field]!=='boolean')throw badRequest(`${field} 必须是布尔值。`);
+  if(Object.hasOwn(patch,'endDate')&&!isValidDateOnly(patch.endDate))throw badRequest('endDate 必须是合法的 YYYY-MM-DD 日期。');
+
+  let updated=null;
+  await store.updateState(state=>{
+    const project=state.projects.find(item=>item.id===projectId);
+    if(!project)throw new Error('项目不存在');
+    for(const field of ['intro','git','feishu'])if(Object.hasOwn(patch,field))project[field]=patch[field].trim();
+    if(Object.hasOwn(patch,'completed')){
+      const wasCompleted=project.completed===true;
+      project.completed=patch.completed;
+      if(project.completed&&!wasCompleted){
+        project.progressBeforeCompletion=structuredClone(project.progress||{});
+        project.progress={...(project.progress||{}),percent:100,status:'已完成',hasBlocker:false};
+      }else if(!project.completed&&wasCompleted){
+        if(project.progressBeforeCompletion&&typeof project.progressBeforeCompletion==='object'&&!Array.isArray(project.progressBeforeCompletion)){
+          project.progress=structuredClone(project.progressBeforeCompletion);
+        }else{
+          const current=project.progress||{};
+          project.progress={
+            ...current,
+            percent:Math.min(99,Number.isInteger(current.percent)?current.percent:0),
+            status:current.lastActivity?'进行中':'未启动',
+            hasBlocker:Boolean(current.hasBlocker)
+          };
+        }
+        delete project.progressBeforeCompletion;
+      }
+    }
+    if(Object.hasOwn(patch,'archived'))project.archived=patch.archived;
+    if(Object.hasOwn(patch,'endDate'))project.endDate=patch.endDate;
+    addActivity(state,{type:'project_updated',projectId,text:`更新项目「${project.name}」`});
+    updated=structuredClone(project);
+  });
+  return await rewriteIdentityFor({appRoot,store,projectId})||updated;
 }
 
 function staleSyncError(){
