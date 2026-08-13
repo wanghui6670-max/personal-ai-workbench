@@ -8,6 +8,8 @@ Personal AI Workbench 是本地优先的个人项目控制层：
 本地项目文件夹  ── 真实工作产物
 Git              ── 版本与代码变化证据
 Workbench state  ── 最小机器状态、任务、确认和指针
+Capture receipts ── 正文哈希与幂等标识，不保存正文
+Recovery receipts ─ 飞书跨资源事务机器凭据，不保存叙事
 飞书每日工作日记  ── 收件箱外部来源
 飞书项目文档      ── 项目分析、总结、复盘和恢复叙事唯一真源
 AI Provider       ── 临时分析，不成为资料真源
@@ -22,8 +24,19 @@ AI Provider       ── 临时分析，不成为资料真源
 - Node HTTP 服务和静态资源；
 - Host / Origin / Content-Type 请求边界；
 - Cookie 登录、Capture Bearer token、限流；
+- `/api/capture` 的 `captureId` HTTP 合同；
 - REST、AI plan/execute 和 MCP-compatible JSON-RPC transport；
 - API 响应错误脱敏。
+
+`source` 是外部不可信兼容标签；Capture 持久化来源由服务端决定。
+
+### `src/request-validation.mjs`
+
+集中定义 HTTP mutation 的严格请求 schema：
+
+- 非对象、缺字段、错误类型和未知字段在领域层之前拒绝；
+- Capture 允许可选 `captureId`、必填 `text` 和可选 `source`；
+- 可靠的客户端重试必须显式提供并复用 `captureId`。
 
 ### `src/store.mjs`
 
@@ -31,8 +44,63 @@ AI Provider       ── 临时分析，不成为资料真源
 - 私有目录和文件权限；
 - 写队列、每日备份、手工备份、恢复和回滚；
 - 旧项目叙事不可覆盖快照；
-- 飞书跨资源事务恢复凭据；
-- 读取时派生未解决恢复凭据的待确认提示。
+- Capture 幂等收据和飞书项目恢复凭据目录；
+- backup v2 生成与旧备份兼容；
+- 读取时派生未解决恢复凭据的待确认提示，而不把这些提示写回持久化 state。
+
+### `src/receipt-backup.mjs`
+
+定义备份中两类恢复凭据的边界：
+
+- `captureReceipts`：Capture ID、正文 SHA-256、Inbox ID、飞书 block ID 和时间；
+- `projectRecordReceipts`：operationId、项目 ID、飞书文档/记录指针、机器进度和事务阶段；
+- 严格字段白名单、ID/URL/hash/phase 校验；
+- 安全普通文件检查；
+- 通过 staging/rename 成组替换凭据目录；
+- 不接受 Capture 正文、项目分析正文或任意未知字段。
+
+### `src/capture-contract.mjs`
+
+定义 Capture ID 和正文哈希合同：
+
+- 新事项使用 8–128 位安全 `captureId`；推荐 UUID；
+- 同一事项的不确定网络重试复用同一 ID；
+- 同 ID + 同正文安全重放；
+- 同 ID + 不同正文返回 `CAPTURE_ID_CONFLICT`。
+
+### `src/capture-receipts.mjs`
+
+管理 `data/captures/capture-<captureId>.json`：
+
+- 只保存正文 SHA-256 和标识符；
+- 不保存采集正文；
+- 使用私有目录和文件权限；
+- 通过安全文件路径和原子写入保护幂等状态。
+
+### `src/capture-domain.mjs`
+
+执行 Capture 领域事务：
+
+```text
+验证 captureId / 计算正文哈希
+→ 查询本地收据
+→ 可选飞书 marker 查重或追加并读回
+→ 提交本地收件箱
+→ 写入哈希收据
+```
+
+- 已存在同正文收据时返回第一次结果；
+- 原 Inbox 已处理时返回 `processed:true`，不复活；
+- 飞书读回成功后本地来源为 `feishu_doc`；
+- 未配置飞书数据源时本地来源为 `iphone-shortcut`。
+
+### `src/feishu-capture.mjs`
+
+- 给飞书 Capture 写入内部 operation marker；
+- 同一 `captureId` 写入前先查重；
+- marker 与正文哈希不作为用户正文暴露；
+- 同一 ID 被用于不同正文时 fail closed；
+- 写入后按 marker/block ID 读回确认。
 
 ### `src/domain.mjs`
 
@@ -141,6 +209,47 @@ AI Provider       ── 临时分析，不成为资料真源
 
 持久化校验器拒绝 `summary`、`resume`、`blocker` 和任意未知 progress 字段。
 
+### Inbox acknowledgement
+
+```json
+{
+  "blockId": "block_...",
+  "contentHash": "<sha256>",
+  "acknowledgedAt": "2026-08-13T02:00:00.000Z"
+}
+```
+
+不保存历史正文。飞书同一 block 正文改变时重新进入收件箱；远端删除时清理仍未处理的本地缓存、ack 和关联确认。
+
+### Capture receipt
+
+```text
+data/captures/capture-<captureId>.json
+```
+
+示意结构：
+
+```json
+{
+  "version": 1,
+  "captureId": "8f25a25e-2b0c-4fd1-b4df-a779848fd552",
+  "contentHash": "<sha256>",
+  "inboxId": "in_...",
+  "feishuBlockId": "block_...",
+  "createdAt": "2026-08-13T02:00:00.000Z"
+}
+```
+
+收据不含 Capture 正文。
+
+### Project recovery receipt
+
+```text
+data/recovery/project-record-<operationId>.json
+```
+
+只保存 operationId、项目 ID、文档和 block 指针、机器进度、快照哈希及事务阶段，不含项目分析或总结正文。
+
 ### Activity
 
 Activity 只保存不含项目分析正文的动作，例如：
@@ -151,15 +260,33 @@ Activity 只保存不含项目分析正文的动作，例如：
 项目链接已更新
 ```
 
-### Recovery receipt
+## 4. Capture 时序
 
 ```text
-data/recovery/project-record-<operationId>.json
+iPhone / 外部客户端生成 captureId
+        │
+        ▼
+Bearer token 或登录会话授权
+        │
+        ▼
+严格 JSON schema + 限流
+        │
+        ▼
+本地收据查重 / 内容哈希冲突检测
+        │
+        ▼
+可选飞书 marker 查重 / 写入 / block-ID 读回
+        │
+        ▼
+本地收件箱提交
+        │
+        ▼
+哈希收据提交
 ```
 
-只保存 operationId、项目 ID、文档和 block 指针、机器进度、快照哈希及事务阶段，不含项目分析或总结正文。
+不确定网络失败时，客户端使用原 `captureId` 和原正文重试。服务端不依赖客户端 `source` 标签决定数据来源。
 
-## 4. 项目同步时序
+## 5. 项目同步时序
 
 ```text
 用户明确点击同步 / 确认 MCP 工具
@@ -194,7 +321,15 @@ stale-before-remote 检查
 
 同步响应不返回项目分析正文。正文通过 `project_records_read` 从飞书读取。
 
-## 5. 失败语义
+## 6. 失败语义
+
+### Capture
+
+- 未授权：`401`；
+- 请求或 `captureId` 无效：`400`；
+- 同一 `captureId` 对应不同正文：`409 CAPTURE_ID_CONFLICT`；
+- 限流：`429`，客户端按 `Retry-After` 使用原 ID 重试；
+- 飞书失败或读回不确定：不伪装为已同步。
 
 ### `PROJECT_SYNC_STALE`
 
@@ -212,7 +347,7 @@ stale-before-remote 检查
 
 飞书已经读回确认，但本地状态提交失败或项目随后变更。receipt 保存 block pointer；下一次同步安全重放。
 
-## 6. 旧数据迁移
+## 7. 旧数据迁移
 
 第一次启动：
 
@@ -236,7 +371,36 @@ npm run migrate:project-records -- --apply
 - 迁移报告保存在 `data/migrations/`；
 - 重复执行不重复写远端。
 
-## 7. AI Provider 边界
+## 8. 备份与恢复
+
+每日和手工备份使用 backup v2：
+
+```json
+{
+  "backupVersion": 2,
+  "backedUpAt": "...",
+  "state": {},
+  "config": {},
+  "captureReceipts": [],
+  "projectRecordReceipts": []
+}
+```
+
+备份读取持久化 state，不写入 `readState()` 临时派生的恢复确认。它不包含真实项目工作区、飞书叙事正文、Capture 正文、`.env`、cookie 或 Provider/飞书凭证。
+
+恢复时：
+
+1. 在任何写入前校验 state/config/两类凭据；
+2. 在同一写队列中创建恢复前安全 backup v2；
+3. 写入 state 和可选 config；
+4. 成组替换 Capture 和项目恢复凭据；
+5. 恢复任一阶段失败时尝试把所有已修改部分回滚到恢复前快照。
+
+旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 字段时，保留当前凭据目录，不静默清空；旧备份因此不是这些凭据的历史快照。
+
+`GET /api/export` 只导出 state/config，用于业务检查，不是完整恢复包。
+
+## 9. AI Provider 边界
 
 Provider 接收稳定 developer instructions 和不可信 user input。所有业务工作流返回统一结构化合同，并在本机再次校验。
 
@@ -244,25 +408,33 @@ Provider 接收稳定 developer instructions 和不可信 user input。所有业
 
 Provider 配置存在、doctor 通过或合同测试成功，不等于 live endpoint 可达。
 
-## 8. 安全边界
+## 10. 安全边界
 
 - 默认只监听 loopback；公开绑定要求密码或明确不安全开关；
 - 启用密码时 SESSION_SECRET 必须是非示例长随机值；
 - 所有 mutation 要求 JSON 和可信 Origin；
 - Capture 需要专用 Bearer token 或有效会话；
-- 工作区、业务目录、项目目录和 `PROJECT.md` 拒绝 symlink/hardlink/path traversal；
+- Capture 客户端 `source` 不决定持久化来源；
+- 工作区、业务目录、项目目录、`PROJECT.md`、凭据目录和凭据文件拒绝 symlink/hardlink/path traversal；
 - Git 调用禁用 hooks、fsmonitor、系统/全局配置和交互提示；
 - Provider endpoint、飞书文档 URL、MCP 工具和参数均为白名单合同。
 
-## 9. 备份与灾备
+## 11. 灾备边界
 
-每日和手工备份包含 state/config，不包含真实项目工作区和飞书正文。迁移快照和恢复凭据位于同一数据目录，因此仍需操作系统级或异地备份，才能构成完整灾备。
+完整灾备需要分别保护：
 
-## 10. 验证边界
+- `/data`：state/config、backup v2、迁移快照和两类恢复凭据；
+- `/workspace`：真实项目资料和 Git 工作树；
+- 远端 Git；
+- 飞书项目文档。
+
+同盘备份不等同于异机灾备。部署者仍需定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
+
+## 12. 验证边界
 
 CI 在无真实凭证环境运行：
 
 - Node 24 语法检查；
-- AI、业务、文件系统、飞书 fake client、迁移、恢复、MCP 和浏览器静态合同测试。
+- AI、业务、文件系统、Capture HTTP、飞书 fake client、迁移、backup v2、恢复、MCP、浏览器和文档合同测试。
 
 CI 通过不等于已完成 live OpenAI、飞书、浏览器、iPhone 或生产部署验证。
