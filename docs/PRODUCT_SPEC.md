@@ -225,9 +225,10 @@ REST、右侧 AI 和 MCP 共用领域层同步协调器：
 ## 备份与恢复
 
 - 自动每日快照和手工备份使用 backup v2。
-- backup v2 必须包含持久化 state、config、Capture 幂等收据和项目记录恢复凭据。
+- backup v2 必须包含精确字段 `state`、`config`、`captureReceipts` 和 `projectRecordReceipts`。
 - 备份不得包含运行时派生的临时确认、Capture 正文、项目分析正文、`.env`、Provider/飞书凭证或真实项目工作区。
 - 完整恢复必须在工作台停止写入时执行，并成组替换 state/config/两类凭据。
+- `projectRecordReceipts[*].projectId` 必须引用恢复状态中真实存在的项目；悬空引用必须在创建数据目录或执行任何写入前拒绝。
 - 任一恢复阶段失败时，必须尝试把所有已修改部分回滚到恢复前安全备份。
 - 旧备份没有凭据字段时，保留当前凭据目录，不得静默清空；同时明确旧备份不是这些凭据的历史快照。
 - `GET /api/export` 只用于导出 state/config，不等同于完整恢复包。
