@@ -1,5 +1,6 @@
 export * from './domain-core.mjs';
 
+import fsp from 'node:fs/promises';
 import * as core from './domain-core.mjs';
 import { addActivity } from './store.mjs';
 import { analyzeProject, projectPath, businessById } from './projects.mjs';
@@ -40,7 +41,7 @@ export function deriveState(appRoot,state,config,aiEnabled=false){
   });
   const projectById=new Map(derived.projects.map(project=>[project.id,project]));
   derived.todos=derived.todos.map(todo=>todo.projectId&&projectById.has(todo.projectId)?{...todo,project:projectById.get(todo.projectId).name}:todo);
-  derived.overdue=derived.projects.filter(project=>!project.archived&&!project.completed&&project.businessId&&project.endDate&&core.projectStatus(project)!=='已完成'&&derived.overdue.some(item=>item.id===project.id));
+  derived.overdue=derived.projects.filter(project=>!project.archived&&!project.completed&&project.businessId&&derived.overdue.some(item=>item.id===project.id));
   derived.unclassified=derived.projects.filter(project=>!project.archived&&!project.businessId);
   return derived;
 }
@@ -106,6 +107,28 @@ function clearProjectRecordConfirmations(state,projectId){
   state.confirmations=state.confirmations.filter(item=>!(PROJECT_RECORD_CONFIRMATION_TYPES.has(item.type)&&item.projectId===projectId));
 }
 
+async function directoryAvailable(dir){
+  if(!dir)return false;
+  try{
+    const stat=await fsp.lstat(dir);
+    return !stat.isSymbolicLink()&&stat.isDirectory();
+  }catch{return false;}
+}
+
+function unavailableNarrative(project){
+  const machine=project.progress||{};
+  return {
+    percent:project.completed?100:Math.min(99,Number.isInteger(machine.percent)?machine.percent:0),
+    status:project.completed?'已完成':(machine.status||'未启动'),
+    summary:'项目目录不存在或不可访问，无法刷新新的分析证据。',
+    resume:'保留上次机器进度；项目目录恢复可访问后再主动同步。',
+    blocker:'项目目录不可访问，需要你确认本地项目路径。',
+    lastActivity:machine.lastActivity??null,
+    syncedAt:nowIso(),
+    confidence:Math.min(.2,typeof machine.confidence==='number'?machine.confidence:.2)
+  };
+}
+
 /**
  * Project sync is intentionally remote-first for narrative records:
  *
@@ -120,7 +143,10 @@ export async function syncProject({appRoot,store,projectId,projectRecordClient=d
   if(!project)throw new Error('项目不存在');
   if(!project.businessId)throw new Error('项目尚未归类');
   const sourceDir=projectPath(appRoot,config,project);
-  const analysis=await analyzeProject(appRoot,config,project);
+  const available=await directoryAvailable(sourceDir);
+  const analysis=available
+    ?await analyzeProject(appRoot,config,project)
+    :{progress:unavailableNarrative(project),gitRemote:project.git||'',filesCount:0,dir:sourceDir,scan:{complete:false,reasons:['project_unavailable'],directoriesVisited:0,maxDepthVisited:0,durationMs:0}};
 
   // Refuse an already-stale analysis before any remote write.
   const beforeRemote=await store.readState();
