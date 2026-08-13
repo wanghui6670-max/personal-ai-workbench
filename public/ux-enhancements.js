@@ -7,7 +7,7 @@ let receipt=null;
 
 function escapeHtml(value){
   return String(value??'').replace(/[&<>"']/g,char=>({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'
   }[char]));
 }
 
@@ -329,7 +329,7 @@ document.addEventListener('click',event=>{
     if(action==='ai-open')setPanelMode('open');
     else if(action==='ai-rail')setPanelMode('rail');
     else if(action==='ai-close')setPanelMode('closed');
-    else if(action==='morning-focus')runMorning('帮我过一下今天。');
+    else if(action==='morning-focus'){setPanelMode('open');runMorning('帮我过一下今天。');}
     else if(action==='morning-close'){morning.open=false;scheduleEnhance();}
     else if(action==='receipt-close'){receipt=null;scheduleEnhance();}
     event.preventDefault();
