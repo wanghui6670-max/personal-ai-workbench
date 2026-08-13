@@ -3,15 +3,22 @@
 ## Unreleased
 
 - 项目分析、卡点说明、上下文恢复摘要、阶段总结和复盘正文迁移为“飞书项目文档唯一真源”；`state.json` 与 `PROJECT.md` 不再保存第二份正文
-- `PROJECT.md` 降级为项目身份证，只保留 ID、业务、日期、Git 与飞书项目文档入口
-- 项目同步改为 remote-first：分析完成后先写飞书并读回确认，再提交本地机器进度和飞书 revision/block 指针
-- 本地机器进度只保留 `percent/status/hasBlocker/lastActivity/syncedAt/confidence` 等运行字段；旧 narrative 字段启动时自动归一化移除
-- 新增飞书项目记录适配层：固定“项目分析与总结”章节、`[WORKBENCH_ANALYSIS]` / `[WORKBENCH_SUMMARY]` 前缀和 block-ID 读回校验
+- `PROJECT.md` 降级为项目身份证；新建和归类项目从第一次落盘起就是 identity-only，不再经过旧叙事 writer
+- 项目同步改为 remote-first：分析完成后先写飞书并读回确认，再提交本地机器进度和 revision/block/operation 指针
+- 本地机器进度只保留 `percent/status/hasBlocker/lastActivity/syncedAt/confidence` 与飞书记录指针；持久化校验器拒绝 narrative 字段
+- 新增稳定 operationId、飞书查重和幂等重试；相同操作不会重复追加远端记录
+- 新增跨资源恢复凭据：区分远端结果未知与远端已保存但本地未提交，重试时先按 operationId 对账
+- REST、右侧 AI 与 MCP 共用领域层项目同步锁，单项目同步与全量同步互斥
+- 项目飞书链接限制为官方 Feishu/Lark HTTPS 云文档；换绑或解绑时原子清除旧指针
+- 项目记录读取增加 latest-first 分页，默认 20、硬上限 100；阶段总结正文最大 6000 字符
+- 项目页新增临时“飞书项目记忆”面板，可读取最近记录和打开云文档；正文不进入浏览器持久化存储
+- 首次升级先生成不可覆盖的旧叙事原始快照；新增 dry-run / apply 迁移命令、`PROJECT.md` 原文件备份和可重入迁移报告
 - MCP 新增 `project_records_read` 与 `project_summary_append`；阶段总结写入仍须用户确认，正文不进入本地审计日志
 - 右侧 AI 控制平面新增 `ai_console` 结构化模型规划：模型只提出白名单 MCP 工具调用，不直接执行
 - 本地 MCP 注册表增加工具参数 schema 校验、模型失败的显式安全回退，以及工具结果与左侧状态读回
 - 双面板明确为左人右 AI；右侧展示当前模型/本地回退状态、工具参数和执行结果
 - 新增 `panel_navigate` 导航桥：AI 可切换左侧面板、打开设置/新建项目，并在右侧显示证据、冲突和缺口摘要
+- CI 升级到 Node 24，固定第三方 Action commit，并检查迁移、恢复与浏览器模块语法
 
 ## 1.2.0 - 2026-08-13
 
