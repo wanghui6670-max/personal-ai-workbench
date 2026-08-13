@@ -1,11 +1,12 @@
+import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
+
 const DATE_ONLY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const STATE_SCHEMA_VERSION = 1;
 const STATE_ARRAY_FIELDS = ['inbox','todos','todayPlan','projects','confirmations','notes','activities','morningSessions'];
 const STATE_ENTITY_FIELDS = STATE_ARRAY_FIELDS.filter(field=>field!=='todayPlan');
 const STATE_ID_ENTITY_FIELDS = STATE_ENTITY_FIELDS.filter(field=>field!=='activities');
-// IDs are rendered into route, HTML attribute and selector contexts. Keep the
-// persisted representation deliberately narrower than those grammars.
 const SAFE_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const SHA256_PATTERN=/^[a-f0-9]{64}$/;
 
 function invalid(scope, message) {
   const error = new Error(`${scope}：${message}`);
@@ -38,11 +39,17 @@ function validateOptionalBoolean(value,scope,field){
 function validateProgress(progress,scope,field){
   if(progress===undefined)return;
   if(!isRecord(progress))throw invalid(scope,`${field} 必须是对象`);
+  const allowed=new Set(['percent','status','hasBlocker','lastActivity','syncedAt','confidence','feishuRevisionId','feishuRecordBlockId','feishuRecordedAt','feishuOperationId']);
+  for(const key of Object.keys(progress)){
+    if(!allowed.has(key))throw invalid(scope,`${field}.${key} 不是允许的机器进度字段；项目分析正文必须只保存在飞书项目文档`);
+  }
   if(Object.hasOwn(progress,'percent')&&(!Number.isInteger(progress.percent)||progress.percent<0||progress.percent>100)){
     throw invalid(scope,`${field}.percent 必须是 0-100 的整数`);
   }
-  for(const key of ['status','summary','resume','blocker'])validateOptionalString(progress[key],scope,`${field}.${key}`);
+  validateOptionalString(progress.status,scope,`${field}.status`);
+  validateOptionalBoolean(progress.hasBlocker,scope,`${field}.hasBlocker`);
   for(const key of ['lastActivity','syncedAt'])validateOptionalString(progress[key],scope,`${field}.${key}`,{nullable:true});
+  for(const key of ['feishuRevisionId','feishuRecordBlockId','feishuRecordedAt','feishuOperationId'])validateOptionalString(progress[key],scope,`${field}.${key}`,{nullable:true});
   if(Object.hasOwn(progress,'confidence')&&(typeof progress.confidence!=='number'||!Number.isFinite(progress.confidence)||progress.confidence<0||progress.confidence>1)){
     throw invalid(scope,`${field}.confidence 必须是 0-1 的有限数值`);
   }
@@ -57,15 +64,20 @@ function isSinglePathSegment(value){
   return value!=='.'&&value!=='..'&&!value.includes('/')&&!value.includes('\\')&&!value.includes('\0');
 }
 
+function validateFeishuUrl(value,scope,field,{allowEmpty=false}={}){
+  if(value===undefined)return;
+  if(typeof value!=='string')throw invalid(scope,`${field} 必须是字符串`);
+  if(!value.trim()&&allowEmpty)return;
+  try{normalizeFeishuProjectDocumentUrl(value);}
+  catch(error){throw invalid(scope,`${field}：${error.message}`);}
+}
+
 function validateDataSource(value,scope='无效工作台配置'){
   if(value===undefined||value===null)return;
   if(!isRecord(value))throw invalid(scope,'dataSource 必须是对象或 null');
   if(value.provider!=='feishu_doc')throw invalid(scope,'dataSource.provider 目前只支持 feishu_doc');
   requireNonEmptyString(value.documentUrl,scope,'dataSource.documentUrl');
-  try{
-    const url=new URL(value.documentUrl);
-    if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('invalid');
-  }catch{throw invalid(scope,'dataSource.documentUrl 必须是有效的 http(s) URL');}
+  validateFeishuUrl(value.documentUrl,scope,'dataSource.documentUrl');
   for(const field of ['inboxHeading','inboxPrefix'])validateOptionalString(value[field],scope,`dataSource.${field}`,{nonEmpty:true});
   for(const field of ['lastRevisionId','lastSyncAt','lastSyncStatus','lastSyncError'])validateOptionalString(value[field],scope,`dataSource.${field}`,{nullable:true});
   if(Object.hasOwn(value,'lastImportedCount')&&(!Number.isInteger(value.lastImportedCount)||value.lastImportedCount<0))throw invalid(scope,'dataSource.lastImportedCount 必须是非负整数');
@@ -87,6 +99,7 @@ export function validateStateInput(state, {restore = false} = {}) {
       throw invalid('无效工作台状态', `${key} 必须是数组`);
     }
   }
+  if(Object.hasOwn(state,'inboxAcks')&&!Array.isArray(state.inboxAcks))throw invalid('无效工作台状态','inboxAcks 必须是数组');
   if (restore && (!Array.isArray(state.todos) || !Array.isArray(state.projects))) {
     throw invalid('无效工作台状态', '恢复数据必须包含 todos 和 projects 数组');
   }
@@ -102,6 +115,7 @@ export function validateState(state) {
   for(const field of STATE_ARRAY_FIELDS){
     if(!Array.isArray(state[field]))throw invalid(scope,`${field} 必须是数组`);
   }
+  if(!Array.isArray(state.inboxAcks))throw invalid(scope,'inboxAcks 必须是数组');
   for(const field of STATE_ENTITY_FIELDS){
     for(const [index,entity] of state[field].entries()){
       if(!isRecord(entity))throw invalid(scope,`${field}[${index}] 必须是对象`);
@@ -137,9 +151,10 @@ export function validateState(state) {
     if (!isValidDateOnly(project.endDate)) {
       throw invalid(scope, `projects[${index}].endDate 必须是合法的 YYYY-MM-DD 日期`);
     }
-    for(const field of ['name','intro','createdAt','startDate','git','feishu','sourceDescription']){
+    for(const field of ['name','intro','createdAt','startDate','git','sourceDescription']){
       validateOptionalString(project[field],scope,`projects[${index}].${field}`);
     }
+    validateFeishuUrl(project.feishu,scope,`projects[${index}].feishu`,{allowEmpty:true});
     validateOptionalBoolean(project.completed,scope,`projects[${index}].completed`);
     validateOptionalBoolean(project.archived,scope,`projects[${index}].archived`);
     validateOptionalId(project.businessId,scope,`projects[${index}].businessId`,{nullable:true});
@@ -167,17 +182,16 @@ export function validateState(state) {
   for(const [index,item] of state.inbox.entries()){
     for(const field of ['text','source','createdAt','feishuBlockId'])validateOptionalString(item[field],scope,`inbox[${index}].${field}`);
   }
-  if(Object.hasOwn(state,'inboxAcks')){
-    if(!Array.isArray(state.inboxAcks))throw invalid(scope,'inboxAcks 必须是数组');
-    const ackIds=new Set();
-    for(const [index,ack] of state.inboxAcks.entries()){
-      if(!isRecord(ack))throw invalid(scope,`inboxAcks[${index}] 必须是对象`);
-      requireNonEmptyString(ack.blockId,scope,`inboxAcks[${index}].blockId`);
-      if(ackIds.has(ack.blockId))throw invalid(scope,`inboxAcks[${index}].blockId 不能重复`);
-      ackIds.add(ack.blockId);
-      requireNonEmptyString(ack.text,scope,`inboxAcks[${index}].text`);
-      validateOptionalString(ack.acknowledgedAt,scope,`inboxAcks[${index}].acknowledgedAt`);
-    }
+  const ackIds=new Set();
+  for(const [index,ack] of state.inboxAcks.entries()){
+    if(!isRecord(ack))throw invalid(scope,`inboxAcks[${index}] 必须是对象`);
+    requireNonEmptyString(ack.blockId,scope,`inboxAcks[${index}].blockId`);
+    if(ackIds.has(ack.blockId))throw invalid(scope,`inboxAcks[${index}].blockId 不能重复`);
+    ackIds.add(ack.blockId);
+    requireNonEmptyString(ack.contentHash,scope,`inboxAcks[${index}].contentHash`);
+    if(!SHA256_PATTERN.test(ack.contentHash))throw invalid(scope,`inboxAcks[${index}].contentHash 必须是 SHA-256 十六进制`);
+    if(Object.hasOwn(ack,'text'))throw invalid(scope,`inboxAcks[${index}] 不得保存收件箱正文`);
+    validateOptionalString(ack.acknowledgedAt,scope,`inboxAcks[${index}].acknowledgedAt`,{nullable:true});
   }
   for(const [index,note] of state.notes.entries()){
     validateOptionalString(note.text,scope,`notes[${index}].text`);
@@ -188,6 +202,8 @@ export function validateState(state) {
     for(const field of ['type','text','createdAt'])validateOptionalString(confirmation[field],scope,`confirmations[${index}].${field}`);
     validateOptionalId(confirmation.projectId,scope,`confirmations[${index}].projectId`);
     validateOptionalId(confirmation.inboxId,scope,`confirmations[${index}].inboxId`);
+    validateOptionalId(confirmation.operationId,scope,`confirmations[${index}].operationId`);
+    validateOptionalBoolean(confirmation.synthetic,scope,`confirmations[${index}].synthetic`);
   }
   for(const [index,activity] of state.activities.entries()){
     for(const field of ['type','text','at'])validateOptionalString(activity[field],scope,`activities[${index}].${field}`);
@@ -220,12 +236,8 @@ export function validateState(state) {
     if(todayIds.has(todoId))throw invalid(scope,`todayPlan[${index}] 不能重复`);
     todayIds.add(todoId);
     const todo = todosById.get(todoId);
-    if (!todo) {
-      throw invalid(scope, `todayPlan[${index}] 引用了不存在的待办`);
-    }
-    if (todo.done === true) {
-      throw invalid(scope, `todayPlan[${index}] 不能引用已完成待办`);
-    }
+    if (!todo) throw invalid(scope, `todayPlan[${index}] 引用了不存在的待办`);
+    if (todo.done === true) throw invalid(scope, `todayPlan[${index}] 不能引用已完成待办`);
   }
   return state;
 }

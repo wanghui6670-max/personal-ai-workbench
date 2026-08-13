@@ -1,89 +1,440 @@
 # 架构说明
 
-## 设计目标
+## 1. 设计目标
 
-工作台负责“状态和上下文”，文件系统负责“真实资料”，其他 AI 工具负责“具体生产工作”。
-
-## AI-native 双面板
-
-桌面端固定为“左人右 AI”：左侧保留导航、收件箱、项目、待办、今日、日志和缓冲区，右侧固定 AI 工作区。右侧不是独立聊天页面，而是统一工具控制面板：自然语言先交给已配置的当前模型，以 `ai_console` 结构化工作流提出一个白名单 MCP 工具调用或澄清问题；模型不执行工具。若模型未配置或输出不合约，则回退本地确定性规划器。界面显示工具、参数和影响范围；涉及写入时等待用户确认；调用白名单工具后重新读取并派生 `/api/state`，左侧立即收敛到持久化结果。
-
-`src/mcp/tools.mjs` 是唯一工具注册表，`src/mcp/registry.mjs` 同时服务浏览器控制台和 `/api/mcp` JSON-RPC transport。工具覆盖左侧导航桥（`panel_navigate`）以及状态、收件箱、项目、待办、今日、飞书、日志、待确认、业务板块、设置和备份；工具只允许调用现有领域函数，不接受任意 URL、shell、文件路径或凭证。当前 MCP 是受限的 MCP-compatible transport；右侧模型规划与工具执行均经过本地 schema、白名单和确认门。外部 MCP Host 仍需按部署环境单独验收，模型配置存在也不等同于真实联网调用已经成功。
+Personal AI Workbench 是本地优先的个人项目控制层：
 
 ```text
-人的左侧面板  <── /api/state 读回 ── 领域层 / state.json
-      ↑                                  ↑
-      └── AI 工具调用预览 → 确认门 → MCP 工具注册表
+本地项目文件夹  ── 真实工作产物
+Git              ── 版本与代码变化证据
+Workbench state  ── 最小机器状态、任务、确认和指针
+Capture receipts ── 正文哈希与幂等标识，不保存正文
+Recovery receipts ─ 飞书跨资源事务机器凭据，不保存叙事
+飞书每日工作日记  ── 收件箱外部来源
+飞书项目文档      ── 项目分析、总结、复盘和恢复叙事唯一真源
+AI Provider       ── 临时分析，不成为资料真源
 ```
 
-## 数据边界
+系统不替用户安排今日工作；AI 只能分析、建议和执行用户明确确认的白名单操作。
 
-- 工作台：项目元数据、待办、今日安排、收件箱、待确认、日志、路径。
-- 本地文件夹：原始资料、工作过程、最终交付、归档。
-- Git：代码/版本变化证据和仓库入口。
-- 飞书每日工作日记：收件箱的外部真实来源；只读取“收件箱”一级章节下 `[INBOX]` 条目，本地 state 只保存缓存和同步游标，不把整篇日记复制进工作台。
+## 2. 运行组件
 
-## 飞书收件箱同步
+### `src/server.mjs`
 
-工作台通过本机已登录的 `lark-cli` 使用飞书用户身份访问文档。同步流程是：读取文档全文（`docs +fetch --api-version v2 --detail with-ids`）→定位一级标题“收件箱”→只解析该章节下以 `[INBOX]` 开头的块→按稳定 block ID 去重→更新本地缓存。文档其他日期日记、明确决定和待确认内容不会进入收件箱。
+- Node HTTP 服务和静态资源；
+- Host / Origin / Content-Type 请求边界；
+- Cookie 登录、Capture Bearer token、限流；
+- `/api/capture` 的 `captureId` HTTP 合同；
+- REST、AI plan/execute 和 MCP-compatible JSON-RPC transport；
+- API 响应错误脱敏。
 
-新增收件箱时先用 `block_insert_after` 写入“收件箱”章节末尾，再立即读回全文并寻找新 block；只有读回成功才提交本地状态。飞书权限、lark-cli、网络或读回失败时，服务返回可见错误，不把本地写入误报为外部已保存。
+`source` 是外部不可信兼容标签；Capture 持久化来源由服务端决定。
 
-同步是用户主动点击动作，不会创建待办、不改变截止日期、不加入 `todayPlan`。从飞书删除的未处理条目会从本地缓存移除并记录日志。
+### `src/request-validation.mjs`
 
-## 项目进度
+集中定义 HTTP mutation 的严格请求 schema：
 
-项目进度不是持续后台监控，而是按需同步：
+- 非对象、缺字段、错误类型和未知字段在领域层之前拒绝；
+- Capture 允许可选 `captureId`、必填 `text` 和可选 `source`；
+- 可靠的客户端重试必须显式提供并复用 `captureId`。
 
-1. 用户点击同步。
-2. 服务在本机读取项目目录文件列表、mtime 和可读文本片段；扫描受文件数、目录数、深度和总时长预算约束。
-3. 若为 Git 仓库，读取最近 commit、remote、working tree 是否有变化。
-4. 本地规则生成一个 fallback 判断。
-5. 若启用 AI Provider，三类工作流只调用统一的供应商无关合同。默认 Profile `openai_luna` 仍以 `gpt-5.6-luna` 和固定极高推理档位 `xhigh` 调用 OpenAI Responses API；经部署管理员显式配置后，也可以使用受限的 Responses-compatible 或 Chat-Completions-compatible Profile。默认只发送项目、文件、Git 和本地规则元数据，不发送 `PROJECT.md` 或可读文件正文。
-6. 任一 Provider 都必须按“证据 → 冲突与缺口 → 最终结论”返回同一结构化信封；Adapter 只负责协议映射，本机再次校验完整性后只把业务结论交给调用方。
-7. AI 置信度过低、证据冲突/不足或目录扫描达到任一安全预算 → 降为低置信度并进入待确认。
-8. 写入项目进度缓存并更新 `PROJECT.md`。
+### `src/store.mjs`
 
-## AI 判断工作流
+- `state.json` / `config.json` 原子写入；
+- 私有目录和文件权限；
+- 写队列、每日备份、手工备份、恢复和回滚；
+- 旧项目叙事不可覆盖快照；
+- Capture 幂等收据和飞书项目恢复凭据目录；
+- backup v2 生成与旧备份兼容；
+- 读取时派生未解决恢复凭据的待确认提示，而不把这些提示写回持久化 state。
 
-项目创建、项目进度和早晨对话共用同一条受控判断链：
+### `src/receipt-backup.mjs`
 
-1. **证据**：引用本次输入中可核对的项目、文件、Git、待办或活动证据，不把模型常识当成业务事实。
-2. **冲突与缺口**：显式标注相互矛盾或不足以支撑判断的信息；证据不足时降低置信度或回退。
-3. **最终结论**：只输出业务需要的结构化字段，并继续接受本机 schema、范围、长度和候选 ID 校验。
+定义备份中两类恢复凭据的边界：
 
-分析信封只提供简短、可审计的依据，不请求模型披露内部思维链；该信封仅用于本次本机校验，持久化时只保存业务结论，依据草稿、Provider 原始响应和隐藏推理都不会写入 `state.json`、活动日志或 `PROJECT.md`。固定 `xhigh` 会增加响应时间和调用成本。任一 Provider 请求超时、拒绝、不可达、返回不完整或不通过本机校验时，调用方使用现有本地规则继续工作；默认不把同一数据静默转发给另一个云 Provider。
+- `captureReceipts`：Capture ID、正文 SHA-256、Inbox ID、飞书 block ID 和时间；
+- `projectRecordReceipts`：operationId、项目 ID、飞书文档/记录指针、机器进度和事务阶段；
+- 严格字段白名单、ID/URL/hash/phase 校验；
+- 安全普通文件检查；
+- 通过 staging/rename 成组替换凭据目录；
+- 不接受 Capture 正文、项目分析正文或任意未知字段。
 
-AI Provider 分析可能持续较长时间。提交结果前，服务会比较分析开始时的项目完整快照和项目路径；如果期间用户修改了完成状态、归档、结束日期、简介、链接或路径基准，本次旧分析会返回 `409` 并整包丢弃，不写进度、待确认、活动或 `PROJECT.md`，也不会自动重试。用户可按最新状态再次手动同步。
+### `src/capture-contract.mjs`
 
-## AI Provider 与出站隐私边界
+定义 Capture ID 和正文哈希合同：
 
-- 未配置可用 Profile 时，AI 路径使用本地回退规则，不发起外部请求。为兼容既有部署，设置 `OPENAI_API_KEY` 且未选择其他 Profile 时会启用默认 `openai_luna`。
-- AI Provider 注册表当前只允许 `openai_luna`、`third_party_responses` 和 `third_party_chat_completions`。普通业务请求不能传入任意 URL、method、path、header 或凭证引用。
-- 第三方 Profile 必须由部署管理员显式设置 `AI_PROVIDER_ENABLED=1`，配置固定的 base URL、exact origin allowlist、model、network zone 和固定凭证变量；公网 endpoint 必须使用 HTTPS，loopback 匿名调用只允许显式的 `local_loopback`。
-- OpenAI-specific 请求映射只存在于 Adapter 内。Responses-compatible 与 Chat-Completions-compatible 分别使用固定 `/responses`、`/chat/completions` 路径；重定向被禁止，响应体有硬上限，服务商错误正文不进入业务日志。
-- 默认 Provider 是 `openai_luna`，保持 `gpt-5.6-luna`、`xhigh`、strict JSON Schema、`store:false` 和 120 秒有界超时。第三方若不能满足 reasoning、schema 或 no-store 要求，必须 fail-closed；只有显式批准的 downgrade 开关才允许降级，并在 `aiConfig.degraded` 中可见。
-- 设置 Provider 后，项目创建会发送项目描述和业务板块；进度分析会发送项目元数据、相对文件名/mtime、Git 提交元数据和本地规则摘要；早晨对话会发送候选项目/待办、近期活动、对话历史和当前消息。配置存在只表示具备发起请求的条件，不表示真实 API 已验证。
-- `PROJECT.md` 和文件片段默认不出站。供应商无关开关 `AI_SEND_FILE_CONTENT=1` 会显式开启正文；旧的 `OPENAI_SEND_FILE_CONTENT=1` 仅在默认 `openai_luna` Profile 下作为兼容别名。
-- 所有发送的 input 都会先脱敏 Bearer 凭证、常见 OpenAI/GitHub token、URL userinfo、key/token/password/secret 赋值和私钥块。这是防误传护栏，不是全部敏感数据识别保证。
-- 固定业务规则与不受信数据保持角色分离；所有 Provider 结果仍须通过本机 JSON、schema、证据 ID 唯一性、候选范围和业务不变量校验。
-- 云到云自动 fallback 默认关闭。Provider 失败只触发现有本地规则，不会改变收件箱、截止日期、项目完成标记或 `todayPlan`。
-- 详细部署配置和能力边界见 `docs/AI_PROVIDER.md`。
+- 新事项使用 8–128 位安全 `captureId`；推荐 UUID；
+- 同一事项的不确定网络重试复用同一 ID；
+- 同 ID + 同正文安全重放；
+- 同 ID + 不同正文返回 `CAPTURE_ID_CONFLICT`。
 
-## 决策权
+### `src/capture-receipts.mjs`
 
-系统没有“自动排期”路径。`todayPlan` 只能通过显式 `/api/todos/today` 用户动作写入，并与 `todayPlanDate` 一起保存。派生 API 只在该日期等于服务本机当天时暴露计划；跨自然日后视为空，用户当天首次操作会清空旧日选择并切换日期。旧版没有日期标记的非空计划无法证明属于哪一天，启动迁移时会保守清空。
+管理 `data/captures/capture-<captureId>.json`：
 
-新项目、新待办和新备忘均以收件箱事项为来源。项目创建会在同一次状态写入中消费 `sourceInboxId`；直接写备忘被拒绝。自然语言指令若匹配到多个项目，只返回候选并进入待确认，必须由用户按项目 ID 明确选择后才会移动事项。
+- 只保存正文 SHA-256 和标识符；
+- 不保存采集正文；
+- 使用私有目录和文件权限；
+- 通过安全文件路径和原子写入保护幂等状态。
 
-## 持久化
+### `src/capture-domain.mjs`
 
-这是单用户、单进程系统，使用原子 JSON 写入而不是数据库。写入通过进程内队列串行化；每天首次修改状态或配置前，会把两者一起保存为同一份快照，快照失败则中止本次写入。不要让多个工作台进程共享同一个 `DATA_DIR`；若未来扩展多人或多实例协作，再迁移 PostgreSQL/SQLite。
+执行 Capture 领域事务：
 
-JSON 状态文件与外部项目目录不是同一种事务资源。正常错误会在状态提交前尽量回滚本次创建的空目录，但主机在极窄的写入窗口崩溃时仍可能留下孤立目录，需要人工核对；这里不宣称跨文件系统的崩溃原子事务。
+```text
+验证 captureId / 计算正文哈希
+→ 查询本地收据
+→ 可选飞书 marker 查重或追加并读回
+→ 提交本地收件箱
+→ 写入哈希收据
+```
 
-## Readiness 边界
+- 已存在同正文收据时返回第一次结果；
+- 原 Inbox 已处理时返回 `processed:true`，不复活；
+- 飞书读回成功后本地来源为 `feishu_doc`；
+- 未配置飞书数据源时本地来源为 `iphone-shortcut`。
 
-`GET /api/health` 是 Docker 和运维使用的只读 readiness 信号。它读取并校验 state/config，检查 data/state/config/backups、解析后的工作区及所有业务目录的存在性、类型、权限、symlink 和 realpath 越界边界。该路径不创建探针文件或修复目录；任一检查失败时对外只暴露固定的 `not_ready` 状态，不暴露绝对路径、JSON 内容或底层错误。
+### `src/feishu-capture.mjs`
 
-这是文件系统依赖就绪检查，不是端到端业务验收：`200` 不证明任一 AI Provider 可达、第三方 API 已通过真实验证、外部备份可恢复或视觉浏览器流程正常。
+- 给飞书 Capture 写入内部 operation marker；
+- 同一 `captureId` 写入前先查重；
+- marker 与正文哈希不作为用户正文暴露；
+- 同一 ID 被用于不同正文时 fail closed；
+- 写入后按 marker/block ID 读回确认。
+
+### `src/domain.mjs`
+
+唯一生产领域入口。它显式复用 `domain-core.mjs` 中仍符合现有产品规则的收件箱、待办、今日、业务板块和早晨对话功能，但不重新导出旧项目同步、项目更新或旧 `PROJECT.md` 写入路径。
+
+负责：
+
+- identity-only 项目创建和归类；
+- 项目基准、飞书链接、完成和归档更新；
+- 项目同步事务；
+- 飞书项目记录读取和阶段总结；
+- 机器进度和记录指针提交；
+- stale、busy 和跨资源部分提交错误语义。
+
+### `src/projects.mjs`
+
+负责本地证据扫描、Git 元数据和目录路径安全。项目新建/归类不再调用其中的旧叙事 writer；新路径由 `src/project-directory.mjs` 和 `src/project-identity.mjs` 建立。
+
+### `src/project-directory.mjs`
+
+- 创建项目目录和四个标准子目录；
+- 第一次落盘即写 identity-only `PROJECT.md`；
+- 独占项目目录，拒绝覆盖已有目录；
+- 失败时只回滚本次创建且尚未被修改的文件和目录。
+
+### `src/project-identity.mjs`
+
+- 生成项目身份证受管区块；
+- 保留 `PROJECT.md` 中的用户自定义正文；
+- 校验受管区块数量、Project ID、symlink 和 hardlink；
+- 支持 dry-run、可重入迁移和不可覆盖原文件备份。
+
+### `src/project-record-contract.mjs`
+
+集中定义：
+
+- 官方飞书/Lark 文档 URL allowlist；
+- 固定章节和记录前缀；
+- 记录长度和分页上限；
+- operationId 生成和标记；
+- 飞书指针清除规则。
+
+### `src/feishu.mjs`
+
+两个独立 client：
+
+1. **每日工作日记收件箱 client**
+   - 只读取“收件箱”一级章节的 `[INBOX]`；
+   - 按 block ID 去重；
+   - 写入后按新增 block-ID 差集读回。
+
+2. **项目记录 client**
+   - 只操作“项目分析与总结”章节；
+   - 只识别 `[WORKBENCH_ANALYSIS]` / `[WORKBENCH_SUMMARY]`；
+   - operationId 查重；
+   - 写入后读回唯一 operationId/block；
+   - 同一操作安全重放，不重复追加。
+
+两者通过本机 `lark-cli` 和当前用户身份访问飞书，不在 state 中保存飞书凭证。
+
+### `src/project-sync-coordinator.mjs`
+
+领域层唯一同步协调器：
+
+- 单项目 lease；
+- 全项目 lease；
+- REST、AI execute 和 MCP 工具全部复用；
+- 返回 `PROJECT_SYNC_BUSY`，而不是让多个入口重复写飞书。
+
+### `src/mcp/*`
+
+- `tools.mjs`：工作台实体工具；
+- `project-record-tools.mjs`：飞书项目记录工具；
+- `registry.mjs`：白名单、schema、确认门、执行和状态读回。
+
+模型只能提出工具名和参数，不能直接执行任意代码或访问任意 URL。
+
+### `public/project-records.js`
+
+项目页的临时飞书记忆面板：
+
+- 通过 `/api/mcp` 调用 `project_records_read`；
+- 最新记录优先和 cursor 分页；
+- 使用 DOM `textContent` 渲染远端正文；
+- 不使用 `localStorage`、`sessionStorage`、IndexedDB 或 cookie 保存叙事；
+- 只允许打开通过官方 host 校验的项目文档。
+
+## 3. 持久化模型
+
+### 项目机器进度
+
+```json
+{
+  "percent": 52,
+  "status": "进行中",
+  "hasBlocker": true,
+  "lastActivity": "2026-08-13T01:00:00.000Z",
+  "syncedAt": "2026-08-13T02:00:00.000Z",
+  "confidence": 0.78,
+  "feishuRevisionId": "12",
+  "feishuRecordBlockId": "block_12",
+  "feishuRecordedAt": "2026-08-13T02:00:00.000Z",
+  "feishuOperationId": "pa_..."
+}
+```
+
+持久化校验器拒绝 `summary`、`resume`、`blocker` 和任意未知 progress 字段。
+
+### Inbox acknowledgement
+
+```json
+{
+  "blockId": "block_...",
+  "contentHash": "<sha256>",
+  "acknowledgedAt": "2026-08-13T02:00:00.000Z"
+}
+```
+
+不保存历史正文。飞书同一 block 正文改变时重新进入收件箱；远端删除时清理仍未处理的本地缓存、ack 和关联确认。
+
+### Capture receipt
+
+```text
+data/captures/capture-<captureId>.json
+```
+
+示意结构：
+
+```json
+{
+  "version": 1,
+  "captureId": "8f25a25e-2b0c-4fd1-b4df-a779848fd552",
+  "contentHash": "<sha256>",
+  "inboxId": "in_...",
+  "feishuBlockId": "block_...",
+  "createdAt": "2026-08-13T02:00:00.000Z"
+}
+```
+
+收据不含 Capture 正文。
+
+### Project recovery receipt
+
+```text
+data/recovery/project-record-<operationId>.json
+```
+
+只保存 operationId、项目 ID、文档和 block 指针、机器进度、快照哈希及事务阶段，不含项目分析或总结正文。
+
+### Activity
+
+Activity 只保存不含项目分析正文的动作，例如：
+
+```text
+项目进度已同步
+阶段总结已保存到飞书
+项目链接已更新
+```
+
+## 4. Capture 时序
+
+```text
+iPhone / 外部客户端生成 captureId
+        │
+        ▼
+Bearer token 或登录会话授权
+        │
+        ▼
+严格 JSON schema + 限流
+        │
+        ▼
+本地收据查重 / 内容哈希冲突检测
+        │
+        ▼
+可选飞书 marker 查重 / 写入 / block-ID 读回
+        │
+        ▼
+本地收件箱提交
+        │
+        ▼
+哈希收据提交
+```
+
+不确定网络失败时，客户端使用原 `captureId` 和原正文重试。服务端不依赖客户端 `source` 标签决定数据来源。
+
+## 5. 项目同步时序
+
+```text
+用户明确点击同步 / 确认 MCP 工具
+        │
+        ▼
+领域层获得统一 sync lease
+        │
+        ▼
+读取本地文件、Git 和本地规则
+        │
+        ▼
+可选 AI Provider 临时分析
+        │
+        ▼
+stale-before-remote 检查
+        │
+        ▼
+生成稳定 operationId + 写 recovery receipt
+        │
+        ▼
+飞书查重 / 写入 / block-ID 读回
+        │
+        ▼
+更新 receipt 为 remote_saved_local_pending
+        │
+        ▼
+第二次项目快照检查 + 提交 machine progress
+        │
+        ▼
+删除 receipt + best-effort 更新 PROJECT.md 身份索引
+```
+
+同步响应不返回项目分析正文。正文通过 `project_records_read` 从飞书读取。
+
+## 6. 失败语义
+
+### Capture
+
+- 未授权：`401`；
+- 请求或 `captureId` 无效：`400`；
+- 同一 `captureId` 对应不同正文：`409 CAPTURE_ID_CONFLICT`；
+- 限流：`429`，客户端按 `Retry-After` 使用原 ID 重试；
+- 飞书失败或读回不确定：不伪装为已同步。
+
+### `PROJECT_SYNC_STALE`
+
+远端写入前项目或路径基准变化。没有新增飞书记录，用户需要重新手动同步。
+
+### `PROJECT_SYNC_BUSY`
+
+另一条 REST、AI 或 MCP 同步已经持有 lease。不得并发自动重试。
+
+### `remote_outcome_unknown`
+
+飞书调用报错，无法确定远端是否已经落盘。receipt 保留，待确认持续显示；下一次同步使用同一 operationId 先查重。
+
+### `PROJECT_RECORD_REMOTE_SAVED_LOCAL_PENDING`
+
+飞书已经读回确认，但本地状态提交失败或项目随后变更。receipt 保存 block pointer；下一次同步安全重放。
+
+## 7. 旧数据迁移
+
+第一次启动：
+
+1. 读取原始 `state.json`；
+2. 检测旧 `progress.summary/resume/blocker` 和旧同步日志；
+3. 在任何覆盖前写 `data/migrations/pre-narrative-v1-startup.json`；
+4. 本地 state 归一化为 machine-only；
+5. 创建 `legacy_project_narrative_pending` 待确认。
+
+显式迁移：
+
+```bash
+npm run migrate:project-records
+npm run migrate:project-records -- --apply
+```
+
+- dry-run 默认；
+- 已绑定飞书的项目按稳定 operationId 写迁移记录；
+- 未绑定飞书的项目保持待确认；
+- 旧 `PROJECT.md` 先备份为 `.pre-feishu-v1.bak`；
+- 迁移报告保存在 `data/migrations/`；
+- 重复执行不重复写远端。
+
+## 8. 备份与恢复
+
+每日和手工备份使用 backup v2：
+
+```json
+{
+  "backupVersion": 2,
+  "backedUpAt": "...",
+  "state": {},
+  "config": {},
+  "captureReceipts": [],
+  "projectRecordReceipts": []
+}
+```
+
+备份读取持久化 state，不写入 `readState()` 临时派生的恢复确认。它不包含真实项目工作区、飞书叙事正文、Capture 正文、`.env`、cookie 或 Provider/飞书凭证。
+
+恢复时：
+
+1. 在任何写入前校验 state/config/两类凭据；
+2. 在同一写队列中创建恢复前安全 backup v2；
+3. 写入 state 和可选 config；
+4. 成组替换 Capture 和项目恢复凭据；
+5. 恢复任一阶段失败时尝试把所有已修改部分回滚到恢复前快照。
+
+旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 字段时，保留当前凭据目录，不静默清空；旧备份因此不是这些凭据的历史快照。
+
+`GET /api/export` 只导出 state/config，用于业务检查，不是完整恢复包。
+
+## 9. AI Provider 边界
+
+Provider 接收稳定 developer instructions 和不可信 user input。所有业务工作流返回统一结构化合同，并在本机再次校验。
+
+默认不发送文件正文；只有显式 `AI_SEND_FILE_CONTENT=1` 才允许受支持正文出站。凭证脱敏是 guardrail，不是完整 DLP。
+
+Provider 配置存在、doctor 通过或合同测试成功，不等于 live endpoint 可达。
+
+## 10. 安全边界
+
+- 默认只监听 loopback；公开绑定要求密码或明确不安全开关；
+- 启用密码时 SESSION_SECRET 必须是非示例长随机值；
+- 所有 mutation 要求 JSON 和可信 Origin；
+- Capture 需要专用 Bearer token 或有效会话；
+- Capture 客户端 `source` 不决定持久化来源；
+- 工作区、业务目录、项目目录、`PROJECT.md`、凭据目录和凭据文件拒绝 symlink/hardlink/path traversal；
+- Git 调用禁用 hooks、fsmonitor、系统/全局配置和交互提示；
+- Provider endpoint、飞书文档 URL、MCP 工具和参数均为白名单合同。
+
+## 11. 灾备边界
+
+完整灾备需要分别保护：
+
+- `/data`：state/config、backup v2、迁移快照和两类恢复凭据；
+- `/workspace`：真实项目资料和 Git 工作树；
+- 远端 Git；
+- 飞书项目文档。
+
+同盘备份不等同于异机灾备。部署者仍需定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
+
+## 12. 验证边界
+
+CI 在无真实凭证环境运行：
+
+- Node 24 语法检查；
+- AI、业务、文件系统、Capture HTTP、飞书 fake client、迁移、backup v2、恢复、MCP、浏览器和文档合同测试。
+
+CI 通过不等于已完成 live OpenAI、飞书、浏览器、iPhone 或生产部署验证。

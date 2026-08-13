@@ -32,7 +32,7 @@ test('project walk duration budget is deterministic and configuration is capped'
   assert.deepEqual(config,SCAN_CAPS);
 });
 
-test('an exhausted scan budget becomes low confidence and a visible confirmation',async t=>{
+test('an exhausted scan budget becomes low confidence and a visible confirmation without persisting narrative',async t=>{
   const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-scan-confirmation-'));t.after(()=>fsp.rm(root,{recursive:true,force:true}));
   const appRoot=path.join(root,'app'),store=new JsonStore(path.join(appRoot,'data'));await store.ensure();
   const config=await store.readConfig();
@@ -56,7 +56,9 @@ test('an exhausted scan budget becomes low confidence and a visible confirmation
   const state=await store.readState(),updated=state.projects.find(item=>item.id===project.id);
 
   assert.equal(analysis.scan.complete,false);assert.ok(analysis.scan.reasons.includes('max_depth'));
-  assert.ok(updated.progress.confidence<=.35);assert.match(updated.progress.summary,/部分证据/);
+  assert.ok(analysis.machineProgress.confidence<=.35);
+  assert.ok(updated.progress.confidence<=.35);assert.equal(updated.progress.hasBlocker,true);
+  assert.equal('summary' in updated.progress,false);assert.equal('blocker' in updated.progress,false);
   assert.equal(state.confirmations.some(item=>item.type==='progress_unclear'&&item.projectId===project.id),true);
   assert.equal(projectPath(appRoot,config,project),dir);
 });

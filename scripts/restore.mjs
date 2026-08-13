@@ -4,6 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { JsonStore } from '../src/store.mjs';
 import { loadWorkbenchEnv } from '../src/env.mjs';
 
+function validateProjectReceiptReferences(state,receipts){
+  if(!Array.isArray(receipts))return;
+  const projectIds=new Set(
+    (Array.isArray(state?.projects)?state.projects:[])
+      .map(project=>project?.id)
+      .filter(id=>typeof id==='string'&&id)
+  );
+  for(const [index,receipt] of receipts.entries()){
+    if(!receipt||typeof receipt!=='object'||Array.isArray(receipt))continue;
+    if(typeof receipt.projectId==='string'&&!projectIds.has(receipt.projectId)){
+      throw new Error(`projectRecordReceipts[${index}].projectId 引用了恢复状态中不存在的项目。`);
+    }
+  }
+}
+
 const input=process.argv[2];
 if(!input){console.error('用法: npm run restore -- /path/to/backup.json');process.exit(1);}
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -14,8 +29,19 @@ try{
   const wrapped=raw!==null&&typeof raw==='object'&&!Array.isArray(raw)&&Object.hasOwn(raw,'state');
   const state=wrapped?raw.state:raw;
   const includeConfig=wrapped&&Object.hasOwn(raw,'config');
+  const includeCaptureReceipts=wrapped&&Object.hasOwn(raw,'captureReceipts');
+  const includeProjectRecordReceipts=wrapped&&Object.hasOwn(raw,'projectRecordReceipts');
+  if(includeProjectRecordReceipts)validateProjectReceiptReferences(state,raw.projectRecordReceipts);
   const store=new JsonStore(dataDir);
-  const safety=await store.restore({state,config:raw?.config,includeConfig});
+  const safety=await store.restore({
+    state,
+    config:raw?.config,
+    includeConfig,
+    captureReceipts:raw?.captureReceipts,
+    includeCaptureReceipts,
+    projectRecordReceipts:raw?.projectRecordReceipts,
+    includeProjectRecordReceipts
+  });
   console.log(`恢复完成。恢复前自动备份：${safety}`);
 }catch(error){
   console.error(error.message||'恢复失败。');

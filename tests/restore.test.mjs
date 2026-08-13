@@ -10,7 +10,7 @@ const projectRoot=path.resolve('.');
 
 function emptyState(overrides={}){
   return {
-    schemaVersion:1,inbox:[],todos:[],todayPlan:[],todayPlanDate:null,projects:[],confirmations:[],notes:[],activities:[],morningSessions:[],
+    schemaVersion:1,inbox:[],inboxAcks:[],todos:[],todayPlan:[],todayPlanDate:null,projects:[],confirmations:[],notes:[],activities:[],morningSessions:[],
     ...overrides
   };
 }
@@ -95,6 +95,7 @@ test('legacy state without schemaVersion or newer optional arrays remains restor
   assert.deepEqual(restored.todos,legacyState.todos);
   assert.deepEqual(restored.projects,legacyState.projects);
   assert.deepEqual(restored.inbox,[]);
+  assert.deepEqual(restored.inboxAcks,[]);
   assert.deepEqual(restored.activities,[]);
 });
 

@@ -7,7 +7,7 @@ import { JsonStore } from '../src/store.mjs';
 
 function emptyState(overrides={}){
   return {
-    schemaVersion:1,inbox:[],todos:[],todayPlan:[],todayPlanDate:null,projects:[],confirmations:[],notes:[],activities:[],morningSessions:[],
+    schemaVersion:1,inbox:[],inboxAcks:[],todos:[],todayPlan:[],todayPlanDate:null,projects:[],confirmations:[],notes:[],activities:[],morningSessions:[],
     ...overrides
   };
 }

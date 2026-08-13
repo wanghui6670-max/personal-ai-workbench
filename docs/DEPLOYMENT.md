@@ -1,6 +1,10 @@
 # 部署说明
 
-## 方案 A：直接运行在你的电脑（最符合当前需求）
+Personal AI Workbench v1.2.0 是本地文件系统优先的应用。服务进程必须能够直接访问持久化数据目录和真实项目工作区；普通无状态云函数不能直接读取笔记本上的项目目录。
+
+本文档中的命令和占位符不代表真实凭证、真实飞书文档或 live 验证结果。
+
+## 1. 推荐拓扑：原生运行在项目所在机器
 
 ```bash
 cp .env.example .env
@@ -8,183 +12,269 @@ npm run doctor
 npm start
 ```
 
-把“工作区根目录”设置成你的真实项目根目录。
+默认只监听：
 
-### 飞书每日工作日记数据源
+```text
+HOST=127.0.0.1
+PORT=4173
+```
 
-收件箱可以绑定飞书云文档《个人 AI 工作台｜每日工作日记》：
+在工作台“设置”中把工作区根目录改成真实项目根目录。`npm run doctor` 只检查本机配置和文件系统条件，不主动调用 OpenAI 或飞书，也不证明外部服务当前可达。
 
-<https://xcnn2pk8gpzl.feishu.cn/wiki/By6ow2cm0iXXQkkx2XRc7Ym5nOb>
+### 飞书每日工作日记收件箱
 
-这份文档是收件箱的外部真实来源。工作台只读取一级标题“收件箱”下、以 `[INBOX]` 开头的段落或待办；“每日工作日记”“明确决定”“待确认”等其他章节不会自动变成收件箱事项。工作台不会替你分类、补截止日期或加入今日计划。
+在设置页填写你自己的官方飞书/Lark HTTPS 云文档链接，例如：
+
+```text
+https://<tenant>.feishu.cn/wiki/<document-token>
+```
+
+工作台只读取一级标题“收件箱”下以 `[INBOX]` 开头的段落或待办。其他章节不会自动变成收件箱事项，也不会自动安排到今日。
 
 启用前置条件：
 
-1. 在**运行工作台的同一台机器、同一个操作系统用户**下安装 `lark-cli`。
-2. 用飞书用户身份完成授权，并确认该用户对目标文档有读取和编辑权限。不要把 access token、appSecret、cookie 或 `.env` 内容复制到项目文件或聊天中。
-3. 在该机器上确认命令可见并检查登录状态（输出不要粘贴凭证）：
+1. 在运行工作台的同一台机器、同一个操作系统用户下安装 `lark-cli`。
+2. 用飞书用户身份完成授权，并确认该用户对目标文档有读取和编辑权限。
+3. 仅在本机检查 CLI 和登录状态；不要把 token、app secret、cookie、授权文件或 `.env` 输出复制到项目、日志或聊天中。
 
 ```bash
 command -v lark-cli
 lark-cli auth status --json --verify
 ```
 
-4. 打开工作台“设置”，填写上面的文档 URL，保存后点击“同步飞书收件箱”。设置会保存文档 URL 和同步状态，不保存飞书凭证。
-
-同步和写入都是可读回的：新增收件箱时先通过 `lark-cli docs +update --api-version v2 --as user` 写飞书，再用 `docs +fetch --api-version v2 --detail with-ids` 读回；读回失败时不会提交本地缓存。飞书文档中删除未处理的 `[INBOX]` 条目后，下一次手动同步会移除对应本地缓存，但不会删除已经转成项目或待办的业务记录。
-
-如果 `lark-cli` 不存在、未登录、无权限或网络不可用，工作台会显示同步错误；本地已有收件箱仍可人工处理。该集成依赖本机 CLI，不会在没有凭证的情况下静默改用另一套 API。
-
-Docker 注意：当前镜像只负责工作台本身，不内置你的 `lark-cli` 用户登录态。若必须使用飞书收件箱数据源，应优先采用上面的原生运行方式；仅把 `/data` 和 `/workspace` 挂载进 Docker 并不能让容器访问宿主机的飞书登录态。若未来把 CLI 和授权安全地注入容器，需要单独设计凭证存储、PATH 和轮换策略，不能把本机授权文件直接打包进镜像。
-
-如果只在本机使用，保持：
+新增收件箱采用：
 
 ```text
-HOST=127.0.0.1
+写飞书
+→ 按 block ID 读回
+→ 读回确认后提交本地缓存
 ```
 
-## 方案 B：局域网 / Tailscale / 内网机器
+飞书读取、写入或读回失败时，工作台不会伪装成已同步。
 
-设置：
+### 飞书项目分析与总结
 
-```text
-HOST=0.0.0.0
-WORKBENCH_PASSWORD=<强密码>
-SESSION_SECRET=<长随机字符串>
-```
+每个项目可绑定独立的官方飞书/Lark HTTPS 云文档。项目分析、阶段总结、卡点说明和上下文恢复叙事只写固定的“项目分析与总结”章节；本地仅保存机器进度、revision/block/operation 指针和恢复凭据。
 
-推荐通过 Tailscale / 内网访问，而不是直接开放公网端口。
+完整边界见 [`PROJECT_RECORDS.md`](PROJECT_RECORDS.md)。
 
-### iPhone 局域网采集
+## 2. 局域网、Tailscale 或内网部署
 
-如果要让 iPhone 快捷指令访问原生工作台，`.env` 至少需要：
+需要从另一台设备访问时，至少设置：
 
 ```text
 HOST=0.0.0.0
 WORKBENCH_PASSWORD=<强密码>
-SESSION_SECRET=<长随机字符串>
-CAPTURE_TOKEN=<单独的采集 token>
-TRUSTED_ORIGINS=http://<Mac局域网IP>:4173
+SESSION_SECRET=<至少 24 字符的长随机字符串>
+TRUSTED_ORIGINS=http://<受信任主机或IP>:4173
 ```
 
-快捷指令请求 `http://<Mac局域网IP>:4173/api/capture`，不携带飞书凭证。工作台使用运行用户已登录的 `lark-cli` 写入和读回飞书文档。详细动作和失败判断见 [`docs/IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。局域网 IP 可能变化，变化后要同步更新快捷指令 URL 与 `TRUSTED_ORIGINS`，然后重启工作台。
+建议使用可信局域网、Tailscale 或受控内网，而不是直接开放公网端口。
 
-## 方案 C：Docker
+### iPhone 快捷指令采集
 
-Compose 在没有 `.env` 时也能完成配置检查：
+```text
+CAPTURE_TOKEN=<独立的长随机采集 token>
+```
+
+快捷指令请求：
+
+```text
+POST http://<Mac局域网IP>:4173/api/capture
+Authorization: Bearer <CAPTURE_TOKEN>
+```
+
+请求必须为每条新事项生成一个 `captureId`，并在不确定重试时复用同一个 ID。iPhone 不携带飞书凭证；工作台使用运行用户已经登录的 `lark-cli`。详细配置见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
+
+局域网地址变化后，应同时更新快捷指令 URL 和 `TRUSTED_ORIGINS`，再重启工作台。
+
+## 3. Docker Compose
+
+先检查配置：
 
 ```bash
 docker compose config
 ```
 
-实际启动前：
+启动前：
 
 1. 复制 `.env.example` 为 `.env`。
-2. 至少设置非空的 `WORKBENCH_PASSWORD` 和 24 字符以上的 `SESSION_SECRET`。容器内部必须监听 `0.0.0.0` 才能接收 Docker 端口转发，因此应用的公开绑定安全门仍会生效；不要把空密码当成本地免认证启动方式。
-3. 在 `.env` 中把 `WORKBENCH_WORKSPACE_PATH` 设置为真实项目目录的宿主机绝对路径。该目录以读写方式挂载，因为新建/归类项目会创建目录并写入 `PROJECT.md`。
-4. 运行：
+2. 设置非空的 `WORKBENCH_PASSWORD` 和至少 24 字符的 `SESSION_SECRET`。
+3. 把 `WORKBENCH_WORKSPACE_PATH` 设置为宿主机真实项目目录的绝对路径。
+4. 确保数据目录和工作区对容器运行 UID/GID 可写。
+5. 启动：
 
 ```bash
 docker compose up -d --build
 ```
 
-Docker 内：
-- `/data` = 工作台持久化数据
-- `/workspace` = 真实项目目录
+容器内：
 
-镜像不会复制本机 `data/`、`workspace/` 或 `.env`。首次挂载空的 `/data` 时，应用会自行创建最小的 `state.json`、`config.json` 和 `backups/`。
+```text
+/data       工作台持久化数据
+/workspace  真实项目目录
+```
 
-默认只发布到宿主机 `127.0.0.1:4173`。需要局域网访问时，必须显式设置以下值，并保留上面的密码与会话密钥：
+镜像不会复制本机 `.env`、`data/` 或 `workspace/`。首次挂载空 `/data` 时会创建：
+
+```text
+state.json
+config.json
+backups/
+migrations/
+captures/
+recovery/
+```
+
+默认只发布到宿主机 `127.0.0.1:4173`。确需局域网发布时设置：
 
 ```text
 WORKBENCH_BIND_ADDRESS=0.0.0.0
 ```
 
-可选的 Compose 变量：
+并保留密码、会话密钥和受信任 origin。
 
-- `WORKBENCH_PORT`：同时设置宿主机发布端口、容器端口和应用监听端口，默认 `4173`。例如设为 `8080` 后访问 `http://127.0.0.1:8080`；Docker Compose 下不要只改原生运行使用的 `PORT`
+可选 Compose 变量：
+
+- `WORKBENCH_PORT`：同时设置宿主机发布端口、容器端口和应用 `PORT`，默认 `4173`
 - `WORKBENCH_DATA_PATH`：宿主机数据目录，默认 `./data`
 - `WORKBENCH_WORKSPACE_PATH`：宿主机真实项目目录，默认 `./workspace`
-- `WORKBENCH_UID` / `WORKBENCH_GID`：容器进程 UID/GID，默认均为 `1000`
+- `WORKBENCH_UID` / `WORKBENCH_GID`：容器进程 UID/GID，默认 `1000:1000`
 
-镜像默认以 Node 镜像内的非 root 用户（UID/GID `1000:1000`）运行。Linux 宿主机上的 bind mount 必须允许这个 UID/GID 读写；更合适的做法通常是在 `.env` 中把 `WORKBENCH_UID`、`WORKBENCH_GID` 设成当前宿主用户的数字 ID，并确保数据目录和真实工作区对该用户可写，避免使用 `chmod 777`。macOS/Windows Docker Desktop 通常由文件共享层处理身份映射，但目录仍须已授权给 Docker Desktop。
+不要使用 `chmod 777` 解决挂载权限。Linux 上应让目录归属或 ACL 与容器 UID/GID 对齐。
 
-容器健康检查使用镜像自带的 Node.js，按容器实际 `PORT` 请求 `/api/health`，不额外安装 curl。该端点只在 state/config 可读且合法，数据、备份、工作区和所有业务目录存在、类型正确、非 symlink、未越界且具备运行所需的读写/进入权限时返回 `200`；其他情况返回 `503`，Docker 会标记为 unhealthy。
+### Docker 与飞书 CLI
 
-readiness 只使用文件系统查询和权限 `access` 检查，不创建探针文件、目录或备份。因此它能证明当前进程的文件系统依赖可用，但不能预知磁盘耗尽、后续权限变化，也不代表 OpenAI 或浏览器功能已验收。
+当前镜像不内置你的 `lark-cli` 用户登录态。仅挂载 `/data` 和 `/workspace` 不会让容器自动获得飞书授权。需要飞书集成时优先使用原生运行；把授权文件直接打包进镜像不受支持。
 
-## AI 判断配置
+## 4. Readiness 与健康检查
 
-默认 Luna Profile 需要 AI 判断时，在 `.env` 中设置：
+容器健康检查使用镜像自带 Node.js 请求 `/api/health`。
+
+只有 state/config 可读且合法、数据目录和工作区路径安全且具备所需权限时返回 `200`；其他情况返回通用 `503 not_ready`。
+
+readiness 只证明当前文件系统依赖可用，不证明：
+
+- OpenAI 当前可达；
+- 飞书当前可达或有编辑权限；
+- 浏览器和真实 iPhone 已验收；
+- 磁盘未来不会耗尽。
+
+## 5. AI Provider
+
+默认 Luna Profile：
 
 ```text
 OPENAI_API_KEY=<你的 Key>
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
-应用将推理档位固定为极高（`xhigh`），并按“证据 → 冲突与缺口 → 最终结论”生成受本机校验的结构化结果。`xhigh` 会提高响应延迟和调用成本，应结合实际项目观察耗时和回退率。`npm run doctor` 只核对本机配置，不主动联网、不产生模型费用；它显示“已配置（未联网验证）”不等于 OpenAI 或该模型当前可达。请求超时、拒绝、不可达或输出校验失败时，系统使用本地规则回退。
+项目把推理档位固定为 `xhigh`，并使用结构化结果与本机校验。超时、拒绝、不可达或输出校验失败时回退本地规则。
 
-正文出站边界没有因模型升级而改变：`PROJECT.md` 和可读文件正文默认不发送。只有明确设置 `OPENAI_SEND_FILE_CONTENT=1` 才会发送这两类正文；高敏感项目不应开启。
+`npm run doctor` 显示“已配置（未联网验证）”不等于 live success。文件正文默认不出站；只有显式开启受支持的正文发送开关时才会发送，且高敏感项目不应启用。
 
-如需使用受限的第三方 Responses-compatible 或 Chat-Completions-compatible Profile，必须由部署管理员按 [`docs/AI_PROVIDER.md`](AI_PROVIDER.md) 设置固定 endpoint、origin allowlist、模型、凭证和能力开关。第三方 Profile 默认关闭；未完成真实 endpoint smoke test 前，只能把它视为本地合同已通过，不能称为 live verified。
+第三方 Provider 的固定 endpoint、origin allowlist、模型、凭证和显式降级门见 [`AI_PROVIDER.md`](AI_PROVIDER.md)。未进行真实 endpoint smoke test 前，只能称本地合同已通过。
 
-## 云部署的限制
+## 6. 反向代理与公开暴露
 
-普通 Vercel/Netlify Serverless 等无状态运行环境无法直接读取你笔记本的本地文件系统。这个项目可以做成纯云任务系统，但那会违背当前 PRD 的“本地项目文件夹是真实来源”。
-
-如果一定要远程部署同时读取本地文件，需要：
-- 在本地机器运行一个 agent / 服务并建立安全通道，或
-- 把项目文件同步/挂载到远程主机。
-
-当前 v1.2.0 选择更简单可靠的路径：**服务与项目文件处在同一台可访问文件系统的机器上。**
-
-## 反向代理
-
-可以用 Caddy / Nginx 做 HTTPS。应用本身只需要一个 HTTP 端口。
-
-反向代理或自定义域名必须显式配置浏览器实际访问的 origin（协议、主机名和端口必须一致），多个值用逗号分隔：
+HTTPS 反向代理示例：
 
 ```text
-TRUSTED_ORIGINS=https://workbench.example.com,https://workbench.internal.example:8443
+TRUSTED_ORIGINS=https://workbench.example.com
 COOKIE_SECURE=1
 ```
 
-代理应保留与 `TRUSTED_ORIGINS` 对应的原始 `Host`。应用不会信任 `X-Forwarded-Host`、`X-Forwarded-Proto` 等转发头来放宽 Host/Origin 校验；只设置这些头不能通过安全门。HTTPS 部署必须设置 `COOKIE_SECURE=1`，否则登录 Cookie 不会带 `Secure` 属性。
+多个 origin 用逗号分隔。协议、主机和端口必须与浏览器实际访问地址一致。
 
-只要启用 `WORKBENCH_PASSWORD`，即使应用只监听 `127.0.0.1`，启动时也会要求至少 24 字符且非默认值的 `SESSION_SECRET`。配置中含有非本机的 `TRUSTED_ORIGINS` 时还会按公开暴露强制要求启用密码。不要把公网代理的上游 `Host` 重写成 `127.0.0.1`/`localhost` 后省略 `TRUSTED_ORIGINS`；应用无法仅凭该请求识别隐藏在本机地址后的公网代理，这种部署不受支持。
+代理应保留对应的实际 `Host`。应用不会信任 `X-Forwarded-Host`、`X-Forwarded-Proto` 自动放宽安全检查。不要把公网代理的上游 Host 重写为 localhost 后省略 `TRUSTED_ORIGINS`。
 
-默认本机访问 `http://127.0.0.1:<PORT>` 和 `http://localhost:<PORT>` 无需设置 `TRUSTED_ORIGINS`。局域网 IP、Tailscale 地址和自定义域名不属于默认本机 origin，必须逐项显式填写。
+只要启用 `WORKBENCH_PASSWORD`，即使监听 localhost，也必须设置非示例值且至少 24 字符的 `SESSION_SECRET`。公开绑定或非本机 origin 在默认情况下没有密码会拒绝启动。
 
-## 环境变量
+## 7. 主要环境变量
 
-- `PORT`：端口，默认 4173
-- `HOST`：默认 127.0.0.1
+- `PORT`：应用端口，默认 `4173`
+- `HOST`：监听地址，默认 `127.0.0.1`
 - `DATA_DIR`：持久化数据目录
-- `WORKSPACE_ROOT`：覆盖界面里的工作区根目录
+- `WORKSPACE_ROOT`：覆盖配置中的工作区根目录
 - `WORKBENCH_PASSWORD`：访问密码
-- `SESSION_SECRET`：登录 cookie 签名密钥；启用 `WORKBENCH_PASSWORD` 时必须为至少 24 字符且不能使用默认值
-- `CAPTURE_TOKEN`：快捷指令采集 token
-- `TRUSTED_ORIGINS`：反向代理或远程浏览器允许使用的完整 origin，多个值用逗号分隔
-- `COOKIE_SECURE=1`：HTTPS 部署时让登录 Cookie 带 `Secure` 属性
-- `OPENAI_API_KEY`：默认 Luna Profile 的可选凭证；未设置时使用本地规则
-- `OPENAI_MODEL`：默认 `gpt-5.6-luna`；推理档位固定为 `xhigh`
-- `OPENAI_SEND_FILE_CONTENT=1`：默认 Luna Profile 的兼容开关，显式允许发送 `PROJECT.md` 和可读文件正文；默认关闭
-- `AI_PROVIDER_*`：第三方 Provider 的固定适配配置；完整字段、降级审批和安全边界见 [`docs/AI_PROVIDER.md`](AI_PROVIDER.md)
-- `AI_PROVIDER_GROK_MODEL` / `AI_PROVIDER_GROK_API_KEY`：同一网关下第二模型 `grok-4.6` 及其凭证；配合 `AI_PROVIDER_ACTIVE_MODEL` 选择当前请求模型，默认不自动切换
-- `ALLOW_INSECURE_PUBLIC=1`：允许无密码绑定公开接口，不建议
+- `SESSION_SECRET`：登录 cookie 签名密钥
+- `CAPTURE_TOKEN`：iPhone / 外部采集专用 Bearer token
+- `TRUSTED_ORIGINS`：允许的完整浏览器 origin，多个值逗号分隔
+- `COOKIE_SECURE=1`：HTTPS 时给登录 Cookie 加 `Secure`
+- `OPENAI_API_KEY`：默认 Luna Profile 凭证
+- `OPENAI_MODEL`：默认 `gpt-5.6-luna`
+- `OPENAI_SEND_FILE_CONTENT=1`：显式允许默认 Profile 发送受支持文件正文；默认关闭
+- `AI_PROVIDER_*`：第三方 Provider 固定适配配置
+- `ALLOW_INSECURE_PUBLIC=1`：明确允许无密码公开绑定；不建议使用
 
-## 恢复数据
+## 8. 数据目录
 
-原生运行时先用实际采用的进程管理器停止服务，再恢复、重启并读回：
+```text
+state.json   机器状态、任务、收件箱、确认项和飞书指针
+config.json  工作区、业务板块和数据源配置
+backups/     自动每日快照与手工备份
+migrations/  升级前原始快照、PROJECT.md 备份和迁移报告
+captures/    Capture 幂等收据；只含正文 SHA-256 和标识符
+recovery/    飞书跨资源事务恢复凭据；只含机器数据和指针
+```
+
+`captures/` 与 `recovery/` 都是恢复正确性的一部分，不是可随意删除的缓存。
+
+## 9. 备份 v2
+
+`npm run backup` 和每日快照生成 JSON backup v2：
+
+```json
+{
+  "backupVersion": 2,
+  "backedUpAt": "...",
+  "state": {},
+  "config": {},
+  "captureReceipts": [],
+  "projectRecordReceipts": []
+}
+```
+
+包含：
+
+- 持久化 state；不包含运行时派生的临时确认；
+- config；
+- Capture 哈希收据，用于恢复后继续去重；
+- 飞书项目记录恢复凭据，用于恢复后继续 operationId 对账。
+
+不包含：
+
+- `/workspace` 中的真实项目资料；
+- 飞书项目分析或总结正文；
+- OpenAI / 飞书凭证、cookie、`.env` 或 `lark-cli` 登录文件。
+
+自动每日快照是当天第一次状态或配置变更前的本机回滚点。手工备份和每日快照默认与主数据位于同一宿主目录，不等同于异机灾备。
+
+## 10. 原生恢复
+
+先用实际进程管理器停止工作台，再执行：
 
 ```bash
 npm run restore -- /path/to/backup.json
 npm start
 ```
 
-不要用宽泛的 `pkill node` 停止服务，以免误停其他 Node 程序。恢复脚本会在覆盖前再备份一次当前数据。启动后登录工作台，通过“今日工作台 / 全部待办 / 项目”读回关键记录；也可以用 `GET /api/state` 核对。
+不要使用宽泛的 `pkill node`，以免误停其他 Node 进程。
 
-Docker Compose 恢复时，备份文件必须位于宿主机 `WORKBENCH_DATA_PATH` 内。以下示例假设文件在该目录的 `backups/` 下：
+恢复脚本会先创建恢复前安全备份。backup v2 会同时替换 state、可选 config、Capture 收据和项目恢复凭据；任一阶段失败时会尝试回滚全部已修改部分。
+
+旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段，恢复时会保留当前凭据目录，而不是把它们静默清空。这保证向后兼容，但也意味着旧备份不是这些凭据的历史快照。
+
+恢复后至少核对：
+
+- 今日工作台、全部待办和项目列表；
+- 一条已处理 Capture 使用原 `captureId` 重放时不会复活；
+- 待确认中仍能显示未完成的项目记录对账项；
+- `GET /api/health` 返回就绪。
+
+## 11. Docker Compose 恢复
+
+备份文件需位于宿主机 `WORKBENCH_DATA_PATH` 内。示例：
 
 ```bash
 docker compose stop workbench
@@ -193,6 +283,19 @@ docker compose up -d workbench
 docker compose ps
 ```
 
-随后登录网页或读取 `/api/state` 核对目标记录。不要在服务仍运行并可能写入状态时恢复。
+不要在服务仍运行并可能写状态或凭据时恢复。恢复完成后登录网页或读取 `/api/state` 核对业务记录。
 
-备份边界：自动每日快照是“每天首次状态或配置变更前”的本机回滚点，手工备份包含 `state.json` 与 `config.json`；两者都不包含 `/workspace` 的真实项目资料。默认备份还与主数据位于同一宿主目录，不等于异机灾备。若需要灾备，必须另行备份 `/data` 与 `/workspace`，并自行定义加密、保留期、RPO/RTO 与恢复演练。
+## 12. 灾备边界
+
+完整灾备至少要分别保护：
+
+1. `/data`：工作台状态、配置、备份、迁移快照和恢复凭据；
+2. `/workspace`：真实项目资料和 Git 工作树；
+3. 远端 Git 仓库；
+4. 飞书项目文档。
+
+应由部署者自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。仓库中的本地测试不构成生产灾备演练。
+
+## 13. 云部署限制
+
+Vercel、Netlify Serverless 等无状态环境不能直接读取你电脑的本地项目路径。若一定要远程部署，需要在项目文件所在机器运行受控 agent/服务，或把项目工作区安全挂载到远程主机；这属于另一套架构，不是当前 v1.2.0 的默认部署模型。

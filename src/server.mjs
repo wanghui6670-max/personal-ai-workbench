@@ -9,10 +9,11 @@ import { aiEnabled,aiRuntimeConfig } from './ai.mjs';
 import { sendJson,readJsonBody,serveStatic,securityHeaders,createRequestGuard,parseTrustedOrigins } from './http.mjs';
 import { ensureBusinessDirs, resolveWorkspace } from './projects.mjs';
 import { deriveState,createProject,assignProjectBusiness,syncProject,syncAllProjects,syncFeishuInbox,addInbox,processInbox,morningChat,setToday,updateTodo,updateProject,updateWorkbenchConfig,createBusiness,renameBusiness,deleteBusiness } from './domain.mjs';
+import { captureInbox } from './capture-domain.mjs';
 import { FeishuSourceError } from './feishu.mjs';
 import { nowIso } from './utils.mjs';
 import { addActivity } from './store.mjs';
-import { createEndpointRateLimiter,createSyncCoordinator,endpointRateLimitConfig,requestClientKey } from './rate-limit.mjs';
+import { createEndpointRateLimiter,endpointRateLimitConfig,requestClientKey } from './rate-limit.mjs';
 import { loadWorkbenchEnv } from './env.mjs';
 import { inspectReadiness } from './health.mjs';
 import { requestSchemas,validateRequestBody } from './request-validation.mjs';
@@ -78,7 +79,6 @@ const AI_PLAN_TTL_MS=10*60*1000;
 function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
 const rateLimitConfig=endpointRateLimitConfig();
 const endpointLimiter=createEndpointRateLimiter(rateLimitConfig);
-const syncCoordinator=createSyncCoordinator();
 
 function withSecurity(res){const raw=res.writeHead.bind(res);res.writeHead=(status,headers={})=>raw(status,{...securityHeaders(),...headers});return res;}
 function notFound(res){return sendJson(res,404,{error:'Not found'});}
@@ -89,7 +89,6 @@ function rateLimited(req,res,scope){
   sendJson(res,429,{error:'请求过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(result.retryAfterMs/1000)))});
   return true;
 }
-function syncBusy(res){return sendJson(res,409,{error:'项目同步正在进行，请等待当前同步完成。'},{'Retry-After':'1'});}
 
 async function apiState(){return deriveState(APP_ROOT,await store.readState(),await store.readConfig(),aiEnabled());}
 async function requestBody(req,schema){return validateRequestBody(await readJsonBody(req),schema);}
@@ -131,7 +130,13 @@ const server=http.createServer(async(req,rawRes)=>{
       if(!captureAuthorized(req))return unauthorized(res);
       const body=await requestBody(req,requestSchemas.capture);
       if(rateLimited(req,res,'capture'))return;
-      const item=await addInbox({store,text:body.text,source:body.source||'external'});return sendJson(res,201,{item});
+      const captured=await captureInbox({store,captureId:body.captureId??null,text:body.text});
+      return sendJson(res,captured.replayed?200:201,{
+        captureId:captured.captureId,
+        replayed:captured.replayed,
+        processed:captured.processed,
+        item:captured.item
+      });
     }
 
     if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
@@ -199,15 +204,14 @@ const server=http.createServer(async(req,rawRes)=>{
     if(pathname==='/api/projects/sync'&&req.method==='POST'){
       await requestBody(req,requestSchemas.empty);
       if(rateLimited(req,res,'sync'))return;
-      const lease=syncCoordinator.tryAcquireAll();if(!lease)return syncBusy(res);
-      try{const results=await syncAllProjects({appRoot:APP_ROOT,store});return sendJson(res,200,{results});}finally{lease.release();}
+      const results=await syncAllProjects({appRoot:APP_ROOT,store});
+      return sendJson(res,200,{results});
     }
     const refreshMatch=pathname.match(/^\/api\/projects\/([^/]+)\/sync$/);
     if(refreshMatch&&req.method==='POST'){
       await requestBody(req,requestSchemas.empty);
       if(rateLimited(req,res,'sync'))return;
-      const lease=syncCoordinator.tryAcquireProject(refreshMatch[1]);if(!lease)return syncBusy(res);
-      try{return sendJson(res,200,await syncProject({appRoot:APP_ROOT,store,projectId:refreshMatch[1]}));}finally{lease.release();}
+      return sendJson(res,200,await syncProject({appRoot:APP_ROOT,store,projectId:refreshMatch[1]}));
     }
     const classifyMatch=pathname.match(/^\/api\/projects\/([^/]+)\/classify$/);
     if(classifyMatch&&req.method==='POST'){const body=await requestBody(req,requestSchemas.classify);return sendJson(res,200,{project:await assignProjectBusiness({appRoot:APP_ROOT,store,projectId:classifyMatch[1],businessId:body.businessId})});}
@@ -232,14 +236,17 @@ const server=http.createServer(async(req,rawRes)=>{
 
     if(pathname.startsWith('/api/'))return notFound(res);
     if(await serveStatic(PUBLIC_DIR,pathname,res))return;
-    // SPA fallback
     if(req.method==='GET'&&await serveStatic(PUBLIC_DIR,'/',res))return;
     return notFound(res);
   }catch(e){
     console.error('[server]',e);
     const explicitStatus=Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<=599?e.statusCode:500;
     const publicMessage=(explicitStatus<500||e instanceof FeishuSourceError)&&typeof e?.message==='string'&&e.message?e.message:'服务器内部错误，请稍后重试。';
-    return sendJson(res,explicitStatus,{error:publicMessage});
+    return sendJson(res,explicitStatus,{
+      error:publicMessage,
+      ...(typeof e?.code==='string'?{code:e.code}:{}),
+      ...(e?.recovery?{recovery:e.recovery}:{})
+    });
   }
 });
 

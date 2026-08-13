@@ -2,6 +2,7 @@ import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
+import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -9,7 +10,7 @@ function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
 
 export function createWorkbenchRegistry({appRoot,store}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  const tools=createWorkbenchTools();
+  const tools=[...createWorkbenchTools(),...createProjectRecordTools()];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -34,8 +35,6 @@ export function createWorkbenchRegistry({appRoot,store}={}){
     }
     const input=validateArguments(tool,args);
     const result=await tool.execute(await context(),input);
-    // A tool result is never treated as the canonical UI state. Always read
-    // state again after execution so the two panels converge on persisted data.
     const after=await context();
     return {result,state:deriveState(after.appRoot,after.state,after.config,after.aiEnabled),tool:publicTool(tool)};
   }
@@ -53,12 +52,10 @@ export function createWorkbenchRegistry({appRoot,store}={}){
         planned=await planAIConsole({message,state:derived,tools:list(),route});
         if(planned)planner='model';
       }catch(error){
-        // A stale or invalid provider configuration must never make the
-        // control plane unusable; the deterministic planner is the safe
-        // local fallback and does not issue a network request.
         console.warn('[AI console planner fallback]',error.message);
       }
     }
+    if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){

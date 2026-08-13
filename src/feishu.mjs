@@ -1,5 +1,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  PROJECT_RECORD_HEADING,
+  PROJECT_ANALYSIS_PREFIX,
+  PROJECT_SUMMARY_PREFIX,
+  normalizeFeishuProjectDocumentUrl,
+  normalizeProjectRecordText,
+  normalizeProjectRecordOperationId,
+  projectRecordOperationId,
+  projectRecordMarker
+} from './project-record-contract.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -46,13 +56,10 @@ function documentContent(payload) {
 }
 
 function validateDocumentUrl(value) {
-  const raw = String(value ?? '').trim();
   try {
-    const url = new URL(raw);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('invalid');
-    return url.toString();
-  } catch {
-    throw new FeishuSourceError('飞书文档 URL 无效。', { code: 'INVALID_FEISHU_SOURCE', statusCode: 400 });
+    return normalizeFeishuProjectDocumentUrl(value);
+  } catch (error) {
+    throw new FeishuSourceError(error.message, { cause:error, code:error.code || 'INVALID_FEISHU_SOURCE', statusCode:error.statusCode || 400 });
   }
 }
 
@@ -80,11 +87,25 @@ async function runCli(args, action, { timeoutMs = DEFAULT_TIMEOUT_MS, exec = exe
   }
 }
 
-/**
- * Parse only the top-level section headed “收件箱”. Other diary sections are
- * deliberately ignored. Every returned item carries the Feishu block id so
- * the local cache can deduplicate without using the text as an identity key.
- */
+async function fetchDocument(documentUrl, { timeoutMs = DEFAULT_TIMEOUT_MS, exec = execFileAsync } = {}) {
+  const url = validateDocumentUrl(documentUrl);
+  const payload = await runCli([
+    'docs', '+fetch', '--api-version', 'v2', '--as', 'user', '--doc', url,
+    '--detail', 'with-ids', '--format', 'json'
+  ], '文档读取', { exec, timeoutMs });
+  return { ...documentContent(payload), url };
+}
+
+async function updateDocument(documentUrl, { anchorBlockId, content }, { timeoutMs = DEFAULT_TIMEOUT_MS, exec = execFileAsync } = {}) {
+  const url = validateDocumentUrl(documentUrl);
+  validateToken(anchorBlockId);
+  await runCli([
+    'docs', '+update', '--api-version', 'v2', '--as', 'user', '--doc', url,
+    '--command', 'block_insert_after', '--block-id', anchorBlockId,
+    '--content', content, '--format', 'json'
+  ], '文档写入', { exec, timeoutMs });
+}
+
 export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INBOX]' } = {}) {
   const source = String(xml ?? '');
   const headingPattern = new RegExp(`<h1\\b[^>]*>${escapeRegExp(heading)}<\\/h1\\s*>`, 'i');
@@ -112,6 +133,54 @@ export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INB
   return { sectionFound: true, headingBlockId: headingId, items: [...unique.values()] };
 }
 
+export function parseFeishuProjectRecordsXml(xml, { heading = PROJECT_RECORD_HEADING } = {}) {
+  const source = String(xml ?? '');
+  const headingPattern = new RegExp(`<h1\\b[^>]*>${escapeRegExp(heading)}<\\/h1\\s*>`, 'i');
+  const headingMatch = headingPattern.exec(source);
+  if (!headingMatch) return { sectionFound: false, headingBlockId: null, items: [] };
+  const afterHeading = source.slice(headingMatch.index + headingMatch[0].length);
+  const nextHeading = /<h1\b[^>]*>[^<]*<\/h1\s*>/i.exec(afterHeading);
+  const section = nextHeading ? afterHeading.slice(0, nextHeading.index) : afterHeading;
+  const blockPattern = /<(p|checkbox|li)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+  const items = [];
+  let match;
+  while ((match = blockPattern.exec(section))) {
+    const rawText = decodeXmlText(match[3]);
+    let kind = null;
+    let prefix = null;
+    if (rawText.startsWith(PROJECT_ANALYSIS_PREFIX)) { kind = 'analysis'; prefix = PROJECT_ANALYSIS_PREFIX; }
+    else if (rawText.startsWith(PROJECT_SUMMARY_PREFIX)) { kind = 'summary'; prefix = PROJECT_SUMMARY_PREFIX; }
+    else continue;
+    let value = rawText.slice(prefix.length).trim();
+    let operationId = null;
+    const operationMatch = value.match(/^\[WORKBENCH_OP:([A-Za-z0-9][A-Za-z0-9_-]{0,127})\]\s*/);
+    if (operationMatch) {
+      operationId = operationMatch[1];
+      value = value.slice(operationMatch[0].length).trim();
+    }
+    if (!value) continue;
+    const blockId = match[2].match(/\bid=["']([^"']+)["']/i)?.[1] || null;
+    if (!blockId) continue;
+    items.push({ blockId, kind, operationId, text: value, rawText, tag: match[1].toLowerCase() });
+  }
+  const unique = new Map();
+  for (const item of items) unique.set(item.blockId, item);
+  const headingBlockId = headingMatch[0].match(/\bid=["']([^"']+)["']/i)?.[1] || null;
+  return { sectionFound: true, headingBlockId, items: [...unique.values()] };
+}
+
+function lastDocumentBlockId(xml) {
+  const source = String(xml ?? '');
+  const pattern = /<(?:title|h1|h2|h3|p|checkbox|li)\b([^>]*)>/gi;
+  let match;
+  let last = null;
+  while ((match = pattern.exec(source))) {
+    const id = match[1].match(/\bid=["']([^"']+)["']/i)?.[1] || null;
+    if (id) last = id;
+  }
+  return last;
+}
+
 function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function escapeXml(value) {
@@ -121,36 +190,85 @@ function escapeXml(value) {
 export function createFeishuJournalClient({ exec = execFileAsync, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return {
     async fetch(config) {
-      const documentUrl = validateDocumentUrl(config?.documentUrl);
-      const payload = await runCli([
-        'docs', '+fetch', '--api-version', 'v2', '--as', 'user', '--doc', documentUrl,
-        '--detail', 'with-ids', '--format', 'json'
-      ], '文档读取', { exec, timeoutMs });
-      const document = documentContent(payload);
+      const document = await fetchDocument(config?.documentUrl, { exec, timeoutMs });
       const parsed = parseFeishuInboxXml(document.content, {
         heading: config?.inboxHeading || '收件箱',
         prefix: config?.inboxPrefix || '[INBOX]'
       });
       if (!parsed.sectionFound) throw new FeishuSourceError(`文档中没有找到“${config?.inboxHeading || '收件箱'}”章节。`, { code: 'FEISHU_SOURCE_FORMAT' });
-      return { ...document, ...parsed, url: documentUrl };
+      return { ...document, ...parsed };
     },
     async appendAndFetch(config, text) {
       const documentUrl = validateDocumentUrl(config?.documentUrl);
       const prefix = config?.inboxPrefix || '[INBOX]';
       const current = await this.fetch(config);
+      const beforeIds = new Set(current.items.map(item => item.blockId));
       const anchor = current.items.at(-1)?.blockId || current.headingBlockId;
       if (!anchor) throw new FeishuSourceError('飞书文档收件箱章节缺少可写入锚点。', { code: 'FEISHU_SOURCE_FORMAT' });
-      await runCli([
-        'docs', '+update', '--api-version', 'v2', '--as', 'user', '--doc', documentUrl,
-        '--command', 'block_insert_after', '--block-id', anchor,
-        '--content', `<p>${escapeXml(`${prefix} ${text}`)}</p>`, '--format', 'json'
-      ], '文档写入', { exec, timeoutMs });
+      await updateDocument(documentUrl, {
+        anchorBlockId: anchor,
+        content: `<p>${escapeXml(`${prefix} ${text}`)}</p>`
+      }, { exec, timeoutMs });
       const fetched = await this.fetch(config);
-      const matches = fetched.items.filter(item => item.text === text);
-      const item = matches.at(-1);
-      if (!item) throw new FeishuSourceError('飞书写入命令已返回，但文档读回没有找到新增收件箱事项。', { code: 'FEISHU_SOURCE_READBACK_FAILED' });
-      return { ...fetched, item };
+      const added = fetched.items.filter(item => !beforeIds.has(item.blockId) && item.text === text);
+      if (added.length !== 1) throw new FeishuSourceError('飞书写入命令已返回，但文档读回无法唯一确认新增收件箱事项。', { code: 'FEISHU_SOURCE_READBACK_FAILED' });
+      return { ...fetched, item: added[0] };
     }
+  };
+}
+
+export function createFeishuProjectRecordClient({ exec = execFileAsync, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  async function fetchRecords(documentUrl, { heading = PROJECT_RECORD_HEADING } = {}) {
+    const document = await fetchDocument(documentUrl, { exec, timeoutMs });
+    const parsed = parseFeishuProjectRecordsXml(document.content, { heading });
+    return { ...document, ...parsed, heading };
+  }
+
+  async function ensureSection(documentUrl, heading) {
+    let current = await fetchRecords(documentUrl, { heading });
+    if (current.sectionFound) return current;
+    const anchor = lastDocumentBlockId(current.content);
+    if (!anchor) throw new FeishuSourceError('飞书项目文档缺少可创建记录章节的锚点。', { code: 'FEISHU_PROJECT_RECORD_FORMAT' });
+    await updateDocument(documentUrl, {
+      anchorBlockId: anchor,
+      content: `<h1>${escapeXml(heading)}</h1>`
+    }, { exec, timeoutMs });
+    current = await fetchRecords(documentUrl, { heading });
+    if (!current.sectionFound || !current.headingBlockId) throw new FeishuSourceError('飞书项目记录章节创建后读回失败。', { code: 'FEISHU_PROJECT_RECORD_READBACK_FAILED' });
+    return current;
+  }
+
+  async function append(documentUrl, { kind, text, operationId, heading = PROJECT_RECORD_HEADING } = {}) {
+    if (!['analysis', 'summary'].includes(kind)) throw new FeishuSourceError('飞书项目记录类型无效。', { code: 'INVALID_FEISHU_PROJECT_RECORD', statusCode: 400 });
+    let value;
+    try { value = normalizeProjectRecordText(text); }
+    catch (error) { throw new FeishuSourceError(error.message, { cause:error, code:error.code, statusCode:error.statusCode }); }
+    const normalizedUrl = validateDocumentUrl(documentUrl);
+    const op = normalizeProjectRecordOperationId(operationId || projectRecordOperationId(kind,{documentUrl:normalizedUrl,text:value}));
+    const prefix = kind === 'analysis' ? PROJECT_ANALYSIS_PREFIX : PROJECT_SUMMARY_PREFIX;
+    const current = await ensureSection(normalizedUrl, heading);
+    const existing = current.items.filter(item => item.kind === kind && item.operationId === op);
+    if (existing.length > 1) throw new FeishuSourceError('飞书项目文档中存在重复 operationId，需要人工核对。', { code: 'FEISHU_PROJECT_RECORD_DUPLICATE_OPERATION', statusCode: 409 });
+    if (existing.length === 1) return { ...current, item: existing[0], replayed: true, operationId: op };
+    const beforeIds = new Set(current.items.map(item => item.blockId));
+    const anchor = current.items.at(-1)?.blockId || current.headingBlockId;
+    if (!anchor) throw new FeishuSourceError('飞书项目记录章节缺少可写入锚点。', { code: 'FEISHU_PROJECT_RECORD_FORMAT' });
+    await updateDocument(normalizedUrl, {
+      anchorBlockId: anchor,
+      content: `<p>${escapeXml(`${prefix} ${projectRecordMarker(op)} ${value}`)}</p>`
+    }, { exec, timeoutMs });
+    const fetched = await fetchRecords(normalizedUrl, { heading });
+    const matches = fetched.items.filter(item => item.kind === kind && item.operationId === op);
+    if (matches.length !== 1) throw new FeishuSourceError('飞书项目记录写入后读回无法唯一确认 operationId。', { code: 'FEISHU_PROJECT_RECORD_READBACK_FAILED' });
+    const item = matches[0];
+    const replayed = beforeIds.has(item.blockId);
+    return { ...fetched, item, replayed, operationId: op };
+  }
+
+  return {
+    fetch: fetchRecords,
+    appendAnalysis(documentUrl, text, options = {}) { return append(documentUrl, { ...options, kind: 'analysis', text }); },
+    appendSummary(documentUrl, text, options = {}) { return append(documentUrl, { ...options, kind: 'summary', text }); }
   };
 }
 
@@ -158,4 +276,16 @@ export function sourceConfigured(dataSource) {
   return Boolean(dataSource && dataSource.provider === 'feishu_doc' && String(dataSource.documentUrl || '').trim());
 }
 
-export { escapeXml };
+export function projectRecordConfigured(project) {
+  if (!project || !String(project.feishu || '').trim()) return false;
+  try { normalizeFeishuProjectDocumentUrl(project.feishu); return true; }
+  catch { return false; }
+}
+
+export {
+  escapeXml,
+  validateDocumentUrl,
+  PROJECT_RECORD_HEADING,
+  PROJECT_ANALYSIS_PREFIX,
+  PROJECT_SUMMARY_PREFIX
+};

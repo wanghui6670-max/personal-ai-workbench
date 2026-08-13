@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'agent/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Syntax check control-plane, migration, inbox, capture and browser modules
+        run: |
+          node --check src/server.mjs
+          node --check src/request-validation.mjs
+          node --check src/domain.mjs
+          node --check src/domain-core.mjs
+          node --check src/workbench-core.mjs
+          node --check src/store.mjs
+          node --check src/inbox-ack.mjs
+          node --check src/inbox-domain.mjs
+          node --check src/capture-contract.mjs
+          node --check src/capture-receipts.mjs
+          node --check src/capture-domain.mjs
+          node --check src/receipt-backup.mjs
+          node --check src/feishu.mjs
+          node --check src/feishu-capture.mjs
+          node --check src/project-directory.mjs
+          node --check src/project-record-contract.mjs
+          node --check src/project-record-policy.mjs
+          node --check src/project-sync-coordinator.mjs
+          node --check src/project-identity.mjs
+          node --check src/mcp/registry.mjs
+          node --check src/mcp/project-record-tools.mjs
+          node --check scripts/migrate-project-records.mjs
+          node --check scripts/test-by-file.mjs
+          node --check public/project-records.js
+      - name: Run contract tests with concise per-file diagnostics
+        env:
+          OPENAI_API_KEY: ''
+          AI_PROVIDER_ENABLED: '0'
+        run: npm run test:files
