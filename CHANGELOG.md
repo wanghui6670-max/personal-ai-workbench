@@ -18,7 +18,13 @@
 - 本地 MCP 注册表增加工具参数 schema 校验、模型失败的显式安全回退，以及工具结果与左侧状态读回
 - 双面板明确为左人右 AI；右侧展示当前模型/本地回退状态、工具参数和执行结果
 - 新增 `panel_navigate` 导航桥：AI 可切换左侧面板、打开设置/新建项目，并在右侧显示证据、冲突和缺口摘要
-- CI 升级到 Node 24，固定第三方 Action commit，并检查迁移、恢复与浏览器模块语法
+- 飞书收件箱 ack 改为 block ID + SHA-256，不再保存历史正文；远端编辑会重新导入，远端删除会清理未处理缓存和关联确认
+- iPhone `/api/capture` 新增 `captureId` 幂等合同：同 ID 同正文安全重放，同 ID 不同正文冲突，处理后重放不复活
+- HTTP 请求 schema 正式允许 `captureId`，并增加真实服务进程级的 201/200/409 回归测试
+- Capture 收据只保存正文哈希和标识符；飞书 Capture marker 支持远端查重，不把内部 marker 暴露为用户正文
+- backup v2 同时保存持久化 state/config、Capture 幂等收据和项目记录恢复凭据；不保存 Capture 正文或项目分析正文
+- 恢复支持成组替换和失败回滚两类凭据；旧备份缺少凭据字段时保留当前目录，避免静默清空
+- CI 升级到 Node 24，固定第三方 Action commit，并检查迁移、收件箱、Capture、恢复与浏览器模块语法
 
 ## 1.2.0 - 2026-08-13
 
@@ -26,7 +32,7 @@
 - 新增飞书文档读取、`[INBOX]` 章节解析、稳定 block ID 去重、同步游标和删除读回
 - 本地新增收件箱改为“先写飞书、再读回、最后提交本地缓存”，失败时不伪装成本地成功
 - 设置页、API、README、部署说明和架构文档补齐飞书配置、安全边界及 Docker 限制
-- 补充真实飞书链路回归测试与版本健康检查
+- 补充飞书链路合同测试与版本健康检查；测试不等同于 live 飞书验证
 - AI 判断统一收敛为 Provider 合同；默认继续使用 `gpt-5.6-luna` / `xhigh` 的 Responses API，并新增受限的 Responses-compatible 与 Chat-Completions-compatible 适配器
 - Provider 请求增加固定工作流 allowlist、证据 ID 校验、响应体上限、稳定错误码和显式能力降级门；未配置或失败时继续使用本地规则
 
