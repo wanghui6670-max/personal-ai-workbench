@@ -52,9 +52,21 @@ function stable(value){
   return value;
 }
 
+function idempotencyPayload(kind,payload){
+  if(!payload||typeof payload!=='object'||Array.isArray(payload))return payload;
+  const next=structuredClone(payload);
+  if(kind==='analysis'&&next.project&&typeof next.project==='object'&&!Array.isArray(next.project)){
+    delete next.project.progress;
+    delete next.project.progressBeforeCompletion;
+  }
+  if(kind==='summary')delete next.parentBlockId;
+  return next;
+}
+
 export function projectRecordOperationId(kind,payload){
   if(!['analysis','summary','migration'].includes(kind))throw contractError('项目记录操作类型无效。','INVALID_FEISHU_PROJECT_RECORD');
-  const digest=crypto.createHash('sha256').update(JSON.stringify(stable(payload))).digest('hex').slice(0,40);
+  const normalized=idempotencyPayload(kind,payload);
+  const digest=crypto.createHash('sha256').update(JSON.stringify(stable(normalized))).digest('hex').slice(0,40);
   return `${kind==='analysis'?'pa':kind==='summary'?'ps':'pm'}_${digest}`;
 }
 
