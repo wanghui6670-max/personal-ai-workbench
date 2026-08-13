@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { normalizeCaptureId } from './capture-contract.mjs';
+import { normalizeCaptureId, captureContentHash } from './capture-contract.mjs';
 import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
 
 const DIRECTORY_MODE=0o700;
@@ -170,8 +170,38 @@ async function listDirectory(directory,filePattern,label,normalizer){
   return receipts;
 }
 
+async function synthesizedCaptureReceiptsFromState(dataDir){
+  const target=path.join(dataDir,'state.json');
+  let stat;
+  try{stat=await fsp.lstat(target);}catch(error){if(error.code==='ENOENT')return[];throw error;}
+  if(stat.isSymbolicLink()||!stat.isFile()||stat.nlink>1)throw invalid('state.json 不是安全普通文件');
+  const state=JSON.parse(await fsp.readFile(target,'utf8'));
+  const receipts=[];
+  for(const item of Array.isArray(state?.inbox)?state.inbox:[]){
+    if(!isRecord(item)||!item.captureId)continue;
+    const text=String(item.text??'').trim();
+    if(!text)throw invalid(`state.inbox 中 captureId=${item.captureId} 的正文为空`);
+    receipts.push(normalizeCaptureReceipt({
+      version:1,
+      captureId:item.captureId,
+      contentHash:captureContentHash(text),
+      inboxId:typeof item.id==='string'?item.id:null,
+      feishuBlockId:typeof item.feishuBlockId==='string'?item.feishuBlockId:null,
+      createdAt:typeof item.createdAt==='string'&&item.createdAt.trim()
+        ?item.createdAt
+        :'1970-01-01T00:00:00.000Z'
+    }));
+  }
+  return receipts;
+}
+
 export async function listCaptureReceipts(dataDir){
-  return listDirectory(path.join(dataDir,'captures'),CAPTURE_FILE,'captures',normalizeCaptureReceipt);
+  const persisted=await listDirectory(path.join(dataDir,'captures'),CAPTURE_FILE,'captures',normalizeCaptureReceipt);
+  const byId=new Map(persisted.map(receipt=>[receipt.captureId,receipt]));
+  for(const receipt of await synthesizedCaptureReceiptsFromState(dataDir)){
+    if(!byId.has(receipt.captureId))byId.set(receipt.captureId,receipt);
+  }
+  return [...byId.values()].sort((left,right)=>left.captureId.localeCompare(right.captureId));
 }
 
 export async function listProjectRecordReceipts(dataDir){
