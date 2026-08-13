@@ -13,18 +13,27 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Syntax check control-plane, migration and browser modules
+      - name: Syntax check control-plane, migration, inbox, capture and browser modules
         run: |
+          node --check src/server.mjs
+          node --check src/request-validation.mjs
           node --check src/domain.mjs
           node --check src/domain-core.mjs
+          node --check src/workbench-core.mjs
           node --check src/store.mjs
+          node --check src/inbox-ack.mjs
+          node --check src/inbox-domain.mjs
+          node --check src/capture-contract.mjs
+          node --check src/capture-receipts.mjs
+          node --check src/capture-domain.mjs
           node --check src/feishu.mjs
+          node --check src/feishu-capture.mjs
           node --check src/project-directory.mjs
           node --check src/project-record-contract.mjs
           node --check src/project-record-policy.mjs
@@ -33,9 +42,10 @@ jobs:
           node --check src/mcp/registry.mjs
           node --check src/mcp/project-record-tools.mjs
           node --check scripts/migrate-project-records.mjs
+          node --check scripts/test-by-file.mjs
           node --check public/project-records.js
-      - name: Run local contract tests
+      - name: Run contract tests with concise per-file diagnostics
         env:
           OPENAI_API_KEY: ''
           AI_PROVIDER_ENABLED: '0'
-        run: npm test
+        run: npm run test:files
