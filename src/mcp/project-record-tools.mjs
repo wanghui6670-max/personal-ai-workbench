@@ -1,4 +1,5 @@
 import { readProjectRecords, appendProjectSummary } from '../domain.mjs';
+import { PROJECT_RECORD_READ_MAX, PROJECT_RECORD_TEXT_MAX } from '../project-record-contract.mjs';
 
 const nonEmptyString={type:'string',minLength:1};
 
@@ -21,7 +22,7 @@ export function planProjectRecordMessage({message,state}){
   const wantsRecords=/(查看|读取|看看|回顾|打开).*(项目)?(分析|总结|复盘|记录)|(项目)?(分析|总结|复盘|记录).*(查看|读取|看看|回顾)/.test(text);
   if(wantsRecords){
     if(!project)return {kind:'clarification',message:'请明确项目名称，我只会从该项目绑定的飞书项目文档读取分析与总结。'};
-    return {kind:'tool',toolName:'project_records_read',args:{projectId:project.id},reason:`从「${project.name}」绑定的飞书项目文档读取分析与总结，不读取本地副本。`};
+    return {kind:'tool',toolName:'project_records_read',args:{projectId:project.id,limit:20},reason:`从「${project.name}」绑定的飞书项目文档读取最近分析与总结，不读取本地副本。`};
   }
   const summaryMatch=text.match(/(?:追加|保存|记录|写入)(?:一条)?(?:阶段)?总结(?:到[^：:，,。]*)?[：:]\s*([\s\S]+)$/);
   if(summaryMatch){
@@ -37,15 +38,15 @@ export function createProjectRecordTools(){
   return [
     descriptor({
       name:'project_records_read',
-      description:'从项目绑定的飞书项目文档读取分析与阶段总结。正文不缓存在工作台本地状态。',
-      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:nonEmptyString},required:['projectId']},
+      description:'从项目绑定的飞书项目文档读取最近的分析与阶段总结，支持有界分页；正文不缓存在工作台本地状态。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:nonEmptyString,limit:{type:'integer',minimum:1,maximum:PROJECT_RECORD_READ_MAX},beforeBlockId:{type:'string',minLength:1}},required:['projectId']},
       readOnly:true,
-      execute:async(context,args)=>readProjectRecords({store:context.store,projectId:String(args.projectId).trim()})
+      execute:async(context,args)=>readProjectRecords({store:context.store,projectId:String(args.projectId).trim(),limit:args.limit,beforeBlockId:args.beforeBlockId?String(args.beforeBlockId).trim():null})
     }),
     descriptor({
       name:'project_summary_append',
       description:'把用户确认的阶段总结追加到项目绑定的飞书项目文档；本地仅记录不含正文的审计事件。',
-      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:nonEmptyString,text:{type:'string',minLength:1,maxLength:6000}},required:['projectId','text']},
+      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:nonEmptyString,text:{type:'string',minLength:1,maxLength:PROJECT_RECORD_TEXT_MAX}},required:['projectId','text']},
       requiresConfirmation:true,
       execute:async(context,args)=>appendProjectSummary({store:context.store,projectId:String(args.projectId).trim(),text:String(args.text).trim()})
     })
