@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'agent/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax check changed control-plane modules
+        run: |
+          node --check src/domain.mjs
+          node --check src/domain-core.mjs
+          node --check src/feishu.mjs
+          node --check src/project-record-policy.mjs
+          node --check src/project-identity.mjs
+          node --check src/mcp/registry.mjs
+          node --check src/mcp/project-record-tools.mjs
+      - name: Run local contract tests
+        env:
+          OPENAI_API_KEY: ''
+          AI_PROVIDER_ENABLED: '0'
+        run: npm test
