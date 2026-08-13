@@ -16,7 +16,7 @@ async function setup(t){
     state.projects.push({
       id:'p_records',businessId:'biz_ai',name:'飞书记录项目',intro:'测试项目记录工具',folder:'feishu-records',
       createdAt:'2026-08-13',startDate:'2026-08-13',endDate:'2026-08-31',git:'',feishu:'https://example.feishu.cn/wiki/project',completed:false,archived:false,
-      progress:{percent:20,status:'进行中',lastActivity:null,syncedAt:null,confidence:.8}
+      progress:{percent:20,status:'进行中',hasBlocker:false,lastActivity:null,syncedAt:null,confidence:.8}
     });
   });
   return {root,store};
@@ -31,6 +31,7 @@ test('MCP registry exposes Feishu project record tools with correct confirmation
   assert.equal(read?.readOnly,true);
   assert.equal(read?.requiresConfirmation,false);
   assert.equal(append?.requiresConfirmation,true);
+  assert.equal(read.inputSchema.properties.limit.maximum,100);
   await assert.rejects(
     registry.call('project_summary_append',{projectId:'p_records',text:'阶段总结'}),
     error=>error.code==='MCP_CONFIRMATION_REQUIRED'
@@ -41,7 +42,7 @@ test('local deterministic planner maps explicit project-record read intent',()=>
   const state={projects:[{id:'p_records',name:'飞书记录项目'}]};
   const plan=planProjectRecordMessage({message:'查看飞书记录项目的分析和总结',state});
   assert.equal(plan.toolName,'project_records_read');
-  assert.deepEqual(plan.args,{projectId:'p_records'});
+  assert.deepEqual(plan.args,{projectId:'p_records',limit:20});
 });
 
 test('local deterministic planner maps explicit summary append and keeps confirmation to registry',()=>{
