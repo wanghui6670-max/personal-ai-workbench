@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { nowIso, todayIso } from './utils.mjs';
 import { isValidDateOnly, validateConfig, validateState, validateStateConfigReferences, validateStateInput } from './validation.mjs';
 import { stripNarrativeProgress } from './project-record-policy.mjs';
+import { normalizeInboxAcks } from './inbox-ack.mjs';
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
@@ -24,7 +25,7 @@ const DEFAULT_CONFIG = {
 
 const DEFAULT_STATE = {
   schemaVersion: 1,
-  inbox: [], todos: [], todayPlan: [], todayPlanDate: null, projects: [], confirmations: [], notes: [],
+  inbox: [], inboxAcks: [], todos: [], todayPlan: [], todayPlanDate: null, projects: [], confirmations: [], notes: [],
   activities: [], morningSessions: []
 };
 
@@ -81,6 +82,7 @@ function normalizeState(state={}, {migrateLegacyTodayPlan=false}={}) {
     ...state,
     schemaVersion: 1,
     inbox: Array.isArray(state.inbox)?state.inbox:[],
+    inboxAcks: normalizeInboxAcks(state.inboxAcks),
     todos: Array.isArray(state.todos)?state.todos:[],
     todayPlan: legacyUndatedTodayPlan?[]:todayPlan,
     todayPlanDate: isValidDateOnly(state.todayPlanDate)?state.todayPlanDate:null,
