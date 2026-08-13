@@ -16,14 +16,15 @@ const apply=process.argv.includes('--apply');
 const store=new JsonStore(DATA_DIR);
 await store.ensure();
 
-function legacyText(project){
-  const progress=project?.progress&&typeof project.progress==='object'?project.progress:{};
-  const before=project?.progressBeforeCompletion&&typeof project.progressBeforeCompletion==='object'?project.progressBeforeCompletion:{};
-  const source=Object.keys(progress).some(key=>['summary','resume','blocker'].includes(key))?progress:before;
-  if(!['summary','resume','blocker'].some(key=>typeof source[key]==='string'&&source[key].trim()))return null;
+function hasNarrative(progress){
+  return progress&&typeof progress==='object'&&!Array.isArray(progress)&&['summary','resume','blocker'].some(key=>typeof progress[key]==='string'&&progress[key].trim());
+}
+
+function legacySection(project,label,source){
   return [
     '迁移来源：Personal AI Workbench 升级前本地项目记录',
     `项目：${project.name||project.id}`,
+    `记录范围：${label}`,
     `状态：${source.status||'未记录'}`,
     `进度：${Number.isFinite(source.percent)?Math.round(source.percent):0}%`,
     `原分析：${source.summary||'未记录'}`,
@@ -31,6 +32,23 @@ function legacyText(project){
     `原恢复摘要：${source.resume||'未记录'}`,
     `原同步时间：${source.syncedAt||'未记录'}`
   ].join(' ｜ ');
+}
+
+function splitRecord(text,max=5_600){
+  const chunks=[];
+  for(let offset=0;offset<text.length;offset+=max){
+    const part=text.slice(offset,offset+max);
+    chunks.push(text.length>max?`迁移分片 ${chunks.length+1} ｜ ${part}`:part);
+  }
+  return chunks;
+}
+
+function legacyTexts(project){
+  if(!project)return[];
+  const sections=[];
+  if(hasNarrative(project.progress))sections.push(legacySection(project,'项目当前进度',project.progress));
+  if(hasNarrative(project.progressBeforeCompletion))sections.push(legacySection(project,'项目完成前进度',project.progressBeforeCompletion));
+  return sections.flatMap(text=>splitRecord(text));
 }
 
 async function readSnapshot(){
@@ -46,10 +64,19 @@ const results=[];
 
 for(const project of state.projects){
   const legacy=legacyById.get(project.id);
-  const narrative=legacyText(legacy);
+  const narratives=legacyTexts(legacy);
   const business=businessById(config,project.businessId);
   const dir=project.businessId?projectPath(APP_ROOT,config,project):null;
-  const result={projectId:project.id,name:project.name,narrative:Boolean(narrative),feishuBound:projectRecordConfigured(project),projectMd:'not_applicable',narrativeMigration:'not_applicable'};
+  const result={
+    projectId:project.id,
+    name:project.name,
+    narrative:narratives.length>0,
+    narrativeRecordCount:narratives.length,
+    feishuBound:projectRecordConfigured(project),
+    projectMd:'not_applicable',
+    narrativeMigration:'not_applicable',
+    records:[]
+  };
 
   if(dir){
     try{
@@ -58,25 +85,43 @@ for(const project of state.projects){
     }catch(error){result.projectMd=`error:${error.message}`;}
   }
 
-  if(narrative){
+  if(narratives.length){
     if(!projectRecordConfigured(project))result.narrativeMigration='pending_feishu_binding';
     else if(!apply)result.narrativeMigration='ready';
     else{
-      try{
-        const saved=await appendProjectSummary({store,projectId:project.id,text:narrative});
-        result.narrativeMigration=saved.replayed?'already_migrated':'migrated';
-        result.operationId=saved.operationId;
-        result.blockId=saved.blockId;
+      let complete=true;
+      for(const text of narratives){
+        try{
+          const saved=await appendProjectSummary({store,projectId:project.id,text});
+          result.records.push({
+            status:saved.replayed?'already_migrated':'migrated',
+            operationId:saved.operationId,
+            blockId:saved.blockId
+          });
+        }catch(error){
+          complete=false;
+          result.records.push({status:'error',error:error.code||error.message});
+          break;
+        }
+      }
+      result.narrativeMigration=complete?'migrated':'partial_error';
+      if(complete){
         await store.updateState(current=>{
           current.confirmations=current.confirmations.filter(item=>!(item.type==='legacy_project_narrative_pending'&&item.projectId===project.id));
         });
-      }catch(error){result.narrativeMigration=`error:${error.code||error.message}`;}
+      }
     }
   }
   results.push(result);
 }
 
-const report={migration:'project-narrative-to-feishu-v1',mode:apply?'apply':'dry-run',createdAt:new Date().toISOString(),snapshotFound:Boolean(snapshot),results};
+const report={
+  migration:'project-narrative-to-feishu-v1',
+  mode:apply?'apply':'dry-run',
+  createdAt:new Date().toISOString(),
+  snapshotFound:Boolean(snapshot),
+  results
+};
 if(apply){
   const reportFile=path.join(store.migrationDir,`migration-report-${new Date().toISOString().replace(/[:.]/g,'-')}.json`);
   await fsp.writeFile(reportFile,JSON.stringify(report,null,2),{encoding:'utf8',flag:'wx',mode:0o600});
