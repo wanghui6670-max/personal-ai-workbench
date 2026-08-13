@@ -8,6 +8,7 @@ import { machineProgress, narrativeFromProgress } from '../src/project-record-po
 import { projectIdentityBlock } from '../src/project-identity.mjs';
 import { createFeishuProjectRecordClient, parseFeishuProjectRecordsXml } from '../src/feishu.mjs';
 import { readProjectRecords, appendProjectSummary } from '../src/domain.mjs';
+import { validateState } from '../src/validation.mjs';
 
 function projectDoc(records=[], { withSection=true }={}){
   const section=withSection?`<h1 id="records">项目分析与总结</h1>${records.map((record,index)=>`<p id="r_${index}">${record}</p>`).join('')}`:'';
@@ -38,6 +39,20 @@ test('machine progress retains operational state but strips narrative text',()=>
   assert.equal('summary' in progress,false);
   assert.equal('resume' in progress,false);
   assert.equal('blocker' in progress,false);
+});
+
+test('machine progress preserves an explicit null syncedAt during legacy migration',()=>{
+  const progress=machineProgress({percent:0,status:'未启动',lastActivity:null,syncedAt:null,confidence:.9});
+  assert.equal(progress.syncedAt,null);
+  assert.equal(progress.lastActivity,null);
+});
+
+test('machine progress validator rejects local narrative fields',()=>{
+  const state={
+    schemaVersion:1,inbox:[],todos:[],todayPlan:[],todayPlanDate:null,confirmations:[],notes:[],activities:[],morningSessions:[],
+    projects:[{id:'p_validate',businessId:null,name:'校验项目',intro:'',createdAt:'2026-08-13',startDate:'2026-08-13',endDate:'2026-08-31',folder:'',git:'',feishu:'',completed:false,archived:false,progress:{percent:1,status:'进行中',summary:'不得留在本地'}}]
+  };
+  assert.throws(()=>validateState(state),/项目分析正文必须只保存在飞书项目文档/);
 });
 
 test('JsonStore migration removes legacy narrative fields from project progress',async t=>{
