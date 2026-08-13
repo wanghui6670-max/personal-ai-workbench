@@ -99,18 +99,20 @@ WORKBENCH_BIND_ADDRESS=0.0.0.0
 
 readiness 只使用文件系统查询和权限 `access` 检查，不创建探针文件、目录或备份。因此它能证明当前进程的文件系统依赖可用，但不能预知磁盘耗尽、后续权限变化，也不代表 OpenAI 或浏览器功能已验收。
 
-## Luna AI 判断配置
+## AI 判断配置
 
-需要 AI 判断时，在 `.env` 中设置：
+默认 Luna Profile 需要 AI 判断时，在 `.env` 中设置：
 
 ```text
 OPENAI_API_KEY=<你的 Key>
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
-应用将推理档位固定为极高（`xhigh`），并按“证据 → 冲突与缺口 → 最终结论”生成受本机校验的结构化结果。`xhigh` 会提高响应延迟和调用成本，应结合实际项目观察耗时与回退率。`npm run doctor` 只核对本机配置，不主动联网、不产生模型费用；它显示“已配置（未联网验证）”不等于 OpenAI 或该模型当前可达。请求超时、拒绝、不可达或输出校验失败时，系统使用本地规则回退。
+应用将推理档位固定为极高（`xhigh`），并按“证据 → 冲突与缺口 → 最终结论”生成受本机校验的结构化结果。`xhigh` 会提高响应延迟和调用成本，应结合实际项目观察耗时和回退率。`npm run doctor` 只核对本机配置，不主动联网、不产生模型费用；它显示“已配置（未联网验证）”不等于 OpenAI 或该模型当前可达。请求超时、拒绝、不可达或输出校验失败时，系统使用本地规则回退。
 
 正文出站边界没有因模型升级而改变：`PROJECT.md` 和可读文件正文默认不发送。只有明确设置 `OPENAI_SEND_FILE_CONTENT=1` 才会发送这两类正文；高敏感项目不应开启。
+
+如需使用受限的第三方 Responses-compatible 或 Chat-Completions-compatible Profile，必须由部署管理员按 [`docs/AI_PROVIDER.md`](AI_PROVIDER.md) 设置固定 endpoint、origin allowlist、模型、凭证和能力开关。第三方 Profile 默认关闭；未完成真实 endpoint smoke test 前，只能把它视为本地合同已通过，不能称为 live verified。
 
 ## 云部署的限制
 
@@ -150,9 +152,10 @@ COOKIE_SECURE=1
 - `CAPTURE_TOKEN`：快捷指令采集 token
 - `TRUSTED_ORIGINS`：反向代理或远程浏览器允许使用的完整 origin，多个值用逗号分隔
 - `COOKIE_SECURE=1`：HTTPS 部署时让登录 Cookie 带 `Secure` 属性
-- `OPENAI_API_KEY`：可选；未设置时使用本地规则
+- `OPENAI_API_KEY`：默认 Luna Profile 的可选凭证；未设置时使用本地规则
 - `OPENAI_MODEL`：默认 `gpt-5.6-luna`；推理档位固定为 `xhigh`
-- `OPENAI_SEND_FILE_CONTENT=1`：显式允许发送 `PROJECT.md` 和可读文件正文；默认关闭
+- `OPENAI_SEND_FILE_CONTENT=1`：默认 Luna Profile 的兼容开关，显式允许发送 `PROJECT.md` 和可读文件正文；默认关闭
+- `AI_PROVIDER_*`：第三方 Provider 的固定适配配置；完整字段、降级审批和安全边界见 [`docs/AI_PROVIDER.md`](AI_PROVIDER.md)
 - `ALLOW_INSECURE_PUBLIC=1`：允许无密码绑定公开接口，不建议
 
 ## 恢复数据

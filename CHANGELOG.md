@@ -7,6 +7,8 @@
 - 本地新增收件箱改为“先写飞书、再读回、最后提交本地缓存”，失败时不伪装成本地成功
 - 设置页、API、README、部署说明和架构文档补齐飞书配置、安全边界及 Docker 限制
 - 补充真实飞书链路回归测试与版本健康检查
+- AI 判断统一收敛为 Provider 合同；默认继续使用 `gpt-5.6-luna` / `xhigh` 的 Responses API，并新增受限的 Responses-compatible 与 Chat-Completions-compatible 适配器
+- Provider 请求增加固定工作流 allowlist、证据 ID 校验、响应体上限、稳定错误码和显式能力降级门；未配置或失败时继续使用本地规则
 
 ## 1.1.0 - 2026-08-12
 

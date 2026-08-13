@@ -99,7 +99,7 @@ const server=http.createServer(async(req,rawRes)=>{
       try{
         const {workspaceRoot}=await inspectReadiness({appRoot:APP_ROOT,store});
         const enabled=aiEnabled();
-        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?{provider:'openai',...aiRuntimeConfig()}:null};
+        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?aiRuntimeConfig():null};
         if((!publicExposure&&!authEnabled())||(authEnabled()&&isAuthenticated(req)))health.workspaceRoot=workspaceRoot;
         return sendJson(res,200,health);
       }catch{
@@ -209,7 +209,7 @@ server.listen(port,host,()=>{
   console.log(`Data: ${DATA_DIR}`);
   console.log(`Workspace: ${resolveWorkspace(APP_ROOT,config)}`);
   const aiConfig=aiRuntimeConfig();
-  console.log(`AI: ${aiEnabled()?`OpenAI configured · ${aiConfig.model} / ${aiConfig.reasoningEffort} (not live-verified)`:'local fallback'}`);
+  console.log(`AI: ${aiEnabled()?`${aiConfig.provider} configured · ${aiConfig.profileId} · ${aiConfig.model} / ${aiConfig.reasoningEffort} (not live-verified)`:'local fallback'}`);
   console.log(`Auth: ${authEnabled()?'password enabled':'disabled (localhost recommended)'}`);
 });
 

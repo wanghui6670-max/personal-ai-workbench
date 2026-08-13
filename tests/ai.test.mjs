@@ -141,9 +141,9 @@ test('OpenAI failures expose only status or a stable safe summary',async t=>{
     text:async()=>{bodyRead=true;return providerSecret;}
   }));
   await assert.rejects(
-    askStructured({name:'failure_test',description:'test',schema,input:'safe'}),
+    askStructured({name:'project_progress',description:'test',schema,input:'safe'}),
     error=>{
-      assert.match(error.message,/HTTP 429/);
+      assert.equal(error.code,'AI_PROVIDER_RATE_LIMITED');
       assert.doesNotMatch(error.message,new RegExp(providerSecret));
       return true;
     }
@@ -152,9 +152,9 @@ test('OpenAI failures expose only status or a stable safe summary',async t=>{
 
   globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({output_text:`not-json-${providerSecret}`})});
   await assert.rejects(
-    askStructured({name:'parse_failure_test',description:'test',schema,input:'safe'}),
+    askStructured({name:'project_progress',description:'test',schema,input:'safe'}),
     error=>{
-      assert.equal(error.message,'OpenAI API 返回的结构化结果无效');
+      assert.equal(error.code,'AI_PROVIDER_SCHEMA_INVALID');
       assert.doesNotMatch(error.message,new RegExp(providerSecret));
       return true;
     }
@@ -169,8 +169,8 @@ test('raw Responses output rejects incomplete responses and explicit refusals',a
     })
   }));
   await assert.rejects(
-    askStructured({name:'incomplete_test',description:'test',schema,input:'safe'}),
-    {message:'OpenAI API 返回了不完整结果'}
+    askStructured({name:'project_progress',description:'test',schema,input:'safe'}),
+    {code:'AI_PROVIDER_INCOMPLETE',message:'AI Provider 返回了不完整结果'}
   );
 
   globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({
@@ -178,9 +178,9 @@ test('raw Responses output rejects incomplete responses and explicit refusals',a
     output:[{type:'message',role:'assistant',content:[{type:'refusal',refusal:'provider refusal details must stay private'}]}]
   })});
   await assert.rejects(
-    askStructured({name:'refusal_test',description:'test',schema,input:'safe'}),
+    askStructured({name:'morning_dialogue',description:'test',schema,input:'safe'}),
     error=>{
-      assert.equal(error.message,'OpenAI 拒绝了该请求');
+      assert.equal(error.code,'AI_PROVIDER_REFUSED');
       assert.doesNotMatch(error.message,/provider refusal details/);
       return true;
     }
@@ -193,8 +193,8 @@ test('parsed JSON is checked locally against the requested schema',async t=>{
     return{ok:true,status:200,json:async()=>rawStructuredResponse(responseEnvelope(body,{ok:'not-a-boolean'}))};
   });
   await assert.rejects(
-    askStructured({name:'local_validation_test',description:'test',schema,input:'safe'}),
-    {message:'OpenAI API 返回的结构化结果不符合约束'}
+    askStructured({name:'project_creation',description:'test',schema,input:'safe'}),
+    {code:'AI_PROVIDER_SCHEMA_INVALID',message:'AI Provider 返回的结构化结果不符合约束'}
   );
 });
 

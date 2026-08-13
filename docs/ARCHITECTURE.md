@@ -27,8 +27,8 @@
 2. 服务在本机读取项目目录文件列表、mtime 和可读文本片段；扫描受文件数、目录数、深度和总时长预算约束。
 3. 若为 Git 仓库，读取最近 commit、remote、working tree 是否有变化。
 4. 本地规则生成一个 fallback 判断。
-5. 若配置 OpenAI，默认以 `gpt-5.6-luna` 和固定极高推理档位 `xhigh` 调用 Responses API Structured Outputs；只发送项目、文件、Git 和本地规则元数据，不发送 `PROJECT.md` 或可读文件正文。
-6. Luna 按“证据 → 冲突与缺口 → 最终结论”返回结构化信封；本机校验完整性后只把业务结论交给调用方。
+5. 若启用 AI Provider，三类工作流只调用统一的供应商无关合同。默认 Profile `openai_luna` 仍以 `gpt-5.6-luna` 和固定极高推理档位 `xhigh` 调用 OpenAI Responses API；经部署管理员显式配置后，也可以使用受限的 Responses-compatible 或 Chat-Completions-compatible Profile。默认只发送项目、文件、Git 和本地规则元数据，不发送 `PROJECT.md` 或可读文件正文。
+6. 任一 Provider 都必须按“证据 → 冲突与缺口 → 最终结论”返回同一结构化信封；Adapter 只负责协议映射，本机再次校验完整性后只把业务结论交给调用方。
 7. AI 置信度过低、证据冲突/不足或目录扫描达到任一安全预算 → 降为低置信度并进入待确认。
 8. 写入项目进度缓存并更新 `PROJECT.md`。
 
@@ -40,18 +40,23 @@
 2. **冲突与缺口**：显式标注相互矛盾或不足以支撑判断的信息；证据不足时降低置信度或回退。
 3. **最终结论**：只输出业务需要的结构化字段，并继续接受本机 schema、范围、长度和候选 ID 校验。
 
-分析信封只提供简短、可审计的依据，不请求模型披露内部思维链；该信封仅用于本次本机校验，持久化时只保存业务结论，依据草稿和隐藏推理都不会写入 `state.json`、活动日志或 `PROJECT.md`。固定 `xhigh` 会增加响应时间和调用成本。任一 OpenAI 请求超时、拒绝、不可达、返回不完整或不通过本机校验时，调用方使用现有本地规则继续工作。
+分析信封只提供简短、可审计的依据，不请求模型披露内部思维链；该信封仅用于本次本机校验，持久化时只保存业务结论，依据草稿、Provider 原始响应和隐藏推理都不会写入 `state.json`、活动日志或 `PROJECT.md`。固定 `xhigh` 会增加响应时间和调用成本。任一 Provider 请求超时、拒绝、不可达、返回不完整或不通过本机校验时，调用方使用现有本地规则继续工作；默认不把同一数据静默转发给另一个云 Provider。
 
-Luna 分析可能持续较长时间。提交结果前，服务会比较分析开始时的项目完整快照和项目路径；如果期间用户修改了完成状态、归档、结束日期、简介、链接或路径基准，本次旧分析会返回 `409` 并整包丢弃，不写进度、待确认、活动或 `PROJECT.md`，也不会自动重试。用户可按最新状态再次手动同步。
+AI Provider 分析可能持续较长时间。提交结果前，服务会比较分析开始时的项目完整快照和项目路径；如果期间用户修改了完成状态、归档、结束日期、简介、链接或路径基准，本次旧分析会返回 `409` 并整包丢弃，不写进度、待确认、活动或 `PROJECT.md`，也不会自动重试。用户可按最新状态再次手动同步。
 
-## AI 出站与隐私边界
+## AI Provider 与出站隐私边界
 
-- 未设置 `OPENAI_API_KEY` 时，AI 路径使用本地回退规则，不发起 OpenAI 请求。
-- 设置 Key 后，项目创建分类会发送项目描述和业务板块；进度分析会发送项目元数据、相对文件名/mtime、Git 提交元数据和本地规则摘要；早晨对话会发送候选项目/待办、近期活动、对话历史和当前消息。配置存在只表示具备发起请求的条件，不表示 Luna 已联网调用成功。
-- `PROJECT.md` 和文件片段默认不出站。只有 `OPENAI_SEND_FILE_CONTENT=1` 会显式开启这两类正文；文件在本机被读取不代表默认会发送。
-- 所有发送的输入都会先脱敏 Bearer 凭证、常见 OpenAI/GitHub token、URL userinfo、key/token/password/secret 赋值和私钥块。这是防误传护栏，不是全部敏感数据识别保证。
-- OpenAI 请求使用有界超时和 `store:false`。服务商错误正文不写入本机错误日志；`store:false` 也不应被解读为零处理或零留存保证。
-- AI 固定规则通过 developer instructions 发送；项目正文、文件/Git 元数据和对话上下文只作为不可信 user input。Responses API 的 `incomplete` 和 `refusal` 不会进入业务状态，完整输出仍须通过本机字段、类型、范围、长度和候选 ID 校验。
+- 未配置可用 Profile 时，AI 路径使用本地回退规则，不发起外部请求。为兼容既有部署，设置 `OPENAI_API_KEY` 且未选择其他 Profile 时会启用默认 `openai_luna`。
+- AI Provider 注册表当前只允许 `openai_luna`、`third_party_responses` 和 `third_party_chat_completions`。普通业务请求不能传入任意 URL、method、path、header 或凭证引用。
+- 第三方 Profile 必须由部署管理员显式设置 `AI_PROVIDER_ENABLED=1`，配置固定的 base URL、exact origin allowlist、model、network zone 和固定凭证变量；公网 endpoint 必须使用 HTTPS，loopback 匿名调用只允许显式的 `local_loopback`。
+- OpenAI-specific 请求映射只存在于 Adapter 内。Responses-compatible 与 Chat-Completions-compatible 分别使用固定 `/responses`、`/chat/completions` 路径；重定向被禁止，响应体有硬上限，服务商错误正文不进入业务日志。
+- 默认 Provider 是 `openai_luna`，保持 `gpt-5.6-luna`、`xhigh`、strict JSON Schema、`store:false` 和 120 秒有界超时。第三方若不能满足 reasoning、schema 或 no-store 要求，必须 fail-closed；只有显式批准的 downgrade 开关才允许降级，并在 `aiConfig.degraded` 中可见。
+- 设置 Provider 后，项目创建会发送项目描述和业务板块；进度分析会发送项目元数据、相对文件名/mtime、Git 提交元数据和本地规则摘要；早晨对话会发送候选项目/待办、近期活动、对话历史和当前消息。配置存在只表示具备发起请求的条件，不表示真实 API 已验证。
+- `PROJECT.md` 和文件片段默认不出站。供应商无关开关 `AI_SEND_FILE_CONTENT=1` 会显式开启正文；旧的 `OPENAI_SEND_FILE_CONTENT=1` 仅在默认 `openai_luna` Profile 下作为兼容别名。
+- 所有发送的 input 都会先脱敏 Bearer 凭证、常见 OpenAI/GitHub token、URL userinfo、key/token/password/secret 赋值和私钥块。这是防误传护栏，不是全部敏感数据识别保证。
+- 固定业务规则与不受信数据保持角色分离；所有 Provider 结果仍须通过本机 JSON、schema、证据 ID 唯一性、候选范围和业务不变量校验。
+- 云到云自动 fallback 默认关闭。Provider 失败只触发现有本地规则，不会改变收件箱、截止日期、项目完成标记或 `todayPlan`。
+- 详细部署配置和能力边界见 `docs/AI_PROVIDER.md`。
 
 ## 决策权
 
@@ -69,4 +74,4 @@ JSON 状态文件与外部项目目录不是同一种事务资源。正常错误
 
 `GET /api/health` 是 Docker 和运维使用的只读 readiness 信号。它读取并校验 state/config，检查 data/state/config/backups、解析后的工作区及所有业务目录的存在性、类型、权限、symlink 和 realpath 越界边界。该路径不创建探针文件或修复目录；任一检查失败时对外只暴露固定的 `not_ready` 状态，不暴露绝对路径、JSON 内容或底层错误。
 
-这是文件系统依赖就绪检查，不是端到端业务验收：`200` 不证明 OpenAI 可达、外部备份可恢复或视觉浏览器流程正常。
+这是文件系统依赖就绪检查，不是端到端业务验收：`200` 不证明任一 AI Provider 可达、第三方 API 已通过真实验证、外部备份可恢复或视觉浏览器流程正常。

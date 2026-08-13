@@ -58,7 +58,7 @@ npm start
 
 Docker Compose 改端口时使用 `WORKBENCH_PORT`，它会同时修改宿主机发布端口和容器内应用监听端口。例如设置 `WORKBENCH_PORT=8080` 后，从 `http://127.0.0.1:8080` 访问；不要只修改原生启动使用的 `PORT`。
 
-## OpenAI
+## AI 判断 Provider
 
 设置：
 
@@ -67,11 +67,13 @@ export OPENAI_API_KEY="..."
 export OPENAI_MODEL="gpt-5.6-luna"
 ```
 
-默认 AI 判断器是 `gpt-5.6-luna`，推理档位在代码中固定为极高（`xhigh`）。工作台通过 OpenAI Responses API 的 Structured Outputs 运行三段式分析工作流：先列出可核对的证据，再标明冲突与信息缺口，最后给出结构化业务结论。模型只返回简短、可审计的依据，不请求隐藏思维过程；分析信封仅用于本次本机校验，持久化时只保存业务结论，不保存依据草稿或隐藏思维。
+默认 AI Provider 是 `openai_luna`，模型为 `gpt-5.6-luna`，推理档位在代码中固定为极高（`xhigh`）。工作台通过 OpenAI Responses API 的 Structured Outputs 运行三段式分析工作流：先列出可核对的证据，再标明冲突与信息缺口，最后给出结构化业务结论。模型只返回简短、可审计的依据，不请求隐藏思维过程；分析信封仅用于本次本机校验，持久化时只保存业务结论，不保存依据草稿或隐藏思维。
 
-稳定规则放在 developer instructions，项目、文件、Git 和对话数据作为不可信 user input 发送；返回结果会拒绝 incomplete/refusal，并在本机再次校验字段、类型、长度和候选 ID。Luna 的 `xhigh` 推理通常比低档位有更高延迟和调用成本；配置 Key、运行 `npm run doctor` 或在设置页看到“已配置”，都只证明请求参数已经就绪，不证明模型已经联网可达。OpenAI 超时、拒绝、不可达或结构化结果校验失败时，项目创建、项目进度和早晨对话都会回退到本地规则，不影响基础项目管理，也不会因此自动安排今日任务。
+稳定规则放在 developer instructions，项目、文件、Git 和对话数据作为不可信 user input 发送；返回结果会拒绝 incomplete/refusal，并在本机再次校验字段、类型、长度和候选 ID。Luna 的 `xhigh` 推理通常比低档位有更高延迟和调用成本；配置 Key、运行 `npm run doctor` 或在设置页看到“已配置”，都只证明请求参数已经就绪，不证明模型已经联网可达。Provider 超时、拒绝、不可达或结构化结果校验失败时，项目创建、项目进度和早晨对话都会回退到本地规则，不影响基础项目管理，也不会因此自动安排今日任务。
 
-启用 Key 后，项目描述、业务板块、项目/待办元数据、相对文件名与修改时间、Git 提交元数据和早晨对话上下文会发送给 OpenAI，并在发送前做通用凭证脱敏。`PROJECT.md` 和可读文件正文默认只在本机处理；只有显式设置 `OPENAI_SEND_FILE_CONTENT=1` 才会把这两类正文加入请求，仍会脱敏。脱敏不能代替人工检查，不应对高敏感项目开启正文发送。请求使用 `store:false`，但这不等于承诺服务商零处理或零留存；请同时核对当前 OpenAI 数据政策。
+启用 Provider 后，项目描述、业务板块、项目/待办元数据、相对文件名与修改时间、Git 提交元数据和早晨对话上下文会发送给 Provider，并在发送前做通用凭证脱敏。`PROJECT.md` 和可读文件正文默认只在本机处理；只有显式设置 `AI_SEND_FILE_CONTENT=1` 才会把这两类正文加入请求（默认 Luna 入口兼容旧的 `OPENAI_SEND_FILE_CONTENT=1`），仍会脱敏。脱敏不能代替人工检查，不应对高敏感项目开启正文发送。默认请求使用 `store:false`，但这不等于承诺服务商零处理或零留存；请同时核对实际 Provider 的数据政策。
+
+如需接入已经审查过的兼容服务，管理员可选择 `third_party_responses` 或 `third_party_chat_completions`，并按 [`docs/AI_PROVIDER.md`](docs/AI_PROVIDER.md) 配置固定 endpoint、origin allowlist、模型和凭证。第三方 Profile 默认关闭；不满足 `xhigh`、strict schema 或 no-store 能力时，程序默认拒绝调用，只有显式批准的降级才会标记为 `degraded`。配置和合同测试通过不等于真实 endpoint 已联网验收。
 
 ## 你的真实项目目录
 

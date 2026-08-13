@@ -123,7 +123,7 @@ export function deriveState(appRoot,state,config,aiEnabled=false){
   const todayTodos=todayPlan.map(id=>todos.find(t=>t.id===id)).filter(Boolean).filter(t=>!t.done);
   return {
     config:{...config,workspaceRootResolved:resolveWorkspace(appRoot,config),dataSource:config.dataSource?{...config.dataSource}:null},
-    aiEnabled, aiConfig:aiEnabled?{provider:'openai',...aiRuntimeConfig()}:null, projects, businesses:config.businesses, inbox:state.inbox, todos, todayPlan, todayPlanDate:state.todayPlanDate,
+    aiEnabled, aiConfig:aiEnabled?aiRuntimeConfig():null, projects, businesses:config.businesses, inbox:state.inbox, todos, todayPlan, todayPlanDate:state.todayPlanDate,
     todayTodos, confirmations:state.confirmations, notes:state.notes, activities:state.activities,
     morningSession: state.morningSessions.find(s=>s.date===today) || null,
     overdue, unclassified,
