@@ -31,10 +31,10 @@ async function fixture(t){
 }
 
 test('machine progress retains operational state but strips narrative text',()=>{
-  const progress=machineProgress({percent:61,status:'进行中',summary:'详细分析',resume:'恢复摘要',blocker:'存在卡点',lastActivity:'2026-08-13T01:00:00Z',syncedAt:'2026-08-13T02:00:00Z',confidence:.7},{revisionId:9,item:{blockId:'blk_9'},recordedAt:'2026-08-13T02:00:00Z'});
+  const progress=machineProgress({percent:61,status:'进行中',summary:'详细分析',resume:'恢复摘要',blocker:'存在卡点',lastActivity:'2026-08-13T01:00:00Z',syncedAt:'2026-08-13T02:00:00Z',confidence:.7},{revisionId:9,item:{blockId:'blk_9'},recordedAt:'2026-08-13T02:00:00Z',operationId:'pa_test'});
   assert.deepEqual(progress,{
     percent:61,status:'进行中',hasBlocker:true,lastActivity:'2026-08-13T01:00:00Z',syncedAt:'2026-08-13T02:00:00Z',confidence:.7,
-    feishuRevisionId:'9',feishuRecordBlockId:'blk_9',feishuRecordedAt:'2026-08-13T02:00:00Z'
+    feishuRevisionId:'9',feishuRecordBlockId:'blk_9',feishuRecordedAt:'2026-08-13T02:00:00Z',feishuOperationId:'pa_test'
   });
   assert.equal('summary' in progress,false);
   assert.equal('resume' in progress,false);
@@ -76,42 +76,63 @@ test('PROJECT.md managed block is identity-only and points narrative to Feishu',
 
 test('Feishu project parser reads only fixed project record section and prefixes',()=>{
   const xml=projectDoc([
-    '[WORKBENCH_ANALYSIS] 分析一',
+    '[WORKBENCH_ANALYSIS] [WORKBENCH_OP:pa_one] 分析一',
     '[WORKBENCH_SUMMARY] 总结一',
     '普通项目正文不得进入记录'
   ]).replace('</h1><p id="intro_p">介绍正文</p>','</h1><p id="intro_p">[WORKBENCH_ANALYSIS] 其他章节不得读取</p>');
   const parsed=parseFeishuProjectRecordsXml(xml);
   assert.equal(parsed.sectionFound,true);
   assert.equal(parsed.headingBlockId,'records');
-  assert.deepEqual(parsed.items.map(item=>[item.kind,item.text]),[['analysis','分析一'],['summary','总结一']]);
+  assert.deepEqual(parsed.items.map(item=>[item.kind,item.operationId,item.text]),[['analysis','pa_one','分析一'],['summary',null,'总结一']]);
 });
 
-test('Feishu project record client creates fixed section and confirms append by new block id',async()=>{
+test('Feishu project record client creates fixed section and confirms append by operation id',async()=>{
   const calls=[];
   let stage=0;
   const fakeExec=async(command,args)=>{
     calls.push({command,args});
     if(args.includes('+fetch')){
-      const content=stage===0?projectDoc([],{withSection:false}):stage===1?projectDoc([]):projectDoc(['[WORKBENCH_ANALYSIS] 新分析']);
+      const content=stage===0
+        ?projectDoc([],{withSection:false})
+        :stage===1
+          ?projectDoc([])
+          :projectDoc(['[WORKBENCH_ANALYSIS] [WORKBENCH_OP:pa_test] 新分析']);
       return {stdout:JSON.stringify({data:{document:{content,revision_id:stage+1,document_id:'doc'}}})};
     }
     stage+=1;
     return {stdout:JSON.stringify({ok:true})};
   };
   const client=createFeishuProjectRecordClient({exec:fakeExec});
-  const result=await client.appendAnalysis('https://example.feishu.cn/wiki/project','新分析');
+  const result=await client.appendAnalysis('https://example.feishu.cn/wiki/project','新分析',{operationId:'pa_test'});
   assert.equal(result.item.kind,'analysis');
+  assert.equal(result.item.operationId,'pa_test');
   assert.equal(result.item.text,'新分析');
   assert.equal(result.item.blockId,'r_0');
   assert.equal(calls.filter(call=>call.args.includes('+update')).length,2);
 });
 
-test('project summary is written to Feishu and local activity does not duplicate summary text',async t=>{
+test('same operation id replays the existing Feishu record without another write',async()=>{
+  const calls=[];
+  const fakeExec=async(command,args)=>{
+    calls.push({command,args});
+    if(args.includes('+fetch')){
+      return {stdout:JSON.stringify({data:{document:{content:projectDoc(['[WORKBENCH_SUMMARY] [WORKBENCH_OP:ps_same] 已存在总结']),revision_id:9,document_id:'doc'}}})};
+    }
+    throw new Error('replay must not write');
+  };
+  const client=createFeishuProjectRecordClient({exec:fakeExec});
+  const result=await client.appendSummary('https://example.feishu.cn/wiki/project','已存在总结',{operationId:'ps_same'});
+  assert.equal(result.replayed,true);
+  assert.equal(result.item.blockId,'r_0');
+  assert.equal(calls.filter(call=>call.args.includes('+update')).length,0);
+});
+
+test('project summary is written to Feishu, updates pointer, and local activity does not duplicate text',async t=>{
   const store=await fixture(t);
   const calls=[];
   const client={
-    appendSummary:async(url,text)=>{calls.push({url,text});return{revisionId:12,item:{blockId:'sum_12'}};},
-    fetch:async()=>({revisionId:12,items:[{blockId:'a1',kind:'analysis',text:'远端分析'}]})
+    appendSummary:async(url,text,{operationId})=>{calls.push({url,text,operationId});return{revisionId:12,item:{blockId:'sum_12',operationId}};},
+    fetch:async()=>({revisionId:12,items:[{blockId:'a1',kind:'analysis',operationId:null,text:'远端分析'}]})
   };
   const secretSummary='这是只应存在飞书的阶段总结正文';
   const saved=await appendProjectSummary({store,projectId:'p_test',text:secretSummary,projectRecordClient:client});
@@ -119,10 +140,12 @@ test('project summary is written to Feishu and local activity does not duplicate
   assert.equal(calls[0].text,secretSummary);
   const state=await store.readState();
   assert.equal(JSON.stringify(state).includes(secretSummary),false);
+  assert.equal(state.projects[0].progress.feishuRecordBlockId,'sum_12');
+  assert.equal(state.projects[0].progress.feishuOperationId,saved.operationId);
   assert.ok(state.activities.some(activity=>activity.type==='project_summary_saved'));
 
   const records=await readProjectRecords({store,projectId:'p_test',projectRecordClient:client});
-  assert.deepEqual(records.records,[{blockId:'a1',kind:'analysis',text:'远端分析'}]);
+  assert.deepEqual(records.records,[{blockId:'a1',kind:'analysis',operationId:null,text:'远端分析'}]);
 });
 
 test('narrative formatter contains human-readable analysis only for remote write payload',()=>{
