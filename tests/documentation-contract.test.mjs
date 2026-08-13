@@ -14,7 +14,7 @@ test('iPhone documentation requires a stable captureId across retries',async()=>
 });
 
 test('public documentation contains no repository-specific Feishu URL',async()=>{
-  const files=['README.md','docs/DEPLOYMENT.md','docs/IPHONE_SHORTCUT.md'];
+  const files=['README.md','docs/PRODUCT_SPEC.md','docs/ARCHITECTURE.md','docs/DEPLOYMENT.md','docs/IPHONE_SHORTCUT.md'];
   for(const file of files){
     const text=await read(file);
     assert.doesNotMatch(text,/xcnn2pk8gpzl\.feishu\.cn/);
@@ -22,16 +22,22 @@ test('public documentation contains no repository-specific Feishu URL',async()=>
   }
 });
 
-test('README and API document captureId and backup v2 recovery fields',async()=>{
-  const [readme,api,deployment]=await Promise.all([
-    read('README.md'),read('docs/API.md'),read('docs/DEPLOYMENT.md')
+test('authoritative docs bind captureId and backup v2 recovery fields',async()=>{
+  const [readme,product,architecture,api,deployment]=await Promise.all([
+    read('README.md'),
+    read('docs/PRODUCT_SPEC.md'),
+    read('docs/ARCHITECTURE.md'),
+    read('docs/API.md'),
+    read('docs/DEPLOYMENT.md')
   ]);
-  for(const text of [readme,api])assert.match(text,/"captureId"/);
-  for(const text of [readme,api,deployment]){
+  for(const text of [readme,product,architecture,api])assert.match(text,/captureId/);
+  for(const text of [readme,product,architecture,api,deployment]){
     assert.match(text,/backup v2/i);
     assert.match(text,/captureReceipts/);
     assert.match(text,/projectRecordReceipts/);
   }
   assert.match(api,/`GET \/api\/export`[\s\S]*不是完整恢复包/);
   assert.match(deployment,/旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段/);
+  assert.match(product,/旧备份没有凭据字段时，保留当前凭据目录/);
+  assert.match(architecture,/恢复任一阶段失败[\s\S]*回滚/);
 });
