@@ -5,6 +5,7 @@ let scheduled=false;
 
 function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
 function pipeline(){return didaState?.config?.settings?.[PIPELINE_KEY]||{enabled:false,cliFlavor:'ticktick',journalDocumentUrl:'',journalHeading:'每日工作日记',calendarEnabled:true,calendarName:'个人 AI 工作台'};}
+function regionLabel(value){return value==='dida365'?'国内版（dida365.com）':'国际版（ticktick.com）';}
 
 async function json(url,options={}){
   const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
@@ -47,13 +48,13 @@ function integrationSettingsHtml(value){
     <div class="section-title">外部待办来源与沉淀</div>
     <label class="dida-check"><input id="dida-enabled" type="checkbox" ${enabled?'checked':''}> 启用滴答 CLI 单向同步</label>
     <div class="dida-settings-grid">
-      <label><span>CLI 类型</span><select id="dida-cli-flavor"><option value="ticktick" ${value.cliFlavor==='ticktick'?'selected':''}>ticktick</option><option value="dida365" ${value.cliFlavor==='dida365'?'selected':''}>dida365</option></select></label>
+      <label><span>滴答账户区域</span><select id="dida-cli-flavor"><option value="ticktick" ${value.cliFlavor==='ticktick'?'selected':''}>国际版（ticktick.com）</option><option value="dida365" ${value.cliFlavor==='dida365'?'selected':''}>国内版（dida365.com）</option></select></label>
       <label><span>本机日历名称</span><input id="dida-calendar-name" value="${esc(value.calendarName||'个人 AI 工作台')}"></label>
     </div>
     <label><span>飞书每日工作日记 URL</span><input id="dida-journal-url" type="url" placeholder="https://你的租户.feishu.cn/wiki/..." value="${esc(value.journalDocumentUrl||'')}"></label>
     <label class="dida-check"><input id="dida-calendar-enabled" type="checkbox" ${value.calendarEnabled!==false?'checked':''}> 同步生成本机 ICS 日历</label>
-    <p>任务事实只从滴答 CLI 读取；飞书只保存待办快照和每日总结；日历只镜像源任务已有的日期与时间，不由 AI 排期。</p>
-    ${value.lastSyncAt?`<div class="dida-status"><strong>最近同步</strong><span>${esc(new Date(value.lastSyncAt).toLocaleString('zh-CN'))} · ${value.lastSyncStatus==='ok'?'成功':'失败'}${value.lastSyncError?` · ${esc(value.lastSyncError)}`:''}</span>${value.lastCalendarPath?`<code>${esc(value.lastCalendarPath)}</code>`:''}</div>`:''}
+    <p>程序始终执行固定的 <code>ticktick</code> CLI，并按账户区域设置 <code>TICKTICK_HOST</code>。任务事实只从 CLI 读取；飞书只保存待办快照和每日总结；日历只镜像源任务已有的日期与时间，不由 AI 排期。</p>
+    ${value.lastSyncAt?`<div class="dida-status"><strong>最近同步</strong><span>${esc(new Date(value.lastSyncAt).toLocaleString('zh-CN'))} · ${value.lastSyncStatus==='ok'?'成功':'失败'} · ${esc(regionLabel(value.cliFlavor))}${value.lastSyncError?` · ${esc(value.lastSyncError)}`:''}</span>${value.lastCalendarPath?`<code>${esc(value.lastCalendarPath)}</code>`:''}</div>`:''}
   </section>`;
 }
 
@@ -80,7 +81,7 @@ function enhanceSyncButtons(){
   const value=pipeline();
   for(const button of document.querySelectorAll('[data-action="sync-feishu"]')){
     button.textContent=value.enabled?'同步滴答待办':'配置滴答待办';
-    button.title=value.enabled?'从滴答 CLI 读取，写入飞书日记并更新本机日历':'先配置滴答 CLI、飞书日记与本机日历';
+    button.title=value.enabled?'从 ticktick CLI 读取，写入飞书日记并更新本机日历':'先配置滴答账户区域、飞书日记与本机日历';
   }
   const actions=document.querySelector('.topbar .actions');
   if(actions&&!actions.querySelector('[data-dida-action="publish-summary"]')){
@@ -99,7 +100,7 @@ function enhanceInboxCopy(){
     if(title.textContent.includes('当前还没有配置飞书日记来源')){
       title.textContent=value.enabled?'滴答 CLI 待办来源已启用':'尚未配置滴答 CLI 待办来源';
       const text=title.nextElementSibling;
-      if(text)text.textContent=value.enabled?'点击顶部“同步滴答待办”开始单向读取。':'打开设置，配置 CLI 类型、飞书每日工作日记和本机日历。';
+      if(text)text.textContent=value.enabled?`点击顶部“同步滴答待办”开始单向读取 · ${regionLabel(value.cliFlavor)}`:'打开设置，配置滴答账户区域、飞书每日工作日记和本机日历。';
     }else if(title.textContent.startsWith('数据来源：飞书云文档')){
       title.textContent='待办来源：滴答清单 CLI；沉淀目标：飞书工作日记';
       const text=title.nextElementSibling;
@@ -114,7 +115,7 @@ function enhanceTaskSourceCard(){
   if(!card||card.querySelector('.dida-source-card'))return;
   const value=pipeline();
   const status=document.createElement('div');status.className='dida-source-card';
-  status.innerHTML=`<strong>${value.enabled?'滴答 CLI 单向来源':'滴答 CLI 尚未启用'}</strong><span>${value.enabled?`${esc(value.cliFlavor)} · 飞书日记 + ${value.calendarEnabled!==false?'本机 ICS 日历':'不生成日历'}`:'在设置中启用后，正式待办将按外部任务 ID 去重。'}</span>`;
+  status.innerHTML=`<strong>${value.enabled?'滴答 CLI 单向来源':'滴答 CLI 尚未启用'}</strong><span>${value.enabled?`${esc(regionLabel(value.cliFlavor))} · 飞书日记 + ${value.calendarEnabled!==false?'本机 ICS 日历':'不生成日历'}`:'在设置中启用后，正式待办将按外部任务 ID 去重。'}</span>`;
   const head=card.querySelector('.card-head');head?.insertAdjacentElement('afterend',status);
 }
 
@@ -140,7 +141,7 @@ async function saveIntegration(event,target){
     if(patch.enabled&&!patch.journalDocumentUrl)throw new Error('启用同步时必须填写飞书每日工作日记 URL。');
     if(workspaceRoot)await json('/api/config',{method:'PATCH',body:JSON.stringify({workspaceRoot})});
     await rpc('external_task_integration_update',patch,true);
-    receipt('集成设置已保存','飞书不再作为收件箱来源；滴答 CLI 变为单向待办来源。');
+    receipt('集成设置已保存',`固定使用 ticktick CLI · ${regionLabel(patch.cliFlavor)}。飞书不再作为收件箱来源。`);
     setTimeout(()=>location.reload(),500);
   }catch(error){receipt('设置保存失败',error.message,true);target.disabled=false;didaBusy=false;}
   return true;
