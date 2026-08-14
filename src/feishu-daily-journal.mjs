@@ -34,6 +34,14 @@ function decodeXmlText(value){
     .trim();
 }
 
+function comparableText(value){
+  return String(value??'')
+    .replace(/\r\n/g,'\n')
+    .replace(/[ \t]+/g,' ')
+    .replace(/\s*\n\s*/g,'\n')
+    .trim();
+}
+
 function escapeXml(value){
   return String(value??'').replace(/[&<>"']/g,char=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'
@@ -176,7 +184,12 @@ export function createFeishuDailyJournalClient({exec=execFileAsync,timeoutMs=DEF
     const current=await ensureSection(url,heading);
     const existing=current.items.filter(item=>item.kind===kind&&item.operationId===op);
     if(existing.length>1)throw new FeishuDailyJournalError('飞书日记中存在重复 operationId，需要人工核对。',{code:'FEISHU_DAILY_JOURNAL_DUPLICATE_OPERATION',statusCode:409});
-    if(existing.length===1)return{...current,item:existing[0],replayed:true,operationId:op};
+    if(existing.length===1){
+      if(comparableText(existing[0].text)!==comparableText(value)){
+        throw new FeishuDailyJournalError('同一飞书日记 operationId 已对应不同正文，需要人工核对。',{code:'FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT',statusCode:409});
+      }
+      return{...current,item:existing[0],replayed:true,operationId:op};
+    }
     const anchor=current.items.at(-1)?.blockId||current.headingBlockId;
     const prefix=kind==='tasks'?DAILY_TASKS_PREFIX:DAILY_SUMMARY_PREFIX;
     await updateDocument(url,{
@@ -186,6 +199,9 @@ export function createFeishuDailyJournalClient({exec=execFileAsync,timeoutMs=DEF
     const fetched=await fetchRecords(url,{heading});
     const matches=fetched.items.filter(item=>item.kind===kind&&item.operationId===op);
     if(matches.length!==1)throw new FeishuDailyJournalError('飞书日记写入后无法唯一读回 operationId。',{code:'FEISHU_DAILY_JOURNAL_READBACK_FAILED'});
+    if(comparableText(matches[0].text)!==comparableText(value)){
+      throw new FeishuDailyJournalError('飞书日记写入后读回正文不一致。',{code:'FEISHU_DAILY_JOURNAL_READBACK_FAILED'});
+    }
     return{...fetched,item:matches[0],replayed:false,operationId:op};
   }
   return{
