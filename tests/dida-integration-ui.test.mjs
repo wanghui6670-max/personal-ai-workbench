@@ -13,6 +13,10 @@ test('browser loads the Dida source, Feishu journal and local calendar integrati
   assert.match(script,/external_tasks_sync/);
   assert.match(script,/daily_summary_publish/);
   assert.match(script,/external_task_integration_update/);
+  assert.match(script,/国际版（ticktick\.com）/);
+  assert.match(script,/国内版（dida365\.com）/);
+  assert.match(script,/固定的 <code>ticktick<\/code> CLI/);
+  assert.match(script,/TICKTICK_HOST/);
   assert.match(script,/日历只镜像源任务已有的日期与时间/);
   assert.doesNotMatch(script,/localStorage|sessionStorage|indexedDB/);
   assert.match(styles,/\.dida-settings/);
