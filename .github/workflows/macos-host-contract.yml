@@ -5,23 +5,34 @@ on:
     branches:
       - main
       - agent/macos-host-p0
+      - agent/macos-one-click-bootstrap
     paths:
       - 'src/host-p0.mjs'
+      - 'src/macos-bootstrap.mjs'
       - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-bootstrap.mjs'
       - 'scripts/macos-launch-agent.mjs'
       - 'scripts/p0-deployment-acceptance.mjs'
+      - 'install-macos.command'
       - 'tests/host-p0.test.mjs'
+      - 'tests/macos-bootstrap.test.mjs'
       - 'docs/MACOS_HOST_P0.md'
+      - 'docs/MACOS_ONE_CLICK.md'
       - 'package.json'
       - '.github/workflows/macos-host-contract.yml'
   pull_request:
     paths:
       - 'src/host-p0.mjs'
+      - 'src/macos-bootstrap.mjs'
       - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-bootstrap.mjs'
       - 'scripts/macos-launch-agent.mjs'
       - 'scripts/p0-deployment-acceptance.mjs'
+      - 'install-macos.command'
       - 'tests/host-p0.test.mjs'
+      - 'tests/macos-bootstrap.test.mjs'
       - 'docs/MACOS_HOST_P0.md'
+      - 'docs/MACOS_ONE_CLICK.md'
       - 'package.json'
       - '.github/workflows/macos-host-contract.yml'
   workflow_dispatch:
@@ -32,14 +43,35 @@ permissions:
 jobs:
   macos-host-contract:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
+      - name: Validate one-click entry and host scripts
+        run: |
+          test -x install-macos.command
+          bash -n install-macos.command
+          node --check src/macos-bootstrap.mjs
+          node --check scripts/macos-bootstrap.mjs
+          node --check scripts/macos-launch-agent.mjs
       - name: Run macOS host contract tests
-        run: node --test tests/host-p0.test.mjs
+        run: node --test tests/host-p0.test.mjs tests/macos-bootstrap.test.mjs
+      - name: Validate one-click prepare-only flow on macOS
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/AI-Work-OS" "$RUNNER_TEMP/workbench-data"
+          git switch -C main HEAD
+          git update-ref refs/remotes/origin/main HEAD
+          SMOKE_PORT="$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close();});")"
+          WORKBENCH_INSTALL_NO_PAUSE=1 node scripts/macos-bootstrap.mjs \
+            --prepare-only \
+            --no-open \
+            --workspace "$RUNNER_TEMP/AI-Work-OS" \
+            --data-dir "$RUNNER_TEMP/workbench-data" \
+            --port "$SMOKE_PORT"
+          node -e "const fs=require('node:fs'),path=require('node:path');const root=process.env.RUNNER_TEMP;const bootstrap=JSON.parse(fs.readFileSync(path.join(root,'workbench-data/p0/macos-bootstrap.json'),'utf8'));const host=JSON.parse(fs.readFileSync(path.join(root,'workbench-data/p0/host-readiness.json'),'utf8'));if(bootstrap.status!=='prepared'||host.status!=='passed'||host.scope.joycrewEnabled!==false)throw new Error('prepare-only evidence invalid');"
       - name: Validate generated LaunchAgent with plutil
         run: |
           node --input-type=module <<'NODE'
@@ -68,7 +100,7 @@ jobs:
           npm run p0:acceptance -- --report artifacts/macos-p0-deployment-acceptance.json
           node -e "const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('artifacts/macos-p0-deployment-acceptance.json','utf8'));if(value.status!=='passed'||value.runtime.platform!=='darwin')throw new Error('macOS P0 evidence invalid');"
       - name: Upload macOS P0 evidence
-        if: always()
+        if: ${{ always() && hashFiles('artifacts/macos-p0-deployment-acceptance.json') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: personal-ai-workbench-macos-p0-${{ github.sha }}
