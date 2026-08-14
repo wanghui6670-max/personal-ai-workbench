@@ -26,17 +26,22 @@ test('real-host binding requires explicit separate paths, localhost, and Joycrew
   });
 });
 
-test('metadata snapshot detects data changes and ignores build caches when requested',async t=>{
+test('content snapshot ignores safe rewrite timestamps but detects real data changes and ignored-cache changes',async t=>{
   const root=await temp(t);
-  await fsp.mkdir(path.join(root,'project'),{recursive:true});
-  await fsp.writeFile(path.join(root,'project','a.txt'),'one','utf8');
+  const dataFile=path.join(root,'project','a.txt');
+  await fsp.mkdir(path.dirname(dataFile),{recursive:true});
+  await fsp.writeFile(dataFile,'one','utf8');
   await fsp.mkdir(path.join(root,'project','node_modules','pkg'),{recursive:true});
   await fsp.writeFile(path.join(root,'project','node_modules','pkg','ignored.js'),'one','utf8');
   const before=await snapshotTree(root,{hashFiles:true,ignoreNames:['node_modules']});
   await fsp.writeFile(path.join(root,'project','node_modules','pkg','ignored.js'),'two','utf8');
   const ignored=await snapshotTree(root,{hashFiles:true,ignoreNames:['node_modules']});
   assert.equal(compareSnapshots(before,ignored).equal,true);
-  await fsp.writeFile(path.join(root,'project','a.txt'),'two','utf8');
+  const later=new Date(Date.now()+5000);
+  await fsp.utimes(dataFile,later,later);
+  const touched=await snapshotTree(root,{hashFiles:true,ignoreNames:['node_modules']});
+  assert.equal(compareSnapshots(before,touched).equal,true,'content-hashed files must ignore mtime-only rewrites');
+  await fsp.writeFile(dataFile,'two','utf8');
   const after=await snapshotTree(root,{hashFiles:true,ignoreNames:['node_modules']});
   assert.equal(compareSnapshots(before,after).equal,false);
   assert.equal(before.counts.contentHashedFiles,1);
