@@ -4,7 +4,11 @@ import { promisify } from 'node:util';
 const execFileAsync=promisify(execFile);
 const DEFAULT_TIMEOUT_MS=45_000;
 const MAX_BUFFER=8*1024*1024;
-const CLI_COMMANDS=Object.freeze({ticktick:'ticktick',dida365:'dida365'});
+const CLI_COMMAND='ticktick';
+const CLI_PROFILES=Object.freeze({
+  ticktick:{host:'ticktick.com'},
+  dida365:{host:'dida365.com'}
+});
 
 export class ExternalTaskSourceError extends Error{
   constructor(message,{cause,code='EXTERNAL_TASK_SOURCE_UNAVAILABLE',statusCode=502}={}){
@@ -105,26 +109,31 @@ export function parseCliTasks(payload,{forceDone=false}={}){
   return [...unique.values()];
 }
 
-function cliError(error,flavor,action){
+function cliError(error,profile,action){
   if(error instanceof ExternalTaskSourceError)return error;
-  const command=CLI_COMMANDS[flavor]||flavor;
   if(error?.code==='ENOENT'){
-    return new ExternalTaskSourceError(`未找到 ${command} CLI。请先在运行工作台的本机安装并登录滴答清单 CLI。`,{cause:error,code:'EXTERNAL_TASK_CLI_MISSING'});
+    return new ExternalTaskSourceError('未找到 ticktick CLI。请先在运行工作台的本机安装并登录滴答清单 CLI。',{cause:error,code:'EXTERNAL_TASK_CLI_MISSING'});
   }
-  return new ExternalTaskSourceError(`滴答 CLI ${action}失败，请检查登录状态和网络。`,{cause:error});
+  const region=profile.host==='dida365.com'?'国内版':'国际版';
+  return new ExternalTaskSourceError(`滴答 CLI ${action}失败（${region}）。请检查登录状态、TICKTICK_HOST 和网络。`,{cause:error});
 }
 
-async function runJson(command,args,flavor,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
+async function runJson(args,profile,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
   try{
-    const result=await exec(command,args,{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true});
+    const result=await exec(CLI_COMMAND,args,{
+      timeout:timeoutMs,
+      maxBuffer:MAX_BUFFER,
+      windowsHide:true,
+      env:{...process.env,TICKTICK_HOST:profile.host}
+    });
     return extractJson(result.stdout);
-  }catch(error){throw cliError(error,flavor,action);}
+  }catch(error){throw cliError(error,profile,action);}
 }
 
 export function normalizeCliFlavor(value){
   const flavor=String(value||'ticktick').trim().toLowerCase();
-  if(!Object.hasOwn(CLI_COMMANDS,flavor)){
-    throw new ExternalTaskSourceError('CLI 类型只支持 ticktick 或 dida365。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
+  if(!Object.hasOwn(CLI_PROFILES,flavor)){
+    throw new ExternalTaskSourceError('滴答账户区域只支持 ticktick 或 dida365。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
   }
   return flavor;
 }
@@ -133,15 +142,15 @@ export function createTaskCliClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOU
   return {
     async fetch(config={}){
       const cliFlavor=normalizeCliFlavor(config.cliFlavor);
-      const command=CLI_COMMANDS[cliFlavor];
-      await runJson(command,['sync','--json'],cliFlavor,'同步',{exec,timeoutMs});
-      const activePayload=await runJson(command,['tasks','list','--json'],cliFlavor,'读取待办',{exec,timeoutMs});
+      const profile=CLI_PROFILES[cliFlavor];
+      await runJson(['sync','--json'],profile,'同步',{exec,timeoutMs});
+      const activePayload=await runJson(['tasks','list','--json'],profile,'读取待办',{exec,timeoutMs});
       const active=parseCliTasks(activePayload,{forceDone:false}).filter(task=>!task.done);
       let completed=[];
       let completedAvailable=true;
       let completedWarning=null;
       try{
-        const completedPayload=await runJson(command,['tasks','completed','--json'],cliFlavor,'读取已完成待办',{exec,timeoutMs});
+        const completedPayload=await runJson(['tasks','completed','--json'],profile,'读取已完成待办',{exec,timeoutMs});
         completed=parseCliTasks(completedPayload,{forceDone:true});
       }catch(error){
         completedAvailable=false;
@@ -149,7 +158,11 @@ export function createTaskCliClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOU
       }
       const activeIds=new Set(active.map(task=>task.externalId));
       completed=completed.filter(task=>!activeIds.has(task.externalId));
-      return {provider:'dida_cli',cliFlavor,active,completed,completedAvailable,completedWarning,fetchedAt:new Date().toISOString()};
+      return {
+        provider:'dida_cli',cliFlavor,host:profile.host,
+        active,completed,completedAvailable,completedWarning,
+        fetchedAt:new Date().toISOString()
+      };
     }
   };
 }
