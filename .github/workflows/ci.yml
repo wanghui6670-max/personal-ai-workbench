@@ -105,13 +105,19 @@ jobs:
         run: docker run --rm --entrypoint node personal-ai-workbench:v2 scripts/harness-check.mjs
       - name: Start unified Workbench with Joycrew disabled and verify fail-isolation
         run: |
+          set -euo pipefail
           docker run -d --name workbench-v2-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 -e JOYCREW_ENABLED=0 personal-ai-workbench:v2
           trap 'docker rm -f workbench-v2-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 40); do
-            if curl --fail --silent http://127.0.0.1:49173/api/health >/dev/null; then break; fi
+            if curl --fail --silent http://127.0.0.1:49173/api/health >/tmp/workbench-health.json; then break; fi
+            if [ "$attempt" -eq 40 ]; then
+              docker logs workbench-v2-smoke || true
+              exit 1
+            fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:49173/api/health | grep '"version":"2.0.0"'
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-health.json','utf8')); if(value.ok!==true||value.version!=='2.0.0') throw new Error('unexpected health response');"
           curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'
           curl --fail --silent http://127.0.0.1:49173/joycrew-integration.js | grep '业务执行'
-          curl --fail --silent http://127.0.0.1:49173/api/joycrew/status | grep '"enabled":false'
+          curl --fail --silent http://127.0.0.1:49173/api/joycrew/status >/tmp/joycrew-status.json
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/joycrew-status.json','utf8')); if(value.joycrew?.enabled!==false) throw new Error('Joycrew fail-isolation contract changed');"
