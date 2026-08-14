@@ -5,7 +5,7 @@
 本轮把“飞书云文档是个人工作台收件箱来源”的旧结构改为：
 
 ```text
-滴答 CLI（任务来源）
+ticktick CLI（任务来源）
 → 工作台解析与去重
 → 飞书每日工作日记（任务快照与每日总结）
 → 本机 ICS 日历（明确日程镜像）
@@ -13,16 +13,21 @@
 
 ## 已实施
 
-- 固定 `ticktick` / `dida365` CLI allowlist；
+- 固定只执行 `ticktick` 二进制；
+- 国际版使用 `TICKTICK_HOST=ticktick.com`，国内版使用 `TICKTICK_HOST=dida365.com`；
 - JSON 任务解析与外部 task ID 去重；
 - 有截止日期进入正式待办，无截止日期进入收件箱；
 - 明确完成状态同步，并移出今日；
 - 飞书 `每日工作日记` 固定章节、固定前缀和 operationId 幂等读回；
+- 同一 operationId 对应不同正文时失败关闭；
 - 任务快照与用户触发的每日总结；
 - 私有、原子、稳定 UID 的本机 ICS 日历；
+- 全天任务保持全天，缺少完整时段时不猜时长；
 - MCP 设置、同步与总结工具；
 - 浏览器设置、同步按钮、总结按钮和状态回执；
-- 旧 `feishu_doc` 收件箱来源在启用新管线时自动关闭。
+- 旧 `feishu_doc` 收件箱来源在启用新管线时自动关闭；
+- 旧 `feishu_inbox_sync` 从 AI/MCP 白名单移除；
+- `npm run doctor` 检查两类 CLI 和本机日历路径。
 
 ## 未实施
 
