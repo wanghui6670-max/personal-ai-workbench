@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Syntax check control-plane, migration, inbox, capture, external tasks and browser modules
+      - name: Syntax check control-plane, external tasks, Harness and browser modules
         run: |
           node --check src/server.mjs
           node --check src/request-validation.mjs
@@ -48,14 +48,36 @@ jobs:
           node --check src/mcp/registry.mjs
           node --check src/mcp/project-record-tools.mjs
           node --check src/mcp/external-task-tools.mjs
+          node --check src/harness-auth.mjs
+          node --check src/harness-policy.mjs
+          node --check src/harness-navigator.mjs
+          node --check src/harness-http.mjs
+          node --check harness/joycrew-tool-bridge.mjs
+          node --check harness/runtime-bin.mjs
           node --check scripts/doctor.mjs
           node --check scripts/migrate-project-records.mjs
           node --check scripts/test-by-file.mjs
+          node --check scripts/harness-check.mjs
           node --check public/project-records.js
           node --check public/ux-enhancements.js
           node --check public/dida-integration.js
-      - name: Run contract tests with concise per-file diagnostics
+          node --check public/harness-navigator.js
+      - name: Run all contract tests
         env:
           OPENAI_API_KEY: ''
           AI_PROVIDER_ENABLED: '0'
+          HARNESS_ENABLED: '0'
         run: npm run test:files
+
+  harness-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Install pinned isolated Harness runtime
+        run: npm run harness:install
+      - name: Compile and initialize Navigator composition
+        run: npm run harness:check

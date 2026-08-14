@@ -77,5 +77,6 @@ export const requestSchemas={
   note:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false},
   aiPlan:{fields:{message:nonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
   aiExecute:{fields:{planId:nonEmptyString,confirmed:boolean},required:['planId','confirmed'],allowEmpty:false},
+  harnessNavigator:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
   mcp:{fields:{jsonrpc:nonEmptyString,id:{type:'string',nullable:true},method:nonEmptyString,params:{type:'object',schema:{fields:{},allowUnknown:true},nullable:true}},required:['jsonrpc','method'],allowEmpty:false}
 };

@@ -19,6 +19,9 @@ import { inspectReadiness } from './health.mjs';
 import { requestSchemas,validateRequestBody } from './request-validation.mjs';
 import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/registry.mjs';
 import { newId } from './utils.mjs';
+import { createHarnessNavigator } from './harness-navigator.mjs';
+import { createHarnessHttp } from './harness-http.mjs';
+import { harnessBridgeBaseUrl } from './harness-auth.mjs';
 
 const __filename=fileURLToPath(import.meta.url);const SRC_DIR=path.dirname(__filename);const APP_ROOT=path.dirname(SRC_DIR);const PUBLIC_DIR=path.join(APP_ROOT,'public');
 await loadWorkbenchEnv({root:APP_ROOT});
@@ -74,6 +77,12 @@ catch(error){refuseStartup(error.message);}
 const store=new JsonStore(DATA_DIR);await store.ensure();
 const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,initialConfig);
 const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store});
+const harnessNavigator=createHarnessNavigator({
+  appRoot:APP_ROOT,
+  bridgeUrl:harnessBridgeBaseUrl(host,port),
+  env:process.env
+});
+const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry});
 const aiPlans=new Map();
 const AI_PLAN_TTL_MS=10*60*1000;
 function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
@@ -104,7 +113,7 @@ const server=http.createServer(async(req,rawRes)=>{
       try{
         const {workspaceRoot}=await inspectReadiness({appRoot:APP_ROOT,store});
         const enabled=aiEnabled();
-        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?aiRuntimeConfig():null};
+        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?aiRuntimeConfig():null,harnessNavigator:harnessNavigator.status()};
         if((!publicExposure&&!authEnabled())||(authEnabled()&&isAuthenticated(req)))health.workspaceRoot=workspaceRoot;
         return sendJson(res,200,health);
       }catch{
@@ -139,7 +148,11 @@ const server=http.createServer(async(req,rawRes)=>{
       });
     }
 
+    if(await harnessHttp.handleBridge(req,res,pathname))return;
+
     if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
+
+    if(await harnessHttp.handleUser(req,res,pathname,{rateLimit:()=>rateLimited(req,res,'navigator')}))return;
 
     if(pathname==='/api/ai/tools'&&req.method==='GET')return sendJson(res,200,{tools:mcpRegistry.list(),mcpTransport:'/api/mcp'});
     if(pathname==='/api/ai/plan'&&req.method==='POST'){
@@ -250,6 +263,8 @@ const server=http.createServer(async(req,rawRes)=>{
   }
 });
 
+server.on('close',()=>{void harnessNavigator.close();});
+
 const config=initialConfig;
 server.listen(port,host,()=>{
   console.log(`\n个人 AI 项目管理工作台 v1.2.0`);
@@ -258,7 +273,9 @@ server.listen(port,host,()=>{
   console.log(`Workspace: ${resolveWorkspace(APP_ROOT,config)}`);
   const aiConfig=aiRuntimeConfig();
   console.log(`AI: ${aiEnabled()?`${aiConfig.provider} configured · ${aiConfig.profileId} · ${aiConfig.model} / ${aiConfig.reasoningEffort} (not live-verified)`:'local fallback'}`);
+  const harnessStatus=harnessNavigator.status();
+  console.log(`Harness Navigator: ${harnessStatus.available?`${harnessStatus.harnessVersion} · ${harnessStatus.model} · read-only`:`${harnessStatus.reason||'unavailable'} (left workbench unaffected)`}`);
   console.log(`Auth: ${authEnabled()?'password enabled':'disabled (localhost recommended)'}`);
 });
 
-export { server, store, APP_ROOT };
+export { server, store, APP_ROOT, harnessNavigator };
