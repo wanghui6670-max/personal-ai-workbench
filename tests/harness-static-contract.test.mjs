@@ -9,10 +9,12 @@ test('Navigator composition contains no execution or persistence plugin',async()
   const config=await fsp.readFile('harness/navigator.cordis.yml','utf8');
   const pluginNames=[...config.matchAll(/^\s*name:\s*['"]?([^'"\s]+)['"]?\s*$/gm)].map(match=>match[1]);
   for(const banned of BANNED_PLUGINS)assert.equal(pluginNames.some(name=>name.startsWith(banned)),false,banned);
-  assert.equal(pluginNames.includes('@deepseek-ai/dsh-mcp-client'),true);
-  assert.match(config,/serverName: joycrew/);
-  assert.match(config,/command: !!js process\.execPath/);
-  assert.match(config,/failOnStartupError: true/);
+  assert.equal(pluginNames.includes('./joycrew-sdk-server.mjs'),true);
+  const gate=await fsp.readFile('harness/joycrew-sdk-server.mjs','utf8');
+  assert.match(gate,/await McpClient\.apply/);
+  assert.match(gate,/SdkServer\.apply\(ctx,config\)/);
+  assert.ok(gate.indexOf('await McpClient.apply')<gate.indexOf('SdkServer.apply(ctx,config)'));
+  assert.match(gate,/failOnStartupError:true/);
 });
 
 test('browser Navigator keeps conversation state in module memory only',async()=>{

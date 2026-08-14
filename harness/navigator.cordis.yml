@@ -1,9 +1,9 @@
-# Joycrew Navigator V1: Agent core + approved model adapter + official MCP client.
+# Joycrew Navigator V1: Agent core + approved model adapter + gated SDK/MCP entry.
 # No shell, filesystem, terminal, web, jobs, workflow, cron, subagent, approval,
 # or session-persistence plugin is mounted.
 
-- id: sdk-jsonrpc-server
-  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+- id: joycrew-sdk-server
+  name: './joycrew-sdk-server.mjs'
   config:
     maxTokensAsSuccess: false
 
@@ -60,22 +60,3 @@
             name: !!js process.env.HARNESS_PROVIDER_MODEL
             contextWindow: !!js Number(process.env.HARNESS_PROVIDER_CONTEXT_WINDOW)
             maxTokens: !!js Number(process.env.HARNESS_PROVIDER_MAX_TOKENS)
-
-- id: joycrew-mcp
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: joycrew
-    transport: stdio
-    command: !!js process.execPath
-    args: ['./joycrew-mcp-server.mjs']
-    cwd: !!js process.cwd()
-    env:
-      JOYCREW_BRIDGE_URL: !!js process.env.JOYCREW_BRIDGE_URL
-      JOYCREW_BRIDGE_TOKEN: !!js process.env.JOYCREW_BRIDGE_TOKEN
-    toolCallTimeoutMs: 60000
-    failOnStartupError: true
-    reconnect:
-      enabled: false
-      initialDelayMs: 500
-      maxDelayMs: 5000
-      maxAttempts: 1

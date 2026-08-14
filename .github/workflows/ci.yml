@@ -54,6 +54,7 @@ jobs:
           node --check src/harness-http.mjs
           node --check harness/joycrew-schema.mjs
           node --check harness/joycrew-mcp-server.mjs
+          node --check harness/joycrew-sdk-server.mjs
           node --check harness/runtime-bin.mjs
           node --check scripts/doctor.mjs
           node --check scripts/migrate-project-records.mjs

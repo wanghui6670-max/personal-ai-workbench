@@ -1,6 +1,6 @@
 # Keyless end-to-end Navigator composition used only by CI/local verification.
-- id: sdk-jsonrpc-server
-  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+- id: joycrew-sdk-server
+  name: './joycrew-sdk-server.mjs'
   config:
     maxTokensAsSuccess: false
 
@@ -45,22 +45,3 @@
             name: Navigator Replay
             contextWindow: 32768
             defaultMaxTokens: 512
-
-- id: joycrew-mcp
-  name: '@deepseek-ai/dsh-mcp-client'
-  config:
-    serverName: joycrew
-    transport: stdio
-    command: !!js process.execPath
-    args: ['./joycrew-mcp-server.mjs']
-    cwd: !!js process.cwd()
-    env:
-      JOYCREW_BRIDGE_URL: !!js process.env.JOYCREW_BRIDGE_URL
-      JOYCREW_BRIDGE_TOKEN: !!js process.env.JOYCREW_BRIDGE_TOKEN
-    toolCallTimeoutMs: 60000
-    failOnStartupError: true
-    reconnect:
-      enabled: false
-      initialDelayMs: 500
-      maxDelayMs: 5000
-      maxAttempts: 1
