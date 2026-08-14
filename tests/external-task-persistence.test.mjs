@@ -6,11 +6,16 @@ import path from 'node:path';
 import { JsonStore } from '../src/store.mjs';
 import { updateExternalTaskIntegration, syncExternalTasks } from '../src/task-sync-domain.mjs';
 
-test('real JsonStore persists the new integration and validates imported task metadata',async t=>{
-  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'paw-external-persistence-'));
+async function fixture(t,prefix='paw-external-persistence-'){
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),prefix));
   t.after(()=>fsp.rm(root,{recursive:true,force:true}));
   const store=new JsonStore(path.join(root,'data'));
   await store.ensure();
+  return{root,store};
+}
+
+test('real JsonStore persists the new integration and validates imported task metadata',async t=>{
+  const {root,store}=await fixture(t);
   await store.updateConfig(config=>{
     config.dataSource={provider:'feishu_doc',documentUrl:'https://example.feishu.cn/wiki/legacy',inboxHeading:'收件箱',inboxPrefix:'[INBOX]'};
     return true;
@@ -52,4 +57,17 @@ test('real JsonStore persists the new integration and validates imported task me
   assert.equal(todo.startAt,'2026-08-20T09:00:00+08:00');
   assert.deepEqual(todo.tags,['工作']);
   assert.equal(state.todayPlan.includes(todo.id),false);
+});
+
+test('unsafe Feishu journal URLs are rejected even when the integration remains disabled',async t=>{
+  const {store}=await fixture(t,'paw-external-url-');
+  await assert.rejects(
+    updateExternalTaskIntegration({
+      store,
+      patch:{enabled:false,journalDocumentUrl:'javascript:alert(1)'}
+    }),
+    error=>error.statusCode===400&&error.code==='INVALID_FEISHU_JOURNAL'
+  );
+  const config=await store.readConfig();
+  assert.equal(config.settings.externalTaskPipeline,undefined);
 });
