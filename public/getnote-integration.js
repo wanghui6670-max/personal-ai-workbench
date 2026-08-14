@@ -1,10 +1,24 @@
 const PIPELINE_KEY='externalTaskPipeline';
+const DEFAULT_PIPELINE=Object.freeze({enabled:false,provider:'getnote_cli',noteLimit:100,journalDocumentUrl:'',journalHeading:'每日工作日记',calendarEnabled:true,calendarName:'个人 AI 工作台'});
 let getnoteState=null;
 let getnoteBusy=false;
 let scheduled=false;
 
 function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
-function pipeline(){return getnoteState?.config?.settings?.[PIPELINE_KEY]||{enabled:false,provider:'getnote_cli',noteLimit:100,journalDocumentUrl:'',journalHeading:'每日工作日记',calendarEnabled:true,calendarName:'个人 AI 工作台'};}
+function pipeline(){
+  const raw=getnoteState?.config?.settings?.[PIPELINE_KEY]||{};
+  const mistaken=raw?.provider==='dida_cli'||Object.hasOwn(raw,'cliFlavor');
+  if(mistaken){
+    return{
+      ...DEFAULT_PIPELINE,...raw,
+      enabled:false,provider:'getnote_cli',
+      noteLimit:Number.isInteger(Number(raw.noteLimit))?Number(raw.noteLimit):100,
+      lastSyncStatus:'needs_reconfiguration',
+      lastSyncError:'此前配置误用了滴答清单。请重新确认得到大脑 CLI、飞书工作日记和本机日历设置。'
+    };
+  }
+  return{...DEFAULT_PIPELINE,...raw,provider:'getnote_cli'};
+}
 
 async function json(url,options={}){
   const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
@@ -44,6 +58,8 @@ function receipt(title,detail='',error=false){
 function integrationSettingsHtml(value){
   const enabled=value.enabled===true;
   const noteLimit=Number.isInteger(Number(value.noteLimit))?Number(value.noteLimit):100;
+  const showStatus=Boolean(value.lastSyncAt)||value.lastSyncStatus==='needs_reconfiguration';
+  const statusTime=value.lastSyncAt?new Date(value.lastSyncAt).toLocaleString('zh-CN'):'尚未完成正确来源同步';
   return `<section class="getnote-settings" id="getnote-settings">
     <div class="section-title">得到大脑待办来源与沉淀</div>
     <label class="getnote-check"><input id="getnote-enabled" type="checkbox" ${enabled?'checked':''}> 启用得到大脑 CLI 单向同步</label>
@@ -54,7 +70,7 @@ function integrationSettingsHtml(value){
     <label><span>飞书每日工作日记 URL</span><input id="getnote-journal-url" type="url" placeholder="https://你的租户.feishu.cn/wiki/..." value="${esc(value.journalDocumentUrl||'')}"></label>
     <label class="getnote-check"><input id="getnote-calendar-enabled" type="checkbox" ${value.calendarEnabled!==false?'checked':''}> 同步生成本机 ICS 日历</label>
     <p>程序固定执行 <code>getnote notes ... -o json</code> 和 <code>getnote note todos &lt;note_id&gt; -o json</code>。得到大脑只作为笔记和会议待办来源；飞书只保存待办快照与每日总结。只有待办文字中能确定日期的事项才进入本机日历，其余进入收件箱等待人工定日期。</p>
-    ${value.lastSyncAt?`<div class="getnote-status"><strong>最近同步</strong><span>${esc(new Date(value.lastSyncAt).toLocaleString('zh-CN'))} · ${value.lastSyncStatus==='ok'?'成功':value.lastSyncStatus==='needs_reconfiguration'?'需要重新配置':'失败'} · 扫描 ${Number(value.lastSourceNoteCount||0)} 篇笔记 · 解析 ${Number(value.lastParsedTodoCount||0)} 条待办${value.lastSyncError?` · ${esc(value.lastSyncError)}`:''}</span>${value.lastCalendarPath?`<code>${esc(value.lastCalendarPath)}</code>`:''}</div>`:''}
+    ${showStatus?`<div class="getnote-status"><strong>来源状态</strong><span>${esc(statusTime)} · ${value.lastSyncStatus==='ok'?'成功':value.lastSyncStatus==='needs_reconfiguration'?'需要重新配置':'失败'} · 扫描 ${Number(value.lastSourceNoteCount||0)} 篇笔记 · 解析 ${Number(value.lastParsedTodoCount||0)} 条待办${value.lastSyncError?` · ${esc(value.lastSyncError)}`:''}</span>${value.lastCalendarPath?`<code>${esc(value.lastCalendarPath)}</code>`:''}</div>`:''}
   </section>`;
 }
 
@@ -116,7 +132,11 @@ function enhanceTaskSourceCard(){
   if(!card||card.querySelector('.getnote-source-card'))return;
   const value=pipeline();
   const status=document.createElement('div');status.className='getnote-source-card';
-  status.innerHTML=`<strong>${value.enabled?'得到大脑 CLI 单向来源':'得到大脑 CLI 尚未启用'}</strong><span>${value.enabled?`最近 ${Number(value.noteLimit||100)} 篇笔记 · 飞书日记 + ${value.calendarEnabled!==false?'本机 ICS 日历':'不生成日历'}`:'在设置中启用后，会议待办会按来源笔记和文本稳定去重。'}</span>`;
+  const title=value.lastSyncStatus==='needs_reconfiguration'?'得到大脑 CLI 需要重新配置':value.enabled?'得到大脑 CLI 单向来源':'得到大脑 CLI 尚未启用';
+  const detail=value.lastSyncStatus==='needs_reconfiguration'
+    ?'检测到旧错误来源配置；保存新的得到大脑设置后才可同步。'
+    :value.enabled?`最近 ${Number(value.noteLimit||100)} 篇笔记 · 飞书日记 + ${value.calendarEnabled!==false?'本机 ICS 日历':'不生成日历'}`:'在设置中启用后，会议待办会按来源笔记和文本稳定去重。';
+  status.innerHTML=`<strong>${title}</strong><span>${detail}</span>`;
   const head=card.querySelector('.card-head');head?.insertAdjacentElement('afterend',status);
 }
 
