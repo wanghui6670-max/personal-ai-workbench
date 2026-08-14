@@ -24,8 +24,8 @@ function taskSource(active){
 }
 
 const activeTasks=[
-  {externalId:'active-1',title:'正式待办',content:'来自滴答',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,done:false,tags:[]},
-  {externalId:'undated-1',title:'没有截止日期',content:'需要用户决定',dueDate:null,dueAt:null,startAt:null,done:false,tags:[]}
+  {externalId:'active-1',title:'正式待办',content:'来自滴答',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[]},
+  {externalId:'undated-1',title:'没有截止日期',content:'需要用户决定',dueDate:null,dueAt:null,startAt:null,updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[]}
 ];
 
 test('external task sync is source -> Feishu readback -> local calendar -> state, without auto-scheduling Today',async t=>{
@@ -49,17 +49,25 @@ test('external task sync is source -> Feishu readback -> local calendar -> state
   assert.equal(store.state.todayPlan.includes(store.state.todos.find(todo=>todo.externalId==='active-1').id),false);
 });
 
-test('task snapshot operationId is stable when the CLI returns the same tasks in a different order',async()=>{
+test('task snapshot operationId follows the exact persisted text, not CLI order or hidden timestamps',async()=>{
   const store=new FakeStore('/tmp/fake-order');
   await updateExternalTaskIntegration({store,patch:{enabled:true,journalDocumentUrl:'https://example.feishu.cn/wiki/journal',calendarEnabled:false}});
   const operations=[];
-  let reversed=false;
-  const taskClient={fetch:async()=>taskSource(reversed?[...activeTasks].reverse():activeTasks)};
-  const journalClient={appendTasks:async(url,text,options)=>{operations.push(options.operationId);return{item:{blockId:`b-${operations.length}`},replayed:operations.length>1};}};
+  const texts=[];
+  let changed=false;
+  const taskClient={fetch:async()=>{
+    const tasks=(changed?[...activeTasks].reverse():activeTasks).map(task=>({...task,updatedAt:changed?'2026-08-14T05:00:00Z':task.updatedAt}));
+    return taskSource(tasks);
+  }};
+  const journalClient={appendTasks:async(url,text,options)=>{
+    operations.push(options.operationId);texts.push(text);
+    return{item:{blockId:`b-${operations.length}`},replayed:operations.length>1};
+  }};
   await syncExternalTasks({store,taskClient,journalClient});
-  reversed=true;
+  changed=true;
   await syncExternalTasks({store,taskClient,journalClient});
   assert.equal(operations.length,2);
+  assert.equal(texts[0],texts[1]);
   assert.equal(operations[0],operations[1]);
 });
 
