@@ -79,12 +79,15 @@ export async function chooseMacosWorkspace({explicit=null,existing=null,home,add
     path.join(home,'Documents','ai-work-os'),
     ...additionalCandidates
   ];
-  const matches=[];
+  const matches=new Map();
   for(const candidate of [...new Set(candidates.map(value=>path.resolve(value)))]){
-    if(await isDirectory(candidate))matches.push(candidate);
+    if(!(await isDirectory(candidate)))continue;
+    const real=await fsp.realpath(candidate);
+    if(!matches.has(real))matches.set(real,real);
   }
-  if(matches.length===1)return matches[0];
-  if(matches.length>1)throw new Error(`发现多个可能的项目根目录，请使用 --workspace 明确指定：\n${matches.join('\n')}`);
+  const unique=[...matches.values()];
+  if(unique.length===1)return unique[0];
+  if(unique.length>1)throw new Error(`发现多个可能的项目根目录，请使用 --workspace 明确指定：\n${unique.join('\n')}`);
   throw new Error(`未找到 AI-Work-OS。预期默认路径：${path.join(home,'AI-Work-OS')}。可使用 --workspace <绝对路径> 指定。`);
 }
 
