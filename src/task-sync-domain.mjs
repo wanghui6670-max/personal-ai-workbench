@@ -62,10 +62,12 @@ export function normalizeExternalTaskIntegration(value={}){
     calendarEnabled:asBoolean(source.calendarEnabled,DEFAULT_INTEGRATION.calendarEnabled),
     calendarName:boundedText(source.calendarName,DEFAULT_INTEGRATION.calendarName,80)
   };
-  if(next.enabled){
-    if(!next.journalDocumentUrl)throw new ExternalTaskIntegrationError('启用滴答待办同步时，必须配置飞书每日工作日记 URL。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:400});
+  if(next.journalDocumentUrl){
     try{next.journalDocumentUrl=normalizeFeishuProjectDocumentUrl(next.journalDocumentUrl);}
     catch(error){throw new ExternalTaskIntegrationError(`飞书每日工作日记 URL 无效：${error.message}`,{cause:error,code:'INVALID_FEISHU_JOURNAL',statusCode:400});}
+  }
+  if(next.enabled&&!next.journalDocumentUrl){
+    throw new ExternalTaskIntegrationError('启用滴答待办同步时，必须配置飞书每日工作日记 URL。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:400});
   }
   return next;
 }
