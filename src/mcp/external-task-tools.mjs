@@ -5,10 +5,28 @@ import {
   publishDailySummary
 } from '../task-sync-domain.mjs';
 
-function toolError(message,statusCode=400){return Object.assign(new Error(message),{statusCode,code:'MCP_TOOL_INVALID_ARGUMENT'});}
+let activeWrite=null;
+
+function toolError(message,statusCode=400,code='MCP_TOOL_INVALID_ARGUMENT'){
+  return Object.assign(new Error(message),{statusCode,code});
+}
 function requireObject(args){if(!args||typeof args!=='object'||Array.isArray(args))throw toolError('工具参数必须是 JSON 对象。');return args;}
 function descriptor({name,description,inputSchema={},readOnly=false,requiresConfirmation=false,execute}){
   return Object.freeze({name,description,inputSchema,readOnly,requiresConfirmation,execute});
+}
+
+export async function withExternalTaskWriteLease(operation,work){
+  if(activeWrite){
+    throw toolError(
+      `外部待办管线正在执行“${activeWrite.operation}”，请等待完成后再执行“${operation}”。`,
+      409,
+      'EXTERNAL_TASK_PIPELINE_BUSY'
+    );
+  }
+  const lease={operation,startedAt:Date.now()};
+  activeWrite=lease;
+  try{return await work();}
+  finally{if(activeWrite===lease)activeWrite=null;}
 }
 
 export function createExternalTaskTools(){
@@ -35,24 +53,30 @@ export function createExternalTaskTools(){
         },required:[]
       },
       requiresConfirmation:true,
-      execute:async(context,args)=>updateExternalTaskIntegration({store:context.store,patch:requireObject(args)})
+      execute:async(context,args)=>withExternalTaskWriteLease(
+        '更新集成设置',
+        ()=>updateExternalTaskIntegration({store:context.store,patch:requireObject(args)})
+      )
     }),
     descriptor({
       name:'external_tasks_sync',
       description:'从滴答清单 CLI 读取并解析待办；先把任务快照写入飞书日记并读回，再更新本机 ICS 日历和工作台缓存。不会自动安排今日。',
       inputSchema:{type:'object',additionalProperties:false,properties:{},required:[]},
       requiresConfirmation:true,
-      execute:async context=>syncExternalTasks({store:context.store})
+      execute:async context=>withExternalTaskWriteLease(
+        '同步滴答待办',
+        ()=>syncExternalTasks({store:context.store})
+      )
     }),
     descriptor({
       name:'daily_summary_publish',
       description:'把当天完成事项、到期待办和工作台关键动作沉淀到飞书每日工作日记。正文只保存到飞书。',
       inputSchema:{type:'object',additionalProperties:false,properties:{notes:{type:'string',maxLength:4000}},required:[]},
       requiresConfirmation:true,
-      execute:async(context,args)=>{
+      execute:async(context,args)=>withExternalTaskWriteLease('沉淀每日总结',()=>{
         const input=requireObject(args);
         return publishDailySummary({store:context.store,notes:typeof input.notes==='string'?input.notes:''});
-      }
+      })
     })
   ];
 }
