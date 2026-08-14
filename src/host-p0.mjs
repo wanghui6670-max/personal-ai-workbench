@@ -78,7 +78,7 @@ export async function snapshotTree(root,{maxEntries=100_000,maxDurationMs=60_000
     if(entries.length>=maxEntries)throw Object.assign(new Error('目录快照超过条目上限。'),{code:'HOST_P0_SNAPSHOT_LIMIT'});
     if(relative!=='.'&&(ignored(relative,ignorePrefixes)||ignoreNames.includes(path.basename(relative))))return;
     const stat=await fsp.lstat(full);
-    const base={path:relative.split(path.sep).join('/'),mode:stat.mode&0o7777,mtimeMs:Math.trunc(stat.mtimeMs)};
+    const base={path:relative.split(path.sep).join('/'),mode:stat.mode&0o7777};
     if(stat.isDirectory()){
       counts.directories+=1;entries.push({...base,type:'directory'});
       const names=(await fsp.readdir(full)).sort((a,b)=>a.localeCompare(b));
@@ -88,13 +88,18 @@ export async function snapshotTree(root,{maxEntries=100_000,maxDurationMs=60_000
     if(stat.isFile()){
       counts.files+=1;
       const item={...base,type:'file',size:stat.size};
-      if(hashFiles&&stat.size<=maxHashBytes){item.sha256=await fileSha256(full);counts.contentHashedFiles+=1;}
+      if(hashFiles&&stat.size<=maxHashBytes){
+        item.sha256=await fileSha256(full);
+        counts.contentHashedFiles+=1;
+      }else{
+        item.mtimeMs=Math.trunc(stat.mtimeMs);
+      }
       entries.push(item);return;
     }
     if(stat.isSymbolicLink()){
       counts.symlinks+=1;entries.push({...base,type:'symlink',target:await fsp.readlink(full)});return;
     }
-    counts.other+=1;entries.push({...base,type:'other',size:stat.size});
+    counts.other+=1;entries.push({...base,type:'other',size:stat.size,mtimeMs:Math.trunc(stat.mtimeMs)});
   }
 
   await walk(resolved,'.');
