@@ -48,6 +48,7 @@ jobs:
           node --check src/project-identity.mjs
           node --check src/joycrew-client.mjs
           node --check src/joycrew-actions.mjs
+          node --check src/host-p0.mjs
           node --check src/mcp/registry.mjs
           node --check src/mcp/tools.mjs
           node --check src/mcp/project-record-tools.mjs
@@ -66,6 +67,9 @@ jobs:
           node --check scripts/test-by-file.mjs
           node --check scripts/harness-check.mjs
           node --check scripts/harness-e2e.mjs
+          node --check scripts/p0-deployment-acceptance.mjs
+          node --check scripts/p0-host-preflight.mjs
+          node --check scripts/macos-launch-agent.mjs
           node --check public/project-records.js
           node --check public/ux-enhancements.js
           node --check public/getnote-integration.js

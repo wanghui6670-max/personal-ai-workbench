@@ -1,0 +1,77 @@
+name: macOS Host Contract
+
+on:
+  push:
+    branches:
+      - main
+      - agent/macos-host-p0
+    paths:
+      - 'src/host-p0.mjs'
+      - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-launch-agent.mjs'
+      - 'scripts/p0-deployment-acceptance.mjs'
+      - 'tests/host-p0.test.mjs'
+      - 'docs/MACOS_HOST_P0.md'
+      - 'package.json'
+      - '.github/workflows/macos-host-contract.yml'
+  pull_request:
+    paths:
+      - 'src/host-p0.mjs'
+      - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-launch-agent.mjs'
+      - 'scripts/p0-deployment-acceptance.mjs'
+      - 'tests/host-p0.test.mjs'
+      - 'docs/MACOS_HOST_P0.md'
+      - 'package.json'
+      - '.github/workflows/macos-host-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-host-contract:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Run macOS host contract tests
+        run: node --test tests/host-p0.test.mjs
+      - name: Validate generated LaunchAgent with plutil
+        run: |
+          node --input-type=module <<'NODE'
+          import fsp from 'node:fs/promises';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { buildMacosLaunchAgentPlist } from './src/host-p0.mjs';
+          const target=path.join(os.tmpdir(),'com.dongjue.personal-ai-workbench.plist');
+          await fsp.writeFile(target,buildMacosLaunchAgentPlist({
+            appRoot:process.cwd(),
+            nodePath:process.execPath,
+            home:os.homedir(),
+            pathEnv:process.env.PATH,
+            stdoutPath:path.join(os.tmpdir(),'workbench.log'),
+            stderrPath:path.join(os.tmpdir(),'workbench.error.log')
+          }),'utf8');
+          console.log(target);
+          NODE
+          plutil -lint "$(node -e "const os=require('node:os'),path=require('node:path');process.stdout.write(path.join(os.tmpdir(),'com.dongjue.personal-ai-workbench.plist'))")"
+      - name: Run isolated Workbench P0 on macOS
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          CI: '1'
+        run: |
+          mkdir -p artifacts
+          npm run p0:acceptance -- --report artifacts/macos-p0-deployment-acceptance.json
+          node -e "const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('artifacts/macos-p0-deployment-acceptance.json','utf8'));if(value.status!=='passed'||value.runtime.platform!=='darwin')throw new Error('macOS P0 evidence invalid');"
+      - name: Upload macOS P0 evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: personal-ai-workbench-macos-p0-${{ github.sha }}
+          path: artifacts/macos-p0-deployment-acceptance.json
+          if-no-files-found: error
+          retention-days: 14

@@ -98,3 +98,15 @@ WORKSPACE_ROOT
 ```
 
 不得把用于 VPN/Hermes 的既有服务器自动视为 Workbench 目标机；必须有明确部署绑定和最小权限方案。真实主机应先部署到测试端口，保持 `JOYCREW_ENABLED=0`，完成数据备份、浏览器和外部 CLI 现场读回后，才允许替换旧版本。
+
+## 8. 当前真实主机路径
+
+由于本地项目文件夹是资料真源，且 `getnote`、`lark-cli` 与 ICS 都依赖同一操作系统用户，第一台真实 P0 主机按 macOS local-first 路径执行：
+
+```bash
+npm run p0:host
+npm run service:macos -- install
+npm run service:macos -- status
+```
+
+完整绑定、硬拒绝条件、LaunchAgent 安装、现场验收和回滚步骤见 [`MACOS_HOST_P0.md`](MACOS_HOST_P0.md)。远程访问与 Joycrew 接入都在本机 P0 通过后进行。
