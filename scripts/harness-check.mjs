@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { harnessNodeSupported } from '../src/harness-navigator.mjs';
+import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from '../src/harness-policy.mjs';
 
 if(!harnessNodeSupported())throw new Error('Harness compile smoke requires Node 22.19+ or Node 24+');
 
@@ -20,16 +21,14 @@ const {DeepSeekHarness}=await import(pathToFileURL(sdkEntry).href);
 if(typeof DeepSeekHarness!=='function')throw new Error('DeepSeekHarness export is unavailable');
 
 const token='compile-smoke-token-'.padEnd(48,'x');
-const SMOKE_TOOL_NAMES=[
-  'panel_navigate','inbox_search','project_list','todo_list',
-  'journal_read','confirmation_list','business_list','project_records_read'
-];
+const SMOKE_TOOL_NAMES=[...HARNESS_NAVIGATOR_TOOL_ALLOWLIST];
 
 function smokeSchema(name){
   if(name==='panel_navigate'){
     return{type:'object',additionalProperties:false,properties:{view:{type:'string',enum:['today','project']},id:{anyOf:[{type:'string',minLength:1},{type:'null'}]}},required:['view']};
   }
-  return{type:'object',additionalProperties:false,properties:{}};
+  if(name==='project_list'||name==='joycrew_project_list')return{type:'object',additionalProperties:false,properties:{includeArchived:{type:'boolean'}},required:[]};
+  return{type:'object',additionalProperties:true,properties:{}};
 }
 
 const bridge=http.createServer(async(req,res)=>{
@@ -39,7 +38,7 @@ const bridge=http.createServer(async(req,res)=>{
   try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{}
   if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(403,{'content-type':'application/json'});res.end('{"error":"denied"}');return;}
   let result;
-  if(body.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'joycrew-smoke',version:'1.0.0'}};
+  if(body.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'unified-workbench-smoke',version:'2.0.0'}};
   else if(body.method==='tools/list')result={tools:SMOKE_TOOL_NAMES.map(name=>({name,description:`compile smoke ${name}`,inputSchema:smokeSchema(name),readOnly:true,requiresConfirmation:false}))};
   else if(body.method==='tools/call')result={content:[{type:'text',text:'[]'}],structuredContent:{result:[],readback:true}};
   else result={};
@@ -62,5 +61,5 @@ const harness=new DeepSeekHarness({
   launch:{command:process.execPath,args:[runtimeBin,configPath],cwd:harnessDir,env:childEnv,requestTimeoutMs:30_000,shutdownTimeoutMs:1500,disposeEofGraceMs:6000,disposeGraceMs:3000},
   cwd:root,provider:'joycrew',model:'compile-smoke-model',maxTokens:512
 });
-try{await harness.start();console.log('Harness Navigator composition compiled and initialized successfully.');}
+try{await harness.start();console.log(`Unified Harness composition initialized with ${SMOKE_TOOL_NAMES.length} fixed tools.`);}
 finally{await harness.close().catch(()=>undefined);await new Promise(resolve=>bridge.close(resolve));}

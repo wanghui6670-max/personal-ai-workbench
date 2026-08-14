@@ -22,6 +22,7 @@ jobs:
       - name: Syntax check all runtime surfaces
         run: |
           node --check src/server.mjs
+          node --check src/product.mjs
           node --check src/request-validation.mjs
           node --check src/domain.mjs
           node --check src/domain-core.mjs
@@ -45,9 +46,13 @@ jobs:
           node --check src/project-record-policy.mjs
           node --check src/project-sync-coordinator.mjs
           node --check src/project-identity.mjs
+          node --check src/joycrew-client.mjs
+          node --check src/joycrew-actions.mjs
           node --check src/mcp/registry.mjs
+          node --check src/mcp/tools.mjs
           node --check src/mcp/project-record-tools.mjs
           node --check src/mcp/external-task-tools.mjs
+          node --check src/mcp/joycrew-tools.mjs
           node --check src/harness-auth.mjs
           node --check src/harness-policy.mjs
           node --check src/harness-navigator.mjs
@@ -65,11 +70,13 @@ jobs:
           node --check public/ux-enhancements.js
           node --check public/getnote-integration.js
           node --check public/harness-navigator.js
+          node --check public/joycrew-integration.js
       - name: Run all Workbench contract tests
         env:
           OPENAI_API_KEY: ''
           AI_PROVIDER_ENABLED: '0'
           HARNESS_ENABLED: '0'
+          JOYCREW_ENABLED: '0'
         run: npm run test:files
 
   harness-e2e:
@@ -82,7 +89,7 @@ jobs:
           node-version: '24'
       - name: Install pinned isolated Harness runtime
         run: npm run harness:install
-      - name: Compile production Navigator composition
+      - name: Compile unified Copilot composition
         run: npm run harness:check
       - name: Run deterministic Agent-to-tool end-to-end
         run: npm run harness:e2e
@@ -93,16 +100,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Build production image with Harness runtime
-        run: docker build -t personal-ai-workbench:harness .
+        run: docker build -t personal-ai-workbench:v2 .
       - name: Initialize Harness inside production image
-        run: docker run --rm --entrypoint node personal-ai-workbench:harness scripts/harness-check.mjs
-      - name: Start Workbench and verify health plus Navigator asset
+        run: docker run --rm --entrypoint node personal-ai-workbench:v2 scripts/harness-check.mjs
+      - name: Start unified Workbench with Joycrew disabled and verify fail-isolation
         run: |
-          docker run -d --name workbench-harness-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 personal-ai-workbench:harness
-          trap 'docker rm -f workbench-harness-smoke >/dev/null 2>&1 || true' EXIT
+          set -euo pipefail
+          docker run -d --name workbench-v2-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 -e JOYCREW_ENABLED=0 personal-ai-workbench:v2
+          trap 'docker rm -f workbench-v2-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 40); do
-            if curl --fail --silent http://127.0.0.1:49173/api/health >/dev/null; then break; fi
+            if curl --fail --silent http://127.0.0.1:49173/api/health >/tmp/workbench-health.json; then break; fi
+            if [ "$attempt" -eq 40 ]; then
+              docker logs workbench-v2-smoke || true
+              exit 1
+            fi
             sleep 1
           done
-          if ! curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'; then docker logs workbench-harness-smoke || true; exit 1; fi
-          if ! curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'; then docker logs workbench-harness-smoke || true; exit 1; fi
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-health.json','utf8')); if(value.ok!==true||value.version!=='2.0.0') throw new Error('unexpected health response');"
+          curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'
+          curl --fail --silent http://127.0.0.1:49173/joycrew-integration.js | grep '业务执行'
+          curl --fail --silent http://127.0.0.1:49173/api/joycrew/status >/tmp/joycrew-status.json
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/joycrew-status.json','utf8')); if(value.joycrew?.enabled!==false) throw new Error('Joycrew fail-isolation contract changed');"

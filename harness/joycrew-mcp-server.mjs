@@ -2,39 +2,44 @@
 import readline from 'node:readline';
 import { normalizeInputSchema } from './joycrew-schema.mjs';
 
-const MAX_RESPONSE_BYTES=1_000_000;
+const MAX_RESPONSE_BYTES=2_000_000;
 const ALLOWED_RAW_NAMES=new Set([
   'panel_navigate','inbox_search','project_list','todo_list',
-  'journal_read','confirmation_list','business_list','project_records_read'
+  'journal_read','confirmation_list','business_list','project_records_read',
+  'joycrew_workspace_open','joycrew_status_read','joycrew_dashboard_read',
+  'joycrew_project_list','joycrew_project_read','joycrew_customer_list',
+  'joycrew_task_list','joycrew_approval_list','joycrew_deliverable_list',
+  'joycrew_pending_action_list','joycrew_run_prepare',
+  'joycrew_deliverable_prepare','joycrew_approval_prepare'
 ]);
 
 function runtimeConfig(){
   const rawUrl=String(process.env.JOYCREW_BRIDGE_URL||'').trim();
   const token=String(process.env.JOYCREW_BRIDGE_TOKEN||'').trim();
-  if(!rawUrl||token.length<32)throw new Error('Joycrew MCP proxy configuration is missing');
+  if(!rawUrl||token.length<32)throw new Error('Workbench MCP proxy configuration is missing');
   let url;
-  try{url=new URL(rawUrl);}catch{throw new Error('Joycrew MCP proxy URL is invalid');}
+  try{url=new URL(rawUrl);}catch{throw new Error('Workbench MCP proxy URL is invalid');}
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash){
-    throw new Error('Joycrew MCP proxy URL is unsafe');
+    throw new Error('Workbench MCP proxy URL is unsafe');
   }
   return{url:url.toString(),token};
 }
 
 async function boundedJson(response){
   const buffer=Buffer.from(await response.arrayBuffer());
-  if(buffer.byteLength>MAX_RESPONSE_BYTES)throw new Error('Joycrew MCP proxy response is too large');
+  if(buffer.byteLength>MAX_RESPONSE_BYTES)throw new Error('Workbench MCP proxy response is too large');
   try{return JSON.parse(buffer.toString('utf8'));}
-  catch{throw new Error('Joycrew MCP proxy received invalid JSON');}
+  catch{throw new Error('Workbench MCP proxy received invalid JSON');}
 }
 
 function normalizeToolList(payload){
   const tools=payload?.result?.tools;
-  if(!Array.isArray(tools))throw new Error('Joycrew MCP proxy received no tool list');
-  if(tools.length!==ALLOWED_RAW_NAMES.size)throw new Error('Joycrew MCP tool catalog size changed');
+  if(!Array.isArray(tools))throw new Error('Workbench MCP proxy received no tool list');
+  if(tools.length!==ALLOWED_RAW_NAMES.size)throw new Error('Workbench MCP tool catalog size changed');
   const seen=new Set();
   payload.result.tools=tools.map(tool=>{
     const name=String(tool?.name||'');
-    if(!ALLOWED_RAW_NAMES.has(name)||seen.has(name))throw new Error('Joycrew MCP tool catalog contains an unreviewed name');
+    if(!ALLOWED_RAW_NAMES.has(name)||seen.has(name))throw new Error('Workbench MCP tool catalog contains an unreviewed name');
     seen.add(name);
     return{
       name,
@@ -45,7 +50,7 @@ function normalizeToolList(payload){
   return payload;
 }
 
-function publicError(id,message='Joycrew MCP proxy request failed'){
+function publicError(id,message='Workbench MCP proxy request failed'){
   return{jsonrpc:'2.0',id,error:{code:-32000,message}};
 }
 
@@ -62,7 +67,7 @@ async function forward(message){
   const hasId=Object.hasOwn(message,'id');
   const originalId=message.id;
   if(message.method==='tools/call'&&!ALLOWED_RAW_NAMES.has(String(message.params?.name||''))){
-    if(hasId)await send(publicError(originalId,'Tool is not allowed by the Joycrew Navigator proxy'));
+    if(hasId)await send(publicError(originalId,'Tool is not allowed by the unified Workbench proxy'));
     return;
   }
   const forwarded={...message};
@@ -73,7 +78,7 @@ async function forward(message){
     headers:{'content-type':'application/json',authorization:`Bearer ${token}`},
     body:JSON.stringify(forwarded)
   });
-  if(!response.ok)throw new Error(`Joycrew MCP proxy HTTP ${response.status}`);
+  if(!response.ok)throw new Error(`Workbench MCP proxy HTTP ${response.status}`);
   let payload=await boundedJson(response);
   if(message.method==='tools/list')payload=normalizeToolList(payload);
   if(!hasId)return;
@@ -92,7 +97,7 @@ for await(const line of input){
   }
   const task=forward(message).catch(async error=>{
     if(Object.hasOwn(message,'id'))await send(publicError(message.id));
-    process.stderr.write(`[joycrew-mcp-proxy] ${String(error?.message||'request failed').slice(0,300)}\n`);
+    process.stderr.write(`[workbench-mcp-proxy] ${String(error?.message||'request failed').slice(0,300)}\n`);
   });
   pending.add(task);
   void task.finally(()=>pending.delete(task));

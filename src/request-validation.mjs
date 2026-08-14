@@ -41,23 +41,9 @@ export function validateRequestBody(body,{fields={},required=[],allowEmpty=true,
   return body;
 }
 
-const settings={
-  type:'object',
-  schema:{
-    fields:{recentDays:nonNegativeInteger,dueSoonDays:nonNegativeInteger},
-    allowEmpty:false
-  }
-};
-
-const dataSource={
-  type:'object',
-  nullable:true,
-  schema:{
-    fields:{provider:nonEmptyString,documentUrl:nonEmptyString,inboxHeading:nonEmptyString,inboxPrefix:nonEmptyString},
-    required:['provider','documentUrl'],
-    allowEmpty:false
-  }
-};
+const settings={type:'object',schema:{fields:{recentDays:nonNegativeInteger,dueSoonDays:nonNegativeInteger},allowEmpty:false}};
+const dataSource={type:'object',nullable:true,schema:{fields:{provider:nonEmptyString,documentUrl:nonEmptyString,inboxHeading:nonEmptyString,inboxPrefix:nonEmptyString},required:['provider','documentUrl'],allowEmpty:false}};
+const arbitraryObject={type:'object',schema:{fields:{},allowUnknown:true}};
 
 export const requestSchemas={
   empty:{fields:{}},
@@ -78,5 +64,7 @@ export const requestSchemas={
   aiPlan:{fields:{message:nonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
   aiExecute:{fields:{planId:nonEmptyString,confirmed:boolean},required:['planId','confirmed'],allowEmpty:false},
   harnessNavigator:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
+  joycrewActionPrepare:{fields:{type:nonEmptyString,payload:arbitraryObject,source:nonEmptyString},required:['type','payload'],allowEmpty:false},
+  joycrewActionExecute:{fields:{confirmed:boolean},required:['confirmed'],allowEmpty:false},
   mcp:{fields:{jsonrpc:nonEmptyString,id:{type:'string',nullable:true},method:nonEmptyString,params:{type:'object',schema:{fields:{},allowUnknown:true},nullable:true}},required:['jsonrpc','method'],allowEmpty:false}
 };

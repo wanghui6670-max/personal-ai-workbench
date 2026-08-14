@@ -1,75 +1,58 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 - 2026-08-14
 
-- 纠正个人待办来源：需求中的“得到 CLI”是得到大脑 / Get笔记 CLI，固定二进制为 `getnote`；移除此前误接入的另一任务 CLI 资产、配置和测试
-- 通过 `getnote notes --limit ... -o json` 分页读取最近笔记，再逐篇执行 `getnote note todos <note_id> -o json` 读取 `meeting_todos.source/items`
-- 没有明确待办章节时接受空列表，不让模型从整篇笔记猜任务；外部 ID 由来源 note ID、待办文本和同文出现序号稳定派生
-- 能确定日期的得到大脑待办映射为正式待办；无法确定日期的事项进入收件箱；模糊表达不自动定日期
-- 只有明确截止时刻时，本机 ICS 生成无猜测时长的瞬时事件；只有日期时保持全天事件
-- 历史 `provider=dida_cli` / `cliFlavor` 配置会被停用并要求重新配置；用户确认新设置后只清理错误来源的机器导入数据
-- 飞书《每日工作日记》继续作为任务快照和用户触发每日总结的沉淀目标，使用固定章节、固定前缀、operationId 查重和写后读回
-- 私有本机 ICS 日历只镜像已确定日期的得到大脑待办，完成任务在下次同步时移除
-- AI/MCP 提供外部待办设置、同步和每日总结工具，旧 `feishu_inbox_sync` 不在白名单；浏览器设置和 `doctor` 已切换到得到大脑合同
-- 已完成待办不能加入今日工作台：领域层返回明确 `409 / TODO_ALREADY_COMPLETED`，AI/MCP 在生成操作预览前同步拦截
-- 早晨对焦获得唯一、可发现的工作流入口；持续读取后端 session，但仍由用户逐条决定是否加入今日
-- 右侧 AI 面板支持展开、窄条和完全收起三态；只持久化界面偏好，不持久化项目叙事或早晨对话
-- 主界面明确区分“模型已配置、未联网验证”与每次结果的模型/本地安全回退来源
-- AI 工具结果先显示人类可读摘要，原始 JSON 收入技术详情；项目同步、外部待办同步、备份和 AI 执行增加可关闭的页内操作回执
-- 项目分析、卡点说明、上下文恢复摘要、阶段总结和复盘正文迁移为“飞书项目文档唯一真源”；`state.json` 与 `PROJECT.md` 不再保存第二份正文
-- `PROJECT.md` 降级为项目身份证；新建和归类项目从第一次落盘起就是 identity-only，不再经过旧叙事 writer
-- 项目同步改为 remote-first：分析完成后先写飞书并读回确认，再提交本地机器进度和 revision/block/operation 指针
-- 本地机器进度只保留 `percent/status/hasBlocker/lastActivity/syncedAt/confidence` 与飞书记录指针；持久化校验器拒绝 narrative 字段
-- 新增稳定 operationId、飞书查重和幂等重试；相同操作不会重复追加远端记录
-- 新增跨资源恢复凭据：区分远端结果未知与远端已保存但本地未提交，重试时先按 operationId 对账
-- REST、右侧 AI 与 MCP 共用领域层项目同步锁，单项目同步与全量同步互斥
-- 项目飞书链接限制为官方 Feishu/Lark HTTPS 云文档；换绑或解绑时原子清除旧指针
-- 项目记录读取增加 latest-first 分页，默认 20、硬上限 100；阶段总结正文最大 6000 字符
-- 项目页新增临时“飞书项目记忆”面板，可读取最近记录和打开云文档；正文不进入浏览器持久化存储
-- 首次升级先生成不可覆盖的旧叙事原始快照；新增 dry-run / apply 迁移命令、`PROJECT.md` 原文件备份和可重入迁移报告
-- MCP 新增 `project_records_read` 与 `project_summary_append`；阶段总结写入仍须用户确认，正文不进入本地审计日志
-- 右侧 AI 控制平面新增 `ai_console` 结构化模型规划：模型只提出白名单 MCP 工具调用，不直接执行
-- 本地 MCP 注册表增加工具参数 schema 校验、模型失败的显式安全回退，以及工具结果与左侧状态读回
-- 双面板明确为左人右 AI；右侧展示当前模型/本地回退状态、工具参数和执行结果
-- 新增 `panel_navigate` 导航桥：AI 可切换左侧面板、打开设置/新建项目，并在右侧显示证据、冲突和缺口摘要
-- 飞书收件箱 ack 改为 block ID + SHA-256，不再保存历史正文；远端编辑会重新导入，远端删除会清理未处理缓存和关联确认
-- iPhone `/api/capture` 新增 `captureId` 幂等合同：同 ID 同正文安全重放，同 ID 不同正文冲突，处理后重放不复活
-- HTTP 请求 schema 正式允许 `captureId`，并增加真实服务进程级的 201/200/409 回归测试
-- Capture 收据只保存正文哈希和标识符；飞书 Capture marker 支持远端查重，不把内部 marker 暴露为用户正文
-- backup v2 同时保存持久化 state/config、Capture 幂等收据和项目记录恢复凭据；不保存 Capture 正文或项目分析正文
-- 恢复支持成组替换和失败回滚两类凭据；旧备份缺少凭据字段时保留当前目录，避免静默清空
-- CI 升级到 Node 24，固定第三方 Action commit，并检查迁移、收件箱、Capture、恢复与浏览器模块语法
+- 将 Personal AI Workbench 明确升级为动觉 AI 工作台的唯一日常入口；个人工作连续性与 Joycrew 企业 AI 员工执行形成一个产品
+- 新增原生“业务执行”页面，按需展示 Joycrew 客户、企业项目、业务任务、AI 员工、Run、Evidence、审批和正式交付
+- 新增服务端 `JoycrewClient`，支持 `trusted_proxy`、`signed_session` 和非生产 Fixture；浏览器不接触 Joycrew URL、Token、Workspace 身份或角色覆盖
+- 新增 `local_loopback`、`private_http`、`public_https` 网络分区，拒绝公网明文 HTTP、URL 认证信息、查询参数、片段和重定向
+- 新增 Joycrew BFF：状态、总览、项目详情和短时操作预览 API；Joycrew 未启用或离线时个人工作台继续运行
+- 新增 Run、交付和审批的 Preview → Confirm → Execute 合同；未确认不调用 Joycrew，已执行预览重放不产生第二次副作用
+- 操作预览使用高熵 ID、规范化参数、SHA-256 摘要、影响范围和过期时间，仅保存在 Workbench 进程内存
+- Run 数据源严格限定为显式选择的 DataWeave records/file 来源；拒绝绝对路径、目录穿越、空路径和过大参数
+- Harness 固定白名单扩展为 Workbench 读取、Joycrew 读取和 Joycrew preview-only 工具；新增普通 MCP 工具不会自动进入 Copilot
+- Harness 统一为“工作 Copilot”：可以跨个人工作和企业业务连续读取，但外部改变必须转到“业务执行”页面人工确认
+- 修复 `.env` allowlist 未加载已文档化 Harness 配置的问题，并加入全部 Joycrew 服务端配置键
+- 新增 Joycrew 专用限流、上游超时、响应体上限、受控错误映射和公开健康检查拓扑脱敏
+- `doctor` 增加 Node 24、Joycrew 配置与连通性检查；只有显式启用 Joycrew 时才成为必需项
+- Docker Compose 增加 `host.docker.internal` 主机网关，支持 Workbench 容器安全调用宿主机 Joycrew
+- 产品版本升级为 2.0.0，PWA 名称更新为“动觉 AI 工作台”，新增统一产品 README 和 Joycrew 集成合同
+- CI 增加 Joycrew 客户端、操作 Broker、MCP 工具、统一 Harness 21 工具目录和 Joycrew 关闭时的 Docker fail-isolation 验证
+
+## 1.3.0 - 2026-08-14
+
+- 个人待办来源纠正为得到大脑 / GetNote CLI，固定执行 `getnote notes`、`getnote note todos` 和 `getnote doctor`
+- 无明确待办章节时接受空列表，不让模型从笔记正文自行发明任务；稳定身份由来源笔记 ID、文本和出现序号派生
+- 明确日期事项进入正式待办，日期不确定事项进入收件箱；只有上游明确完成状态才同步完成
+- 飞书《每日工作日记》作为任务快照和用户触发总结的沉淀目标，本机 ICS 只镜像确定日期并原子重建
+- 项目分析、卡点、恢复摘要、阶段总结和复盘正文统一为飞书项目文档唯一真源
+- `PROJECT.md` 降级为身份索引；本地状态只保存机器进度、飞书指针、幂等收据和恢复凭据
+- 新增 Capture `captureId` 幂等、backup v2、跨资源恢复和项目记录读写合同
+- DeepSeek Harness Navigator V1 接入右侧工作区，提供持续会话、固定只读工具、工具轨迹和 Docker E2E
 
 ## 1.2.0 - 2026-08-13
 
-- 收件箱支持以飞书云文档《个人 AI 工作台｜每日工作日记》作为外部真实来源
-- 新增飞书文档读取、`[INBOX]` 章节解析、稳定 block ID 去重、同步游标和删除读回
-- 本地新增收件箱改为“先写飞书、再读回、最后提交本地缓存”，失败时不伪装成本地成功
-- 设置页、API、README、部署说明和架构文档补齐飞书配置、安全边界及 Docker 限制
-- 补充飞书链路合同测试与版本健康检查；测试不等同于 live 飞书验证
-- AI 判断统一收敛为 Provider 合同；默认继续使用 `gpt-5.6-luna` / `xhigh` 的 Responses API，并新增受限的 Responses-compatible 与 Chat-Completions-compatible 适配器
-- Provider 请求增加固定工作流 allowlist、证据 ID 校验、响应体上限、稳定错误码和显式能力降级门；未配置或失败时继续使用本地规则
+- 收件箱支持飞书云文档外部来源、稳定 block ID 去重、同步游标和删除读回
+- 新增飞书文档读取、先写远端再提交本地缓存的失败关闭链路
+- AI Provider 统一为结构化合同，支持 Responses-compatible 与 Chat-Completions-compatible 适配器
+- Provider 请求增加工作流 allowlist、证据 ID 校验、响应体上限、稳定错误码和显式能力降级门
 
 ## 1.1.0 - 2026-08-12
 
-- AI 判断默认切换为 `gpt-5.6-luna`，固定使用极高推理档位 `xhigh`
-- 项目创建、项目进度和早晨对话统一采用“证据 → 冲突与缺口 → 最终结论”结构化分析工作流
-- 分析信封仅用于本次校验，持久化只保存业务结论，不保存依据草稿或隐藏思维；OpenAI 失败继续回退本地规则
-- 设置页与 doctor 区分“已配置”与“联网调用已验证”；正文默认不出站的隐私边界保持不变
-- Luna 分析期间若项目或路径基准被用户修改，过期结论会以冲突响应作废，不覆盖人的最新决定
-- 批量同步会把这类过期项目单独标为跳过，不误报同步失败或生成失败待确认
-- 显式指定不存在的业务板块会失败并保留收件箱来源，不再静默交由 AI 改判
+- AI 判断默认使用 `gpt-5.6-luna` 和 `xhigh`
+- 项目创建、项目进度和早晨对话采用“证据 → 冲突与缺口 → 最终结论”结构化分析
+- 分析信封仅用于本次校验，不保存依据草稿或隐藏思维；Provider 失败回退本地规则
+- 模型结论在项目或路径基准变化时以冲突作废，不覆盖用户最新决定
 
 ## 1.0.0 - 2026-08-12
 
 - 从 PRD V0.2 升级为可部署完整项目
-- 本地文件系统作为项目真实来源
-- 项目上下文恢复和手动批量进度同步
-- OpenAI Structured Outputs 项目分析 + 无 Key fallback
-- 收件箱强制入口和自然语言显式处理
-- 人在回路的早晨对焦与今日工作台
-- 待确认 / 待归类 / 逾期 / 归档
-- 业务板块与本地目录一致管理
-- 访问密码、外部 capture token、安全 headers
-- 原子 JSON、自动备份、导出
-- Docker、doctor、tests、部署文档
+- 本地文件系统作为项目真实来源，Git 提供版本证据
+- 收件箱强制入口、人在回路的早晨对焦与今日工作台
+- 待确认、待归类、逾期、归档和业务板块目录管理
+- 访问密码、Capture Token、安全 Headers、原子 JSON、自动备份、Docker、Doctor 和测试
+
+
+## 不确定结果保护
+
+Joycrew 写操作在网络中断、响应丢失或返回不可验证结果时会标记为“结果不确定”。同一个预览不会自动重试，避免重复创建 Run、交付或写回；用户应先刷新业务状态核对，再决定是否生成新的预览。

@@ -10,6 +10,8 @@ import { loadWorkbenchEnv } from '../src/env.mjs';
 import { aiRuntimeConfig, aiEnabled } from '../src/ai.mjs';
 import { integrationFromConfig } from '../src/task-sync-domain.mjs';
 import { localCalendarPath } from '../src/local-calendar.mjs';
+import { createJoycrewClient } from '../src/joycrew-client.mjs';
+import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from '../src/product.mjs';
 
 const execFileAsync=promisify(execFile);
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -18,7 +20,8 @@ const dataDir=process.env.DATA_DIR?path.resolve(process.env.DATA_DIR):path.join(
 const results=[];
 const check=(name,ok,detail)=>results.push({name,ok,detail});
 
-check('Node.js >= 20',Number(process.versions.node.split('.')[0])>=20,process.versions.node);
+const nodeMajor=Number(process.versions.node.split('.')[0]);
+check('Node.js >= 24',nodeMajor>=24,`${process.versions.node}${nodeMajor<24?'；v2 统一 Harness 运行时要求 Node 24+':''}`);
 try{await execFileAsync('git',['--version'],{timeout:2000});check('Git 可用',true,'已找到 git');}
 catch{check('Git 可用',false,'未找到 git；项目 Git 信息将不可用');}
 
@@ -59,33 +62,43 @@ try{
         const payload=JSON.parse(raw);
         if(payload?.success===false)throw new Error(payload.message||payload.reason||'getnote doctor 返回失败');
       }
-      check('getnote CLI',true,'已找到，安装、会员、登录和 API 连通性检查通过；未执行写入');
+      check('getnote CLI',true,'安装、会员、登录和 API 连通性检查通过；未执行写入');
     }catch(error){
       check('getnote CLI',false,error.code==='ENOENT'?'未找到 getnote；请执行 npx -y @getnote/cli@latest setup':'getnote doctor 未通过，请检查安装、会员、登录状态和网络');
     }
     try{await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true});check('lark-cli',true,'已找到；未执行真实文档读写');}
     catch(error){check('lark-cli',false,error.code==='ENOENT'?'未找到 lark-cli 可执行文件':'命令不可用，请检查安装和登录状态');}
-    if(store&&externalIntegration.calendarEnabled){
-      check('本机日历路径',true,localCalendarPath(store));
-    }
+    if(store&&externalIntegration.calendarEnabled)check('本机日历路径',true,localCalendarPath(store));
   }else{
     const detail=externalIntegration?.lastSyncStatus==='needs_reconfiguration'
       ?'此前误配置为滴答清单，已停用；请在设置中重新确认得到大脑 CLI 与飞书日记'
       :'未启用；不会调用 getnote、lark-cli 或生成本机日历';
     check('得到大脑待办管线',true,detail);
   }
-}catch(error){
-  check('得到大脑待办管线',false,error.message);
+}catch(error){check('得到大脑待办管线',false,error.message);}
+
+const joycrewClient=createJoycrewClient({env:process.env});
+const joycrewConfig=joycrewClient.config();
+if(!joycrewConfig.enabled){
+  check('Joycrew 业务执行',true,'未启用；个人今日、收件箱、项目文件和飞书记录仍可独立运行');
+}else if(!joycrewConfig.ok){
+  check('Joycrew 业务执行',false,`配置无效：${joycrewConfig.reason}`);
+}else{
+  const probe=await joycrewClient.probe();
+  check('Joycrew 业务执行',probe.available,probe.available
+    ?`${probe.health?.persistence||'unknown'} 持久化 · ${probe.health?.authMode||joycrewConfig.authMode} 身份 · ${probe.health?.runtime||'runtime unknown'}`
+    :`${probe.error||'不可访问'}${probe.errorCode?` · ${probe.errorCode}`:''}`);
 }
 
 const aiConfig=aiRuntimeConfig();
 check('AI 判断配置',aiEnabled(),aiEnabled()?`已配置：${aiConfig.model} / 极高（${aiConfig.reasoningEffort}）；未联网验证 · Provider ${aiConfig.provider} / ${aiConfig.profileId}`:`未配置可用 AI Provider；${aiConfig.model||'模型未配置'} / 极高（${aiConfig.reasoningEffort}）未启用，将使用本地规则`);
 check('访问密码',!!process.env.WORKBENCH_PASSWORD,process.env.WORKBENCH_PASSWORD?'已启用':'未启用；仅绑定 localhost 时可接受');
 
-console.log('\n个人 AI 工作台 · 环境自检\n');
+console.log(`\n${PRODUCT_DISPLAY_NAME} v${PRODUCT_VERSION} · 环境自检\n`);
 for(const result of results)console.log(`${result.ok?'✓':'!'} ${result.name}: ${result.detail}`);
 console.log('');
 
-const required=new Set(['Node.js >= 20','文件系统','数据目录可写','工作区可写','业务板块配置']);
+const required=new Set(['Node.js >= 24','文件系统','数据目录可写','工作区可写','业务板块配置']);
 if(externalIntegration?.enabled){required.add('得到大脑待办管线');required.add('getnote CLI');required.add('lark-cli');}
+if(joycrewConfig.enabled)required.add('Joycrew 业务执行');
 process.exit(results.some(result=>required.has(result.name)&&!result.ok)?1:0);

@@ -9,25 +9,37 @@ const MUTATING_TOOLS=[
   'confirmation_clear','business_create','business_rename','business_delete','config_update','backup_create',
   'project_summary_append'
 ];
+const JOYCREW_PREVIEW_TOOLS=['joycrew_run_prepare','joycrew_deliverable_prepare','joycrew_approval_prepare'];
 
-test('Navigator P0 exposes a fixed reviewed read-only tool set',()=>{
-  const registry=createWorkbenchRegistry({appRoot:process.cwd(),store:{}});
-  const tools=registry.list({readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST});
+function registry(){
+  const joycrewClient={};
+  const joycrewActions={list:()=>[],prepare:()=>({id:'preview'})};
+  return createWorkbenchRegistry({appRoot:process.cwd(),store:{},joycrewClient,joycrewActions});
+}
+
+test('unified Copilot exposes one fixed reviewed read-and-preview tool set',()=>{
+  const tools=registry().list({readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST});
   assert.deepEqual(tools.map(tool=>tool.name).sort(),[...HARNESS_NAVIGATOR_TOOL_ALLOWLIST].sort());
   assert.equal(tools.every(tool=>tool.readOnly===true),true);
   assert.equal(tools.every(tool=>tool.requiresConfirmation!==true),true);
   for(const name of MUTATING_TOOLS)assert.equal(isHarnessNavigatorTool(name),false,name);
+  for(const name of JOYCREW_PREVIEW_TOOLS)assert.equal(isHarnessNavigatorTool(name),true,name);
   assert.equal(isHarnessNavigatorTool('workbench_get_state'),false,'broad full-state reads are not auto-exposed');
+  assert.equal(isHarnessNavigatorTool('joycrew_run_create'),false,'external mutations are never directly model-visible');
 });
 
 test('registry denies a mutating or unreviewed tool before reading state',async()=>{
-  const registry=createWorkbenchRegistry({appRoot:process.cwd(),store:{}});
+  const current=registry();
   await assert.rejects(
-    registry.call('inbox_add',{text:'must not run'},{readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}),
+    current.call('inbox_add',{text:'must not run'},{readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}),
     error=>error?.code==='MCP_TOOL_NOT_ALLOWED'&&error?.statusCode===403
   );
   await assert.rejects(
-    registry.call('workbench_get_state',{}, {readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}),
+    current.call('workbench_get_state',{}, {readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}),
     error=>error?.code==='MCP_TOOL_NOT_ALLOWED'
+  );
+  await assert.rejects(
+    current.call('joycrew_run_create',{}, {readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}),
+    error=>error?.code==='MCP_TOOL_NOT_FOUND'
   );
 });
