@@ -43,7 +43,7 @@ permissions:
 jobs:
   macos-host-contract:
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -58,6 +58,20 @@ jobs:
           node --check scripts/macos-launch-agent.mjs
       - name: Run macOS host contract tests
         run: node --test tests/host-p0.test.mjs tests/macos-bootstrap.test.mjs
+      - name: Validate one-click prepare-only flow on macOS
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/AI-Work-OS" "$RUNNER_TEMP/workbench-data"
+          git branch -M main
+          git update-ref refs/remotes/origin/main HEAD
+          SMOKE_PORT="$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close();});")"
+          WORKBENCH_INSTALL_NO_PAUSE=1 node scripts/macos-bootstrap.mjs \
+            --prepare-only \
+            --no-open \
+            --workspace "$RUNNER_TEMP/AI-Work-OS" \
+            --data-dir "$RUNNER_TEMP/workbench-data" \
+            --port "$SMOKE_PORT"
+          node -e "const fs=require('node:fs'),path=require('node:path');const root=process.env.RUNNER_TEMP;const bootstrap=JSON.parse(fs.readFileSync(path.join(root,'workbench-data/p0/macos-bootstrap.json'),'utf8'));const host=JSON.parse(fs.readFileSync(path.join(root,'workbench-data/p0/host-readiness.json'),'utf8'));if(bootstrap.status!=='prepared'||host.status!=='passed'||host.scope.joycrewEnabled!==false)throw new Error('prepare-only evidence invalid');"
       - name: Validate generated LaunchAgent with plutil
         run: |
           node --input-type=module <<'NODE'
