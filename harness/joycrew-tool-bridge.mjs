@@ -44,10 +44,7 @@ function createRpcClient(){
     const response=await fetch(url,{
       method:'POST',
       redirect:'error',
-      headers:{
-        'content-type':'application/json',
-        authorization:`Bearer ${token}`
-      },
+      headers:{'content-type':'application/json',authorization:`Bearer ${token}`},
       body:JSON.stringify({jsonrpc:'2.0',id:String(nextId++),method,params}),
       ...(signal?{signal}:{})
     });
@@ -76,10 +73,34 @@ export function normalizeInputSchema(value){
     throw new Error('Joycrew tool schema cannot declare both anyOf and oneOf');
   }
   const normalized={};
-  for(const [key,item] of Object.entries(value)){
-    normalized[key==='anyOf'?'oneOf':key]=normalizeInputSchema(item);
-  }
+  for(const [key,item] of Object.entries(value))normalized[key==='anyOf'?'oneOf':key]=normalizeInputSchema(item);
   return normalized;
+}
+
+function createDefinition(rpc,tool){
+  const rawName=String(tool.name);
+  return {
+    name:publicName(rawName),
+    description:`Joycrew 只读工具：${String(tool.description||rawName)}`,
+    parameters:normalizeInputSchema(tool.inputSchema||{type:'object',additionalProperties:false,properties:{}}),
+    output:{
+      schema:{
+        type:'object',
+        properties:{result:{},readback:{type:'boolean'}},
+        required:['result','readback'],
+        additionalProperties:false
+      },
+      render(_args,value){return [{type:'text',text:resultText(value)}];}
+    },
+    async execute(args,exec){
+      const result=await rpc('tools/call',{name:rawName,arguments:args&&typeof args==='object'?args:{}},exec.signal);
+      const structured=result?.structuredContent;
+      return {
+        result:structured&&Object.hasOwn(structured,'result')?structured.result:null,
+        readback:Boolean(structured?.readback)
+      };
+    }
+  };
 }
 
 export const name='joycrew-readonly-tool-bridge';
@@ -90,7 +111,9 @@ export async function apply(ctx){
   const listed=await rpc('tools/list',{});
   const tools=Array.isArray(listed?.tools)?listed.tools:[];
   if(tools.length!==ALLOWED_RAW_NAMES.size)throw new Error('Joycrew bridge tool catalog does not match the fixed Navigator contract');
+
   const seen=new Set();
+  const definitions=[];
   for(const tool of tools){
     const rawName=String(tool?.name||'');
     if(!rawName||!ALLOWED_RAW_NAMES.has(rawName)||tool?.readOnly!==true||tool?.requiresConfirmation===true){
@@ -99,28 +122,21 @@ export async function apply(ctx){
     const modelName=publicName(rawName);
     if(seen.has(modelName))throw new Error(`Duplicate Joycrew tool: ${modelName}`);
     seen.add(modelName);
-    ctx.tools.register({
-      name:modelName,
-      description:`Joycrew 只读工具：${String(tool.description||rawName)}`,
-      parameters:normalizeInputSchema(tool.inputSchema||{type:'object',additionalProperties:false,properties:{}}),
-      output:{
-        schema:{
-          type:'object',
-          properties:{result:{},readback:{type:'boolean'}},
-          required:['result','readback'],
-          additionalProperties:false
-        },
-        render(_args,value){return [{type:'text',text:resultText(value)}];}
-      },
-      async execute(args,exec){
-        const result=await rpc('tools/call',{name:rawName,arguments:args&&typeof args==='object'?args:{}},exec.signal);
-        const structured=result?.structuredContent;
-        return {
-          result:structured&&Object.hasOwn(structured,'result')?structured.result:null,
-          readback:Boolean(structured?.readback)
-        };
-      }
-    });
+    definitions.push(createDefinition(rpc,tool));
   }
   if(seen.size!==ALLOWED_RAW_NAMES.size)throw new Error('Joycrew bridge tool catalog is incomplete');
+
+  // Tool registrations are lifecycle resources. Keep every disposer inside a
+  // Cordis effect so activation publishes the full generation and unloading
+  // removes it. Direct registration in an async continuation is not durable.
+  ctx.effect(()=>{
+    const disposers=[];
+    try{
+      for(const definition of definitions)disposers.push(ctx.tools.register(definition));
+    }catch(error){
+      for(const dispose of disposers.reverse())dispose();
+      throw error;
+    }
+    return()=>{for(const dispose of disposers.reverse())dispose();};
+  },'joycrew-readonly-tool-bridge.tools');
 }

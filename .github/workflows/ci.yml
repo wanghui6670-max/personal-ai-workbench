@@ -96,11 +96,17 @@ jobs:
         run: docker run --rm --entrypoint node personal-ai-workbench:harness scripts/harness-check.mjs
       - name: Start Workbench and verify health plus Navigator asset
         run: |
-          docker run -d --name workbench-harness-smoke -p 127.0.0.1:49173:4173 -e ALLOW_INSECURE_PUBLIC=1 personal-ai-workbench:harness
+          docker run -d --name workbench-harness-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 personal-ai-workbench:harness
           trap 'docker rm -f workbench-harness-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:49173/api/health >/dev/null; then break; fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'
-          curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'
+          if ! curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'; then
+            docker logs workbench-harness-smoke || true
+            exit 1
+          fi
+          if ! curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'; then
+            docker logs workbench-harness-smoke || true
+            exit 1
+          fi
