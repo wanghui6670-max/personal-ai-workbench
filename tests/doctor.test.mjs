@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JsonStore } from '../src/store.mjs';
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const doctorScript = path.join(projectRoot, 'scripts', 'doctor.mjs');
@@ -32,7 +33,7 @@ function runDoctor(env) {
   });
 }
 
-test('doctor preserves a pre-existing legacy write-test file', async t => {
+test('doctor preserves a pre-existing legacy write-test file and reports disabled external pipeline', async t => {
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-'));
   t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
 
@@ -46,6 +47,7 @@ test('doctor preserves a pre-existing legacy write-test file', async t => {
   const result = await runDoctor({ DATA_DIR: dataDir, WORKSPACE_ROOT: workspaceRoot });
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /✓ 滴答待办管线: 未启用/);
   assert.equal(await fsp.readFile(legacyProbe, 'utf8'), originalContent);
   const entries = await fsp.readdir(workspaceRoot);
   assert.deepEqual(
@@ -69,4 +71,45 @@ test('doctor exits non-zero when the workspace target is a file', async t => {
   assert.equal(result.code, 1, result.stderr || result.stdout);
   assert.match(result.stdout, /! 文件系统:/);
   assert.equal(await fsp.readFile(workspaceFile, 'utf8'), originalContent);
+});
+
+test('doctor fails closed when the enabled Dida pipeline is missing required local CLIs', async t => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-external-'));
+  t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
+
+  const dataDir = path.join(tempRoot, 'data');
+  const workspaceRoot = path.join(tempRoot, 'workspace');
+  const emptyBin = path.join(tempRoot, 'empty-bin');
+  await fsp.mkdir(workspaceRoot, { recursive: true });
+  await fsp.mkdir(emptyBin, { recursive: true });
+
+  const store = new JsonStore(dataDir);
+  await store.ensure();
+  await store.updateConfig(config => {
+    config.settings = {
+      ...(config.settings || {}),
+      externalTaskPipeline: {
+        enabled: true,
+        provider: 'dida_cli',
+        cliFlavor: 'dida365',
+        journalDocumentUrl: 'https://example.feishu.cn/wiki/journal',
+        journalHeading: '每日工作日记',
+        calendarEnabled: true,
+        calendarName: '个人 AI 工作台'
+      }
+    };
+    return true;
+  });
+
+  const result = await runDoctor({
+    DATA_DIR: dataDir,
+    WORKSPACE_ROOT: workspaceRoot,
+    PATH: emptyBin
+  });
+
+  assert.equal(result.code, 1, result.stderr || result.stdout);
+  assert.match(result.stdout, /✓ 滴答待办管线: dida365/);
+  assert.match(result.stdout, /! ticktick CLI: 未找到 ticktick 可执行文件/);
+  assert.match(result.stdout, /! lark-cli: 未找到 lark-cli 可执行文件/);
+  assert.match(result.stdout, /✓ 本机日历路径:/);
 });
