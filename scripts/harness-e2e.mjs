@@ -21,6 +21,7 @@ const toolNames=[
   'journal_read','confirmation_list','business_list','project_records_read'
 ];
 const calls=[];
+const rpcTrace=[];
 
 function schema(name){
   if(name==='project_list')return{type:'object',additionalProperties:false,properties:{includeArchived:{type:'boolean'}},required:[]};
@@ -33,6 +34,7 @@ const bridge=http.createServer(async(req,res)=>{
   for await(const chunk of req)chunks.push(chunk);
   let body={};
   try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{}
+  rpcTrace.push({method:body.method||null,name:body.params?.name||null});
   if(req.headers.authorization!==`Bearer ${token}`){
     res.writeHead(403,{'content-type':'application/json'});res.end('{"error":"denied"}');return;
   }
@@ -84,9 +86,18 @@ const harness=new DeepSeekHarness({
   maxTokens:512
 });
 
+function diagnostic(events){
+  return events
+    .filter(event=>['assistant/message','tool/call','tool/result','turn/end'].includes(event.type))
+    .map(event=>({type:event.type,data:event.data}));
+}
+
 try{
   const first=await harness.run('请查看项目');
   assert.equal(first.finalResponse,'已读取 1 个项目：端到端测试项目。');
+  if(calls.length!==1){
+    console.error('Harness E2E diagnostic:',JSON.stringify({rpcTrace,calls,events:diagnostic(first.events)},null,2));
+  }
   assert.equal(calls.length,1);
   assert.equal(calls[0].name,'project_list');
   assert.deepEqual(calls[0].args,{});

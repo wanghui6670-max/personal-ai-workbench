@@ -3,8 +3,8 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 COPY --chown=node:node package.json ./
-COPY --chown=node:node harness/package.json ./harness/package.json
-RUN npm install --prefix harness --omit=dev --ignore-scripts --no-audit --no-fund
+COPY --chown=node:node harness/package.json harness/package-lock.json ./harness/
+RUN npm ci --prefix harness --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY --chown=node:node src ./src
 COPY --chown=node:node public ./public
