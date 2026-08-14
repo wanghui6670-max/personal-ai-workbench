@@ -3,6 +3,7 @@ import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
+import { createExternalTaskTools, planExternalTaskMessage } from './external-task-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -28,7 +29,8 @@ function planGuard(tool,args,state){
 
 export function createWorkbenchRegistry({appRoot,store}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  const tools=[...createWorkbenchTools(),...createProjectRecordTools()];
+  const workbenchTools=createWorkbenchTools().filter(tool=>tool.name!=='feishu_inbox_sync');
+  const tools=[...workbenchTools,...createProjectRecordTools(),...createExternalTaskTools()];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -73,12 +75,13 @@ export function createWorkbenchRegistry({appRoot,store}={}){
         console.warn('[AI console planner fallback]',error.message);
       }
     }
+    if(!planned)planned=planExternalTaskMessage({message,state:derived});
     if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
       return {
-        kind:'clarification',message:'模型提出的工具不在本工作台白名单中，我没有执行。请重新描述你的目标。',toolName:null,args:{},reason:'工具白名单校验未通过。',tool:null,
+        kind:'clarification',message:'这个入口已经停用，当前待办来源是滴答清单 CLI。请说“同步滴答待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,
         state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null
       };
     }
