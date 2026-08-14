@@ -18,6 +18,9 @@ test('browser loads the GetNote source, Feishu journal and local calendar integr
   assert.match(script,/getnote note todos/);
   assert.match(script,/只有待办文字中能确定日期的事项才进入本机日历/);
   assert.match(script,/最近笔记扫描数量必须是 20-500/);
+  assert.match(script,/raw\?\.provider==='dida_cli'/);
+  assert.match(script,/lastSyncStatus:'needs_reconfiguration'/);
+  assert.match(script,/enabled:false,provider:'getnote_cli'/);
   assert.doesNotMatch(script,/TICKTICK_HOST|ticktick\.com|dida365\.com/);
   assert.doesNotMatch(script,/localStorage|sessionStorage|indexedDB/);
   assert.match(styles,/\.getnote-settings/);
