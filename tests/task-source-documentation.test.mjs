@@ -25,10 +25,11 @@ test('normative docs keep Dida CLI as source, Feishu as journal sink, and ICS as
 });
 
 test('external task API documents the exact MCP tools, confirmation boundary, and fixed CLI binary',async()=>{
-  const [api,pipeline,registry,taskCli]=await Promise.all([
+  const [api,pipeline,registry,toolModule,taskCli]=await Promise.all([
     read('docs/API.md'),
     read('docs/TASK_SOURCE_PIPELINE.md'),
     read('src/mcp/registry.mjs'),
+    read('src/mcp/external-task-tools.mjs'),
     read('src/task-cli.mjs')
   ]);
   for(const name of [
@@ -38,8 +39,10 @@ test('external task API documents the exact MCP tools, confirmation boundary, an
     'daily_summary_publish'
   ]){
     assert.match(api,new RegExp(name));
-    assert.match(registry,new RegExp(name));
+    assert.match(toolModule,new RegExp(name));
   }
+  assert.match(registry,/createExternalTaskTools/);
+  assert.match(registry,/filter\(tool=>tool\.name!=='feishu_inbox_sync'\)/);
   assert.match(api,/EXTERNAL_TASK_PIPELINE_BUSY/);
   assert.match(api,/FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT/);
   assert.match(pipeline,/旧的 `feishu_inbox_sync` 已从 AI\/MCP 白名单移除/);
