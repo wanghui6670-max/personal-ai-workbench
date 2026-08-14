@@ -60,5 +60,5 @@ test('backup and recovery documentation remains exact after the source migration
   }
   assert.match(api,/GET \/api\/export/);
   assert.match(api,/不是完整恢复包/);
-  assert.match(deployment,/旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 字段时/);
+  assert.match(deployment,/旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段时/);
 });
