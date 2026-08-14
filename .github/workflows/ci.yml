@@ -52,7 +52,8 @@ jobs:
           node --check src/harness-policy.mjs
           node --check src/harness-navigator.mjs
           node --check src/harness-http.mjs
-          node --check harness/joycrew-tool-bridge.mjs
+          node --check harness/joycrew-schema.mjs
+          node --check harness/joycrew-mcp-server.mjs
           node --check harness/runtime-bin.mjs
           node --check scripts/doctor.mjs
           node --check scripts/migrate-project-records.mjs
@@ -102,11 +103,5 @@ jobs:
             if curl --fail --silent http://127.0.0.1:49173/api/health >/dev/null; then break; fi
             sleep 1
           done
-          if ! curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'; then
-            docker logs workbench-harness-smoke || true
-            exit 1
-          fi
-          if ! curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'; then
-            docker logs workbench-harness-smoke || true
-            exit 1
-          fi
+          if ! curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'; then docker logs workbench-harness-smoke || true; exit 1; fi
+          if ! curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'; then docker logs workbench-harness-smoke || true; exit 1; fi

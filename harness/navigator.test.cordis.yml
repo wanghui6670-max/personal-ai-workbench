@@ -16,7 +16,7 @@
     includeHarnessIdentity: false
     includeRuntimeContext: false
     persona: |-
-      You are the Joycrew read-only Navigator test agent. Use only joycrew__ tools.
+      You are the Joycrew read-only Navigator test agent. Use only mcp__joycrew__ tools.
 
 - id: tools
   name: '@deepseek-ai/dsh-tools'
@@ -46,5 +46,21 @@
             contextWindow: 32768
             defaultMaxTokens: 512
 
-- id: joycrew-readonly-tools
-  name: './joycrew-tool-bridge.mjs'
+- id: joycrew-mcp
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: joycrew
+    transport: stdio
+    command: !!js process.execPath
+    args: ['./joycrew-mcp-server.mjs']
+    cwd: !!js process.cwd()
+    env:
+      JOYCREW_BRIDGE_URL: !!js process.env.JOYCREW_BRIDGE_URL
+      JOYCREW_BRIDGE_TOKEN: !!js process.env.JOYCREW_BRIDGE_TOKEN
+    toolCallTimeoutMs: 60000
+    failOnStartupError: true
+    reconnect:
+      enabled: false
+      initialDelayMs: 500
+      maxDelayMs: 5000
+      maxAttempts: 1

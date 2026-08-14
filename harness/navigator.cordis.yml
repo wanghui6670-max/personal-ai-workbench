@@ -1,5 +1,4 @@
-# Joycrew P0 Navigator runtime. It intentionally composes only the Agent core,
-# one approved LLM adapter, the stdio SDK server, and the fixed read-only bridge.
+# Joycrew Navigator V1: Agent core + approved model adapter + official MCP client.
 # No shell, filesystem, terminal, web, jobs, workflow, cron, subagent, approval,
 # or session-persistence plugin is mounted.
 
@@ -25,7 +24,7 @@
       你的职责是帮助用户查看今日待办、收件箱、项目、工作日志、待确认事项，以及从绑定的飞书项目文档读取项目记录。你可以连续使用当前会话中提供的 Joycrew 只读工具，直到能够基于真实工具结果回答。
 
       强制规则：
-      1. 只使用名称以 joycrew__ 开头的工具；没有合适工具就明确说明缺口。
+      1. 只使用名称以 mcp__joycrew__ 开头的工具；没有合适工具就明确说明缺口。
       2. 不得尝试写入、删除、归类、同步、创建、完成、归档、修改日期或更改配置。
       3. 不得请求或推测 shell、文件系统、终端、任意 URL、凭证、后台任务或子代理能力。
       4. 不把会话当作项目长期记忆；项目分析、阶段总结和复盘的长期真源仍是飞书项目文档。
@@ -62,5 +61,21 @@
             contextWindow: !!js Number(process.env.HARNESS_PROVIDER_CONTEXT_WINDOW)
             maxTokens: !!js Number(process.env.HARNESS_PROVIDER_MAX_TOKENS)
 
-- id: joycrew-readonly-tools
-  name: './joycrew-tool-bridge.mjs'
+- id: joycrew-mcp
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: joycrew
+    transport: stdio
+    command: !!js process.execPath
+    args: ['./joycrew-mcp-server.mjs']
+    cwd: !!js process.cwd()
+    env:
+      JOYCREW_BRIDGE_URL: !!js process.env.JOYCREW_BRIDGE_URL
+      JOYCREW_BRIDGE_TOKEN: !!js process.env.JOYCREW_BRIDGE_TOKEN
+    toolCallTimeoutMs: 60000
+    failOnStartupError: true
+    reconnect:
+      enabled: false
+      initialDelayMs: 500
+      maxDelayMs: 5000
+      maxAttempts: 1

@@ -3,8 +3,8 @@
     "kind": "chunks",
     "chunks": [
       {"type":"block-start","index":0,"blockType":"tool-call"},
-      {"type":"tool-call-delta","index":0,"id":"call_nav_1","name":"joycrew__project_list","argumentsDelta":"{}"},
-      {"type":"block-end","index":0,"block":{"type":"tool-call","id":"call_nav_1","name":"joycrew__project_list","arguments":"{}"}},
+      {"type":"tool-call-delta","index":0,"id":"call_nav_1","name":"mcp__joycrew__project_list","argumentsDelta":"{}"},
+      {"type":"block-end","index":0,"block":{"type":"tool-call","id":"call_nav_1","name":"mcp__joycrew__project_list","arguments":"{}"}},
       {"type":"finish","reason":{"kind":"tool-calls"}}
     ]
   },
