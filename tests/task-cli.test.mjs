@@ -29,6 +29,7 @@ test('meeting todos become stable tasks and only explicit dates are scheduled',(
   assert.equal(first[1].dueDate,null);
   assert.equal(first[2].dueDate,'2026-08-14');
   assert.equal(first[2].done,true);
+  assert.equal(parseTodoSchedule('1月2日复盘',{referenceDate:'2026-08-14'}).dueDate,'2026-01-02');
   assert.deepEqual(parseTodoSchedule('下周找他确认',{referenceDate:'2026-08-14'}),{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:null});
 });
 
