@@ -228,16 +228,6 @@ function summaryText(state,date,notes=''){
   return lines.join('\n');
 }
 
-function stableTaskIdentity(task){
-  return [task.externalId,task.title,task.startAt,task.dueAt,task.dueDate,task.allDay,task.updatedAt,task.completedAt];
-}
-
-function taskJournalOperation(source,date){
-  const active=[...source.active].sort((a,b)=>String(a.externalId).localeCompare(String(b.externalId))).map(stableTaskIdentity);
-  const completed=[...source.completed].sort((a,b)=>String(a.externalId).localeCompare(String(b.externalId))).map(stableTaskIdentity);
-  return operationId('tasks',date,{active,completed,completedAvailable:source.completedAvailable!==false,host:source.host||null});
-}
-
 async function recordSyncError(store,error){
   await store.updateConfig(config=>{
     const current={...(config.settings?.[SETTINGS_KEY]||{})};
@@ -261,7 +251,7 @@ export async function syncExternalTasks({
   try{
     const source=await taskClient.fetch(integration);
     const snapshot=taskSnapshotText(source,date);
-    const journalOp=taskJournalOperation(source,date);
+    const journalOp=operationId('tasks',date,snapshot);
     const journal=await journalClient.appendTasks(integration.journalDocumentUrl,snapshot,{
       operationId:journalOp,heading:integration.journalHeading
     });
