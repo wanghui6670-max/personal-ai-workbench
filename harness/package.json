@@ -1,0 +1,18 @@
+{
+  "name": "personal-ai-workbench-harness-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pinned DeepSeek Harness runtime for the Joycrew Navigator.",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-sdk-client": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-sdk-jsonrpc-server": "0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm-replay": "0.1.0-rc.6"
+  }
+}

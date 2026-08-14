@@ -9,20 +9,27 @@ function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
 }
 
+function normalizedAllowedNames(value){
+  if(value===undefined||value===null)return null;
+  const values=Array.isArray(value)?value:value instanceof Set?[...value]:[];
+  return new Set(values.filter(name=>typeof name==='string'&&name));
+}
+
+function toolAllowed(tool,{readOnlyOnly=false,allowedNames=null}={}){
+  if(!tool)return false;
+  if(readOnlyOnly&&tool.readOnly!==true)return false;
+  const names=normalizedAllowedNames(allowedNames);
+  return names===null||names.has(tool.name);
+}
+
 function planGuard(tool,args,state){
   if(tool?.name!=='todo_today'||args?.add!==true)return null;
   const todo=state.todos.find(candidate=>candidate.id===args.todoId);
   if(!todo){
-    return {
-      message:'目标待办不存在，我没有生成加入今日的操作预览。',
-      reason:'todo_today 预检未找到目标待办。'
-    };
+    return {message:'目标待办不存在，我没有生成加入今日的操作预览。',reason:'todo_today 预检未找到目标待办。'};
   }
   if(todo.done){
-    return {
-      message:`「${todo.title}」已经完成，不能加入今日工作台。请先恢复为未完成，再由你决定是否加入今日。`,
-      reason:'已完成待办被今日计划领域规则排除。'
-    };
+    return {message:`「${todo.title}」已经完成，不能加入今日工作台。请先恢复为未完成，再由你决定是否加入今日。`,reason:'已完成待办被今日计划领域规则排除。'};
   }
   return null;
 }
@@ -37,7 +44,9 @@ export function createWorkbenchRegistry({appRoot,store}={}){
     return contextFrom({appRoot,store,state,config,aiEnabled:aiEnabled()});
   }
 
-  function list(){return tools.map(publicTool);}
+  function list(options={}){
+    return tools.filter(tool=>toolAllowed(tool,options)).map(publicTool);
+  }
 
   function validateArguments(tool,args){
     const input=args===undefined?{}:args;
@@ -50,6 +59,7 @@ export function createWorkbenchRegistry({appRoot,store}={}){
   async function call(name,args={},options={}){
     const tool=findTool(tools,name);
     if(!tool)throw mcpError(`未知 MCP 工具：${name}`,'MCP_TOOL_NOT_FOUND',404);
+    if(!toolAllowed(tool,options))throw mcpError(`工具 ${name} 不在本次调用的能力白名单中。`,'MCP_TOOL_NOT_ALLOWED',403);
     if(tool.requiresConfirmation&&!options.confirmed){
       throw mcpError(`工具 ${name} 会改变工作台状态，必须先展示影响范围并获得确认。`,'MCP_CONFIRMATION_REQUIRED',409);
     }
@@ -71,47 +81,26 @@ export function createWorkbenchRegistry({appRoot,store}={}){
         plannerModel=runtime.model||null;
         planned=await planAIConsole({message,state:derived,tools:list(),route});
         if(planned)planner='model';
-      }catch(error){
-        console.warn('[AI console planner fallback]',error.message);
-      }
+      }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
     if(!planned)planned=planExternalTaskMessage({message,state:derived});
     if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {
-        kind:'clarification',message:'这个入口已经停用，当前待办来源是滴答清单 CLI。请说“同步滴答待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,
-        state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null
-      };
+      return {kind:'clarification',message:'这个入口已经停用，当前待办来源是滴答清单 CLI。请说“同步滴答待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){
-      try{input=validateArguments(tool,input);}
-      catch(error){
-        return {
-          kind:'clarification',message:'模型提出的参数未通过本地校验，我没有执行。请补齐或改写明确参数。',toolName:null,args:{},reason:error.message,tool:null,
-          state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null
-        };
+      try{input=validateArguments(tool,input);}catch(error){
+        return {kind:'clarification',message:'模型提出的参数未通过本地校验，我没有执行。请补齐或改写明确参数。',toolName:null,args:{},reason:error.message,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
       }
       const guarded=planGuard(tool,input,derived);
       if(guarded){
-        return {
-          kind:'clarification',message:guarded.message,toolName:null,args:{},reason:guarded.reason,tool:null,
-          state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null
-        };
+        return {kind:'clarification',message:guarded.message,toolName:null,args:{},reason:guarded.reason,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
       }
     }
-    return {
-      ...planned,
-      args:input,
-      tool:tool?publicTool(tool):null,
-      state:derived,
-      confirmationRequired:Boolean(tool?.requiresConfirmation),
-      planner,
-      plannerModel,
-      analysis:planned.analysis||null
-    };
+    return {...planned,args:input,tool:tool?publicTool(tool):null,state:derived,confirmationRequired:Boolean(tool?.requiresConfirmation),planner,plannerModel,analysis:planned.analysis||null};
   }
 
   return Object.freeze({list,call,plan,tools});
@@ -119,6 +108,6 @@ export function createWorkbenchRegistry({appRoot,store}={}){
 
 export function jsonRpcResult(id,result){return {jsonrpc:'2.0',id,result};}
 export function jsonRpcError(id,error){
-  const code=error?.code==='MCP_CONFIRMATION_REQUIRED'?-32001:error?.code==='MCP_TOOL_NOT_FOUND'?-32601:-32602;
+  const code=error?.code==='MCP_CONFIRMATION_REQUIRED'?-32001:error?.code==='MCP_TOOL_NOT_FOUND'?-32601:error?.code==='MCP_TOOL_NOT_ALLOWED'?-32003:-32602;
   return {jsonrpc:'2.0',id,error:{code,message:error?.message||'MCP 请求失败'}};
 }
