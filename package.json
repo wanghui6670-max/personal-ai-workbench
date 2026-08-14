@@ -12,6 +12,7 @@
     "doctor": "node scripts/doctor.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
+    "p0:acceptance": "node scripts/p0-deployment-acceptance.mjs",
     "migrate:project-records": "node scripts/migrate-project-records.mjs",
     "harness:install": "npm ci --prefix harness --ignore-scripts --no-audit --no-fund",
     "harness:check": "node scripts/harness-check.mjs",

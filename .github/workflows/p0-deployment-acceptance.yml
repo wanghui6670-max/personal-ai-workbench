@@ -1,0 +1,39 @@
+name: P0 Deployment Acceptance
+
+on:
+  push:
+    branches:
+      - main
+      - agent/p0-deployment-acceptance
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-host-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Validate acceptance runner syntax
+        run: node --check scripts/p0-deployment-acceptance.mjs
+      - name: Run isolated P0 deployment acceptance
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          CI: '1'
+        run: |
+          mkdir -p artifacts
+          npm run p0:acceptance -- --report artifacts/p0-deployment-acceptance.json
+          cat artifacts/p0-deployment-acceptance.json
+      - name: Upload P0 acceptance report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: personal-ai-workbench-p0-acceptance-${{ github.sha }}
+          path: artifacts/p0-deployment-acceptance.json
+          if-no-files-found: error
+          retention-days: 14
