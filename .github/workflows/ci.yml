@@ -53,7 +53,7 @@ jobs:
           node --check scripts/test-by-file.mjs
           node --check public/project-records.js
           node --check public/ux-enhancements.js
-          node --check public/dida-integration.js
+          node --check public/getnote-integration.js
       - name: Run contract tests with concise per-file diagnostics
         env:
           OPENAI_API_KEY: ''
