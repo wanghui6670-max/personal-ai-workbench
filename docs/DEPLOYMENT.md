@@ -237,7 +237,7 @@ npm run backup
 
 不包含项目工作区、飞书正文、CLI 登录状态、`.env`、ICS 客户端配置或任何凭证。
 
-旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段，恢复时保留当前凭据目录，而不是静默清空。这保证向后兼容，但旧备份不是这些凭据的历史快照。
+旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 字段时，恢复时保留当前凭据目录，而不是静默清空。这保证向后兼容，但旧备份不是这些凭据的历史快照。
 
 ## 13. 恢复
 
