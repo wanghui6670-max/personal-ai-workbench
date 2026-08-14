@@ -47,12 +47,8 @@ function addDays(dateOnly,days){
   date.setUTCDate(date.getUTCDate()+days);
   return date.toISOString().slice(0,10);
 }
-function nextMonthDay(month,day,referenceDate){
-  const year=Number(referenceDate.slice(0,4));
-  let candidate=validDate(year,month,day);
-  if(!candidate)return null;
-  if(candidate<referenceDate)candidate=validDate(year+1,month,day);
-  return candidate;
+function monthDayInReferenceYear(month,day,referenceDate){
+  return validDate(Number(referenceDate.slice(0,4)),month,day);
 }
 function parseDate(text,referenceDate){
   const fullChinese=text.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
@@ -60,7 +56,7 @@ function parseDate(text,referenceDate){
   const fullNumeric=text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
   if(fullNumeric)return validDate(Number(fullNumeric[1]),Number(fullNumeric[2]),Number(fullNumeric[3]));
   const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
-  if(monthDay)return nextMonthDay(Number(monthDay[1]),Number(monthDay[2]),referenceDate);
+  if(monthDay)return monthDayInReferenceYear(Number(monthDay[1]),Number(monthDay[2]),referenceDate);
   if(/后天/.test(text))return addDays(referenceDate,2);
   if(/明天|明日/.test(text))return addDays(referenceDate,1);
   if(/今天|今日/.test(text))return referenceDate;
