@@ -164,6 +164,32 @@ async function status(){
   if(launch.code!==0||health?.status!==200||health?.body?.ok!==true)process.exitCode=1;
 }
 
+async function start(){
+  assert.equal(process.platform,'darwin','LaunchAgent 启动仅支持 macOS。');
+  const binding=await currentBinding();
+  await fsp.access(plistPath);
+  if(await loaded()){
+    const health=await waitForHealth(binding);
+    console.log(`${label} 已在运行 · v${health.version}`);
+    return;
+  }
+  if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 被其他进程占用。`);
+  await bootstrap();
+  try{
+    const health=await waitForHealth(binding);
+    console.log(`已启动 ${label} · v${health.version}`);
+  }catch(error){
+    await bootout();
+    throw error;
+  }
+}
+
+async function stop(){
+  assert.equal(process.platform,'darwin','LaunchAgent 停止仅支持 macOS。');
+  if(await loaded())await bootout();
+  console.log(`已暂停 ${label}；plist、数据、工作区和日志均保留。`);
+}
+
 async function restart(){
   assert.equal(process.platform,'darwin','LaunchAgent 重启仅支持 macOS。');
   const binding=await currentBinding();
@@ -185,7 +211,9 @@ async function uninstall(){
 try{
   if(command==='install')await install();
   else if(command==='status')await status();
+  else if(command==='start')await start();
+  else if(command==='stop')await stop();
   else if(command==='restart')await restart();
   else if(command==='uninstall')await uninstall();
-  else throw new Error('用法：npm run service:macos -- install|status|restart|uninstall [--report <path>]');
+  else throw new Error('用法：npm run service:macos -- install|status|start|stop|restart|uninstall [--report <path>]');
 }catch(error){console.error(error.message||error);process.exitCode=1;}
