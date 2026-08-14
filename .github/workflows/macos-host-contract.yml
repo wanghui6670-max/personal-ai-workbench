@@ -86,7 +86,7 @@ jobs:
           npm run p0:acceptance -- --report artifacts/macos-p0-deployment-acceptance.json
           node -e "const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('artifacts/macos-p0-deployment-acceptance.json','utf8'));if(value.status!=='passed'||value.runtime.platform!=='darwin')throw new Error('macOS P0 evidence invalid');"
       - name: Upload macOS P0 evidence
-        if: always()
+        if: ${{ always() && hashFiles('artifacts/macos-p0-deployment-acceptance.json') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: personal-ai-workbench-macos-p0-${{ github.sha }}
