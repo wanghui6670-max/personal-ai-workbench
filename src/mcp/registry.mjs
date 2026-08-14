@@ -91,7 +91,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人待办使用得到大脑 CLI；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人待办来源是得到大脑 CLI；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){
