@@ -83,7 +83,7 @@ export async function chooseMacosWorkspace({explicit=null,existing=null,home,add
   for(const candidate of [...new Set(candidates.map(value=>path.resolve(value)))]){
     if(!(await isDirectory(candidate)))continue;
     const real=await fsp.realpath(candidate);
-    if(!matches.has(real))matches.set(real,real);
+    if(!matches.has(real))matches.set(real,candidate);
   }
   const unique=[...matches.values()];
   if(unique.length===1)return unique[0];
