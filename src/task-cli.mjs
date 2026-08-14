@@ -1,14 +1,14 @@
+import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync=promisify(execFile);
 const DEFAULT_TIMEOUT_MS=45_000;
-const MAX_BUFFER=8*1024*1024;
-const CLI_COMMAND='ticktick';
-const CLI_PROFILES=Object.freeze({
-  ticktick:{host:'ticktick.com'},
-  dida365:{host:'dida365.com'}
-});
+const MAX_BUFFER=16*1024*1024;
+const CLI_COMMAND='getnote';
+const PAGE_SIZE=20;
+const DEFAULT_NOTE_LIMIT=100;
+const MAX_NOTE_LIMIT=500;
 
 export class ExternalTaskSourceError extends Error{
   constructor(message,{cause,code='EXTERNAL_TASK_SOURCE_UNAVAILABLE',statusCode=502}={}){
@@ -17,27 +17,6 @@ export class ExternalTaskSourceError extends Error{
     this.code=code;
     this.statusCode=statusCode;
   }
-}
-
-function extractJson(stdout){
-  const raw=String(stdout??'').replace(/^\uFEFF/,'').trim();
-  if(!raw)throw new ExternalTaskSourceError('滴答 CLI 没有返回 JSON。',{code:'EXTERNAL_TASK_SOURCE_EMPTY'});
-  try{return JSON.parse(raw);}catch{}
-  const starts=[raw.indexOf('{'),raw.indexOf('[')].filter(index=>index>=0).sort((a,b)=>a-b);
-  for(const start of starts){
-    const close=raw[start]==='['?raw.lastIndexOf(']'):raw.lastIndexOf('}');
-    if(close<=start)continue;
-    try{return JSON.parse(raw.slice(start,close+1));}catch{}
-  }
-  throw new ExternalTaskSourceError('滴答 CLI 返回内容无法解析为 JSON。',{code:'EXTERNAL_TASK_SOURCE_INVALID_JSON'});
-}
-
-function taskArray(payload){
-  if(Array.isArray(payload))return payload;
-  for(const value of [payload?.tasks,payload?.items,payload?.data,payload?.result,payload?.data?.tasks,payload?.result?.tasks]){
-    if(Array.isArray(value))return value;
-  }
-  throw new ExternalTaskSourceError('滴答 CLI JSON 缺少任务数组。',{code:'EXTERNAL_TASK_SOURCE_SCHEMA'});
 }
 
 function firstText(...values){
@@ -49,118 +28,233 @@ function firstText(...values){
   return null;
 }
 
-function validDateOnly(value){
-  if(typeof value!=='string')return null;
-  const match=value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if(!match)return null;
-  const date=`${match[1]}-${match[2]}-${match[3]}`;
-  const parsed=Date.parse(`${date}T00:00:00.000Z`);
-  return Number.isFinite(parsed)&&new Date(parsed).toISOString().slice(0,10)===date?date:null;
+function normalizeText(value){return String(value??'').replace(/\s+/g,' ').trim();}
+function pad(value){return String(value).padStart(2,'0');}
+function validDate(year,month,day){
+  const date=new Date(Date.UTC(year,month-1,day));
+  if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+function referenceDateOnly(value){
+  const text=String(value||'').trim();
+  const direct=text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(direct&&validDate(Number(direct[1]),Number(direct[2]),Number(direct[3])))return `${direct[1]}-${direct[2]}-${direct[3]}`;
+  const date=new Date(value||Date.now());
+  return Number.isFinite(date.getTime())?date.toISOString().slice(0,10):new Date().toISOString().slice(0,10);
+}
+function addDays(dateOnly,days){
+  const date=new Date(`${dateOnly}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate()+days);
+  return date.toISOString().slice(0,10);
+}
+function nextMonthDay(month,day,referenceDate){
+  const year=Number(referenceDate.slice(0,4));
+  let candidate=validDate(year,month,day);
+  if(!candidate)return null;
+  if(candidate<referenceDate)candidate=validDate(year+1,month,day);
+  return candidate;
+}
+function parseDate(text,referenceDate){
+  const fullChinese=text.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
+  if(fullChinese)return validDate(Number(fullChinese[1]),Number(fullChinese[2]),Number(fullChinese[3]));
+  const fullNumeric=text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if(fullNumeric)return validDate(Number(fullNumeric[1]),Number(fullNumeric[2]),Number(fullNumeric[3]));
+  const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
+  if(monthDay)return nextMonthDay(Number(monthDay[1]),Number(monthDay[2]),referenceDate);
+  if(/后天/.test(text))return addDays(referenceDate,2);
+  if(/明天|明日/.test(text))return addDays(referenceDate,1);
+  if(/今天|今日/.test(text))return referenceDate;
+  return null;
+}
+function parseTime(text){
+  const clock=text.match(/(?:^|\D)([01]?\d|2[0-3]):([0-5]\d)(?:\D|$)/);
+  if(clock)return `${pad(Number(clock[1]))}:${clock[2]}`;
+  const chinese=text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2})\s*点(?:\s*(半|[0-5]?\d)\s*分?)?/);
+  if(!chinese)return null;
+  const period=chinese[1]||'';
+  let hour=Number(chinese[2]);
+  if(hour>24)return null;
+  if(['下午','傍晚','晚上'].includes(period)&&hour<12)hour+=12;
+  if(period==='中午'&&hour<11)hour+=12;
+  if(period==='凌晨'&&hour===12)hour=0;
+  if(['早上','上午'].includes(period)&&hour===12)hour=0;
+  if(hour===24)hour=0;
+  const minute=chinese[3]==='半'?30:Number(chinese[3]||0);
+  return `${pad(hour)}:${pad(minute)}`;
 }
 
-function doneStatus(raw,forceDone=false){
-  if(forceDone)return true;
-  const label=String(raw?.status_label??raw?.statusLabel??raw?.state??'').toLowerCase();
-  if(/completed|done|finished|已完成|完成/.test(label))return true;
-  const status=raw?.status;
-  return status===2||status==='2'||status===true;
-}
-
-export function normalizeCliTask(raw,{forceDone=false}={}){
-  if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
-  const externalId=firstText(raw.id,raw.task_id,raw.taskId);
-  const title=firstText(raw.title,raw.name,raw.content);
-  if(!externalId||!title)return null;
-  const startAt=firstText(raw.start_local,raw.startLocal,raw.start_date,raw.startDate);
-  const dueAt=firstText(raw.due_local,raw.dueLocal,raw.due_date,raw.dueDate);
-  const dueDate=validDateOnly(dueAt);
-  const content=firstText(raw.content,raw.description,raw.note)||'';
-  const completedAt=firstText(raw.completed_time,raw.completedTime,raw.completed_at,raw.completedAt);
-  const updatedAt=firstText(raw.modified_time,raw.modifiedTime,raw.updated_at,raw.updatedAt);
-  return {
-    externalId,
-    externalProjectId:firstText(raw.project_id,raw.projectId),
-    title,
-    content,
-    description:firstText(raw.description)||'',
-    done:doneStatus(raw,forceDone),
-    status:raw.status??null,
-    statusLabel:firstText(raw.status_label,raw.statusLabel,raw.state)||'',
-    priority:Number.isFinite(Number(raw.priority))?Number(raw.priority):0,
-    priorityLabel:firstText(raw.priority_label,raw.priorityLabel)||'',
-    startAt,
-    dueAt,
+export function parseTodoSchedule(text,{referenceDate=new Date().toISOString().slice(0,10)}={}){
+  const base=referenceDateOnly(referenceDate);
+  const dueDate=parseDate(String(text||''),base);
+  if(!dueDate)return{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:null};
+  const time=parseTime(String(text||''));
+  return{
     dueDate,
-    allDay:raw.is_all_day===true||raw.isAllDay===true,
-    timeZone:firstText(raw.time_zone,raw.timeZone),
-    completedAt,
-    updatedAt,
-    tags:Array.isArray(raw.tags)?raw.tags.map(value=>String(value)):[]
+    dueAt:time?`${dueDate}T${time}:00`:dueDate,
+    startAt:null,
+    allDay:!time,
+    timeZone:null
   };
 }
 
-export function parseCliTasks(payload,{forceDone=false}={}){
-  const unique=new Map();
-  for(const raw of taskArray(payload)){
-    const task=normalizeCliTask(raw,{forceDone});
-    if(!task)continue;
-    unique.set(task.externalId,task);
+function extractJson(stdout){
+  const raw=String(stdout??'').replace(/^\uFEFF/,'').trim();
+  if(!raw)throw new ExternalTaskSourceError('得到大脑 CLI 没有返回 JSON。',{code:'EXTERNAL_TASK_SOURCE_EMPTY'});
+  try{return JSON.parse(raw);}catch{}
+  const starts=[raw.indexOf('{'),raw.indexOf('[')].filter(index=>index>=0).sort((a,b)=>a-b);
+  for(const start of starts){
+    const close=raw[start]==='['?raw.lastIndexOf(']'):raw.lastIndexOf('}');
+    if(close<=start)continue;
+    try{return JSON.parse(raw.slice(start,close+1));}catch{}
   }
-  return [...unique.values()];
+  throw new ExternalTaskSourceError('得到大脑 CLI 返回内容无法解析为 JSON。',{code:'EXTERNAL_TASK_SOURCE_INVALID_JSON'});
 }
 
-function cliError(error,profile,action){
+function assertSuccessful(payload){
+  if(payload&&typeof payload==='object'&&!Array.isArray(payload)&&payload.success===false){
+    const message=firstText(payload.message,payload.reason,payload.error?.message,payload.error)||'得到大脑 API 返回失败。';
+    throw new ExternalTaskSourceError(message,{code:'EXTERNAL_TASK_SOURCE_REJECTED'});
+  }
+  return payload;
+}
+
+function normalizeNote(raw){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+  const noteId=firstText(raw.note_id,raw.noteId,raw.id);
+  if(!noteId)return null;
+  return{
+    noteId,
+    title:firstText(raw.title)||'未命名笔记',
+    noteType:firstText(raw.note_type,raw.noteType)||'',
+    createdAt:firstText(raw.created_at,raw.createdAt),
+    updatedAt:firstText(raw.updated_at,raw.updatedAt),
+    noteUrl:firstText(raw.note_url,raw.noteUrl)||''
+  };
+}
+
+export function parseNotesPage(payload){
+  const value=assertSuccessful(payload);
+  const data=value?.data&&typeof value.data==='object'?value.data:value;
+  const rawNotes=Array.isArray(data?.notes)?data.notes:Array.isArray(data?.items)?data.items:[];
+  const notes=rawNotes.map(normalizeNote).filter(Boolean);
+  return{
+    notes,
+    hasMore:data?.has_more===true||data?.hasMore===true,
+    cursor:firstText(data?.cursor,data?.next_cursor,data?.nextCursor)
+  };
+}
+
+function todoContainer(payload){
+  const value=assertSuccessful(payload);
+  const data=value?.data&&typeof value.data==='object'?value.data:value;
+  const container=data?.meeting_todos??data?.meetingTodos??value?.meeting_todos??value?.meetingTodos??{};
+  return{data,container:container&&typeof container==='object'?container:{}};
+}
+
+export function parseMeetingTodos(payload,note={}){
+  const {data,container}=todoContainer(payload);
+  const noteId=firstText(data?.note_id,data?.noteId,note.noteId,note.id);
+  if(!noteId)throw new ExternalTaskSourceError('得到大脑待办结果缺少 note_id。',{code:'EXTERNAL_TASK_SOURCE_SCHEMA'});
+  const noteTitle=firstText(data?.title,note.title)||'未命名笔记';
+  const noteUrl=firstText(data?.note_url,data?.noteUrl,note.noteUrl)||'';
+  const source=firstText(container.source)||'meeting_summary';
+  const items=Array.isArray(container.items)?container.items:[];
+  const referenceDate=referenceDateOnly(note.updatedAt||note.createdAt||new Date().toISOString());
+  const occurrences=new Map();
+  const tasks=[];
+  for(const item of items){
+    const text=normalizeText(typeof item==='string'?item:item?.text);
+    if(!text)continue;
+    const normalized=text.toLocaleLowerCase('zh-CN');
+    const occurrence=occurrences.get(normalized)||0;
+    occurrences.set(normalized,occurrence+1);
+    const externalId=`getnote-${crypto.createHash('sha256').update(`${noteId}\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`;
+    const schedule=parseTodoSchedule(text,{referenceDate});
+    tasks.push({
+      externalId,
+      title:text,
+      content:'',
+      description:'',
+      done:typeof item==='object'&&item?.completed===true,
+      completedAt:typeof item==='object'&&item?.completed===true?(note.updatedAt||note.createdAt||null):null,
+      updatedAt:note.updatedAt||note.createdAt||null,
+      priority:0,
+      priorityLabel:'',
+      tags:[],
+      ...schedule,
+      sourceNoteId:noteId,
+      sourceNoteTitle:noteTitle,
+      sourceNoteUrl:noteUrl,
+      sourceNoteType:note.noteType||'',
+      todoSource:source
+    });
+  }
+  return tasks;
+}
+
+export function normalizeNoteLimit(value){
+  const number=Number(value??DEFAULT_NOTE_LIMIT);
+  if(!Number.isInteger(number)||number<20||number>MAX_NOTE_LIMIT){
+    throw new ExternalTaskSourceError(`得到大脑最近笔记扫描数量必须是 20-${MAX_NOTE_LIMIT} 的整数。`,{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
+  }
+  return number;
+}
+
+function cliError(error,action){
   if(error instanceof ExternalTaskSourceError)return error;
   if(error?.code==='ENOENT'){
-    return new ExternalTaskSourceError('未找到 ticktick CLI。请先在运行工作台的本机安装并登录滴答清单 CLI。',{cause:error,code:'EXTERNAL_TASK_CLI_MISSING'});
+    return new ExternalTaskSourceError('未找到 getnote CLI。请先执行 npx -y @getnote/cli@latest setup，或安装 @getnote/cli 并完成登录。',{cause:error,code:'EXTERNAL_TASK_CLI_MISSING'});
   }
-  const region=profile.host==='dida365.com'?'国内版':'国际版';
-  return new ExternalTaskSourceError(`滴答 CLI ${action}失败（${region}）。请检查登录状态、TICKTICK_HOST 和网络。`,{cause:error});
+  return new ExternalTaskSourceError(`得到大脑 CLI ${action}失败。请运行 getnote doctor -o json 检查安装、会员、登录状态和网络。`,{cause:error});
 }
 
-async function runJson(args,profile,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
+async function runJson(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
   try{
-    const result=await exec(CLI_COMMAND,args,{
-      timeout:timeoutMs,
-      maxBuffer:MAX_BUFFER,
-      windowsHide:true,
-      env:{...process.env,TICKTICK_HOST:profile.host}
-    });
+    const result=await exec(CLI_COMMAND,args,{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true,env:{...process.env}});
     return extractJson(result.stdout);
-  }catch(error){throw cliError(error,profile,action);}
+  }catch(error){throw cliError(error,action);}
 }
 
-export function normalizeCliFlavor(value){
-  const flavor=String(value||'ticktick').trim().toLowerCase();
-  if(!Object.hasOwn(CLI_PROFILES,flavor)){
-    throw new ExternalTaskSourceError('滴答账户区域只支持 ticktick 或 dida365。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
+async function listRecentNotes(noteLimit,options){
+  const notes=[];
+  const seenCursors=new Set();
+  let cursor=null;
+  while(notes.length<noteLimit){
+    const pageLimit=Math.min(PAGE_SIZE,noteLimit-notes.length);
+    const args=['notes','--limit',String(pageLimit)];
+    if(cursor)args.push('--cursor',cursor);
+    args.push('-o','json');
+    const page=parseNotesPage(await runJson(args,'读取最近笔记',options));
+    notes.push(...page.notes);
+    if(!page.hasMore||!page.cursor||seenCursors.has(page.cursor)||page.notes.length===0)break;
+    seenCursors.add(page.cursor);
+    cursor=page.cursor;
   }
-  return flavor;
+  return notes.slice(0,noteLimit);
 }
 
 export function createTaskCliClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
-  return {
+  const options={exec,timeoutMs};
+  return{
     async fetch(config={}){
-      const cliFlavor=normalizeCliFlavor(config.cliFlavor);
-      const profile=CLI_PROFILES[cliFlavor];
-      await runJson(['sync','--json'],profile,'同步',{exec,timeoutMs});
-      const activePayload=await runJson(['tasks','list','--json'],profile,'读取待办',{exec,timeoutMs});
-      const active=parseCliTasks(activePayload,{forceDone:false}).filter(task=>!task.done);
-      let completed=[];
-      let completedAvailable=true;
-      let completedWarning=null;
-      try{
-        const completedPayload=await runJson(['tasks','completed','--json'],profile,'读取已完成待办',{exec,timeoutMs});
-        completed=parseCliTasks(completedPayload,{forceDone:true});
-      }catch(error){
-        completedAvailable=false;
-        completedWarning=error.message;
+      const noteLimit=normalizeNoteLimit(config.noteLimit);
+      const notes=await listRecentNotes(noteLimit,options);
+      const parsed=[];
+      for(const note of notes){
+        const payload=await runJson(['note','todos',note.noteId,'-o','json'],`读取笔记“${note.title}”的待办`,options);
+        parsed.push(...parseMeetingTodos(payload,note));
       }
-      const activeIds=new Set(active.map(task=>task.externalId));
-      completed=completed.filter(task=>!activeIds.has(task.externalId));
-      return {
-        provider:'dida_cli',cliFlavor,host:profile.host,
-        active,completed,completedAvailable,completedWarning,
+      const unique=new Map();
+      for(const task of parsed)unique.set(task.externalId,task);
+      const tasks=[...unique.values()];
+      return{
+        provider:'getnote_cli',
+        noteCount:notes.length,
+        todoCount:tasks.length,
+        active:tasks.filter(task=>!task.done),
+        completed:tasks.filter(task=>task.done),
+        completedAvailable:true,
+        completedWarning:null,
         fetchedAt:new Date().toISOString()
       };
     }
