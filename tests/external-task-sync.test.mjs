@@ -15,26 +15,33 @@ class FakeStore{
   async updateConfig(mutator){return mutator(this.config);}
 }
 
+function taskSource(active){
+  return{
+    cliFlavor:'dida365',host:'dida365.com',fetchedAt:'2026-08-14T00:00:00Z',completedAvailable:true,completedWarning:null,
+    active,
+    completed:[{externalId:'done-1',title:'旧任务',done:true,completedAt:'2026-08-14T08:00:00Z'}]
+  };
+}
+
+const activeTasks=[
+  {externalId:'active-1',title:'正式待办',content:'来自滴答',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,done:false,tags:[]},
+  {externalId:'undated-1',title:'没有截止日期',content:'需要用户决定',dueDate:null,dueAt:null,startAt:null,done:false,tags:[]}
+];
+
 test('external task sync is source -> Feishu readback -> local calendar -> state, without auto-scheduling Today',async t=>{
   const root=await fsp.mkdtemp(path.join(os.tmpdir(),'paw-external-sync-'));t.after(()=>fsp.rm(root,{recursive:true,force:true}));
   const store=new FakeStore(root);
-  await updateExternalTaskIntegration({store,patch:{enabled:true,cliFlavor:'ticktick',journalDocumentUrl:'https://example.feishu.cn/wiki/journal',calendarEnabled:true,calendarName:'工作台'}});
+  await updateExternalTaskIntegration({store,patch:{enabled:true,cliFlavor:'dida365',journalDocumentUrl:'https://example.feishu.cn/wiki/journal',calendarEnabled:true,calendarName:'工作台'}});
   assert.equal(store.config.dataSource,null,'legacy Feishu inbox source is disabled');
   const order=[];
-  const source={
-    cliFlavor:'ticktick',fetchedAt:'2026-08-14T00:00:00Z',completedAvailable:true,completedWarning:null,
-    active:[
-      {externalId:'active-1',title:'正式待办',content:'来自滴答',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,done:false,tags:[]},
-      {externalId:'undated-1',title:'没有截止日期',content:'需要用户决定',dueDate:null,dueAt:null,startAt:null,done:false,tags:[]}
-    ],
-    completed:[{externalId:'done-1',title:'旧任务',done:true,completedAt:'2026-08-14T08:00:00Z'}]
-  };
+  const source=taskSource(activeTasks);
   const taskClient={fetch:async()=>{order.push('source');return source;}};
   const journalClient={appendTasks:async()=>{order.push('feishu');return{item:{blockId:'journal-block'},replayed:false};}};
   const calendarWriter=async()=>{order.push('calendar');return{enabled:true,path:path.join(root,'calendar.ics'),eventCount:1,writtenAt:'2026-08-14T01:00:00Z'};};
   const result=await syncExternalTasks({store,taskClient,journalClient,calendarWriter});
   assert.deepEqual(order,['source','feishu','calendar']);
   assert.equal(result.activeCount,2);
+  assert.equal(result.host,'dida365.com');
   assert.equal(store.state.todos.some(todo=>todo.externalId==='active-1'&&!todo.done),true);
   assert.equal(store.state.inbox.some(item=>item.externalTaskId==='undated-1'),true);
   assert.equal(store.state.todos.find(todo=>todo.externalId==='done-1').done,true);
@@ -42,13 +49,38 @@ test('external task sync is source -> Feishu readback -> local calendar -> state
   assert.equal(store.state.todayPlan.includes(store.state.todos.find(todo=>todo.externalId==='active-1').id),false);
 });
 
-test('daily summary writes narrative to Feishu and keeps only an audit event locally',async()=>{
-  const store=new FakeStore('/tmp/fake');
+test('task snapshot operationId is stable when the CLI returns the same tasks in a different order',async()=>{
+  const store=new FakeStore('/tmp/fake-order');
+  await updateExternalTaskIntegration({store,patch:{enabled:true,journalDocumentUrl:'https://example.feishu.cn/wiki/journal',calendarEnabled:false}});
+  const operations=[];
+  let reversed=false;
+  const taskClient={fetch:async()=>taskSource(reversed?[...activeTasks].reverse():activeTasks)};
+  const journalClient={appendTasks:async(url,text,options)=>{operations.push(options.operationId);return{item:{blockId:`b-${operations.length}`},replayed:operations.length>1};}};
+  await syncExternalTasks({store,taskClient,journalClient});
+  reversed=true;
+  await syncExternalTasks({store,taskClient,journalClient});
+  assert.equal(operations.length,2);
+  assert.equal(operations[0],operations[1]);
+});
+
+test('daily summary writes narrative to Feishu, keeps only an audit event locally, and safely replays',async()=>{
+  const store=new FakeStore('/tmp/fake-summary');
   await updateExternalTaskIntegration({store,patch:{enabled:true,journalDocumentUrl:'https://example.feishu.cn/wiki/journal'}});
-  let captured='';
-  const result=await publishDailySummary({store,date:'2026-08-14',notes:'今天确认了供应商。',journalClient:{appendSummary:async(url,text)=>{captured=text;return{item:{blockId:'summary-block'},replayed:false};}}});
-  assert.equal(result.blockId,'summary-block');
-  assert.match(captured,/今天确认了供应商/);
-  assert.equal(store.state.activities[0].type,'daily_summary_published');
-  assert.doesNotMatch(store.state.activities[0].text,/供应商/);
+  const seen=new Map();
+  const captured=[];
+  const journalClient={appendSummary:async(url,text,options)=>{
+    captured.push({text,operationId:options.operationId});
+    const replayed=seen.has(options.operationId);
+    seen.set(options.operationId,true);
+    return{item:{blockId:'summary-block'},replayed};
+  }};
+  const first=await publishDailySummary({store,date:'2026-08-14',notes:'今天确认了供应商。',journalClient});
+  const second=await publishDailySummary({store,date:'2026-08-14',notes:'今天确认了供应商。',journalClient});
+  assert.equal(first.blockId,'summary-block');
+  assert.equal(second.replayed,true);
+  assert.equal(first.operationId,second.operationId);
+  assert.equal(captured[0].text,captured[1].text);
+  assert.match(captured[0].text,/今天确认了供应商/);
+  assert.equal(store.state.activities.every(activity=>activity.type==='daily_summary_published'),true);
+  assert.equal(store.state.activities.some(activity=>/供应商/.test(activity.text)),false);
 });
