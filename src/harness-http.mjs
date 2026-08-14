@@ -2,7 +2,7 @@ import { readJsonBody, sendJson } from './http.mjs';
 import { validateRequestBody, requestSchemas } from './request-validation.mjs';
 import { harnessBridgeAuthorized } from './harness-auth.mjs';
 import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from './harness-policy.mjs';
-
+import { PRODUCT_VERSION } from './product.mjs';
 
 function jsonRpcResult(id,result){return {jsonrpc:'2.0',id,result};}
 function jsonRpcError(id,error){
@@ -20,6 +20,8 @@ function methodNotAllowed(res,allowed){
 
 export function createHarnessHttp({navigator,mcpRegistry}={}){
   if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
+  // The exposed tools either read external state or create an expiring local
+  // preview. Actual Workbench/Joycrew mutations are not callable here.
   const toolOptions={readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST};
 
   async function handleBridge(req,res,pathname){
@@ -38,7 +40,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
         sendJson(res,200,jsonRpcResult(id,{
           protocolVersion:'2025-06-18',
           capabilities:{tools:{listChanged:false}},
-          serverInfo:{name:'personal-ai-workbench-navigator-readonly',version:'1.2.0'}
+          serverInfo:{name:'personal-ai-workbench-unified-copilot',version:PRODUCT_VERSION}
         }));
         return true;
       }
@@ -71,7 +73,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
   async function handleUser(req,res,pathname,{rateLimit}={}){
     if(pathname==='/api/harness/status'){
       if(req.method!=='GET'){methodNotAllowed(res,'GET');return true;}
-      sendJson(res,200,{navigator:navigator.status()});
+      sendJson(res,200,{navigator:navigator.status(),capabilityMode:'read_and_preview'});
       return true;
     }
     if(pathname==='/api/harness/navigator'){
@@ -83,7 +85,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
         sessionId:body.sessionId??null,
         route:{view:body.view||'today',id:body.id??null}
       });
-      sendJson(res,200,{ok:true,navigator:result,status:navigator.status()});
+      sendJson(res,200,{ok:true,navigator:result,status:navigator.status(),capabilityMode:'read_and_preview'});
       return true;
     }
     return false;

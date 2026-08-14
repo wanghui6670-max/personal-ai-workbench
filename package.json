@@ -1,9 +1,9 @@
 {
   "name": "personal-ai-workbench",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Local-first AI project management workbench with human-in-the-loop scheduling.",
+  "description": "Unified AI workbench for personal execution, Joycrew digital employees, evidence, approvals and delivery.",
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "NODE_ENV=development node --watch src/server.mjs",
@@ -19,6 +19,6 @@
     "verify": "npm run test:files && npm run harness:check && npm run harness:e2e"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   }
 }

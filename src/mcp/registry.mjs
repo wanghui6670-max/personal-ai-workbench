@@ -4,6 +4,7 @@ import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createExternalTaskTools, planExternalTaskMessage } from './external-task-tools.mjs';
+import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -34,14 +35,15 @@ function planGuard(tool,args,state){
   return null;
 }
 
-export function createWorkbenchRegistry({appRoot,store}={}){
+export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycrewActions=null}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
   const workbenchTools=createWorkbenchTools().filter(tool=>tool.name!=='feishu_inbox_sync');
-  const tools=[...workbenchTools,...createProjectRecordTools(),...createExternalTaskTools()];
+  const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
+  const tools=[...workbenchTools,...createProjectRecordTools(),...createExternalTaskTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
-    return contextFrom({appRoot,store,state,config,aiEnabled:aiEnabled()});
+    return {...contextFrom({appRoot,store,state,config,aiEnabled:aiEnabled()}),joycrewClient,joycrewActions};
   }
 
   function list(options={}){
@@ -83,12 +85,13 @@ export function createWorkbenchRegistry({appRoot,store}={}){
         if(planned)planner='model';
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
+    if(!planned)planned=planJoycrewMessage({message,state:derived});
     if(!planned)planned=planExternalTaskMessage({message,state:derived});
     if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口已经停用，当前个人待办来源是得到大脑 CLI。请说“同步得到大脑待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人待办使用得到大脑 CLI；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){

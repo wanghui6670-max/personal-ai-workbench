@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { harnessNodeSupported } from '../src/harness-navigator.mjs';
+import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from '../src/harness-policy.mjs';
 
 if(!harnessNodeSupported())throw new Error('Harness E2E requires Node 22.19+ or Node 24+');
 const root=path.resolve('.');
@@ -16,13 +17,13 @@ require.resolve('@deepseek-ai/dsh-mcp-client/package.json');
 const {DeepSeekHarness}=await import(pathToFileURL(sdkEntry).href);
 
 const token='navigator-e2e-token-'.padEnd(48,'x');
-const toolNames=['panel_navigate','inbox_search','project_list','todo_list','journal_read','confirmation_list','business_list','project_records_read'];
+const toolNames=[...HARNESS_NAVIGATOR_TOOL_ALLOWLIST];
 const calls=[];
 const rpcTrace=[];
 function schema(name){
   if(name==='project_list')return{type:'object',additionalProperties:false,properties:{includeArchived:{type:'boolean'}},required:[]};
   if(name==='panel_navigate')return{type:'object',additionalProperties:false,properties:{view:{type:'string'},id:{anyOf:[{type:'string'},{type:'null'}]},modal:{type:'string'}},required:['view']};
-  return{type:'object',additionalProperties:false,properties:{},required:[]};
+  return{type:'object',additionalProperties:true,properties:{},required:[]};
 }
 
 const bridge=http.createServer(async(req,res)=>{
@@ -31,7 +32,7 @@ const bridge=http.createServer(async(req,res)=>{
   rpcTrace.push({method:body.method||null,name:body.params?.name||null});
   if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(403,{'content-type':'application/json'});res.end('{"error":"denied"}');return;}
   let result;
-  if(body.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'joycrew-e2e',version:'1.0.0'}};
+  if(body.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'unified-workbench-e2e',version:'2.0.0'}};
   else if(body.method==='tools/list')result={tools:toolNames.map(name=>({name,description:`E2E ${name}`,inputSchema:schema(name),readOnly:true,requiresConfirmation:false}))};
   else if(body.method==='tools/call'){
     calls.push({name:body.params?.name,args:body.params?.arguments});
@@ -62,11 +63,12 @@ try{
   assert.equal(calls.length,1);
   assert.equal(calls[0].name,'project_list');
   assert.deepEqual(calls[0].args,{});
+  assert.equal(toolNames.length,21,'unified capability catalog must remain explicitly reviewed');
   assert.ok(first.events.some(event=>event.type==='tool/call'&&event.data?.name==='mcp__joycrew__project_list'));
   assert.ok(first.events.some(event=>event.type==='tool/result'&&!event.data?.error));
   const second=await harness.run('继续',{sessionId:first.sessionId});
   assert.equal(second.sessionId,first.sessionId);
   assert.equal(second.finalResponse,'同一会话可以继续。');
   assert.equal(calls.length,1,'second turn must retain context without inventing another tool call');
-  console.log('Harness Navigator E2E passed: prompt -> official MCP client -> local proxy -> Workbench result -> reply -> continued session.');
+  console.log('Unified Harness E2E passed: prompt -> fixed MCP catalog -> Workbench result -> reply -> continued session.');
 }finally{await harness.close().catch(()=>undefined);await new Promise(resolve=>bridge.close(resolve));}

@@ -11,17 +11,19 @@ import { ensureBusinessDirs, resolveWorkspace } from './projects.mjs';
 import { deriveState,createProject,assignProjectBusiness,syncProject,syncAllProjects,syncFeishuInbox,addInbox,processInbox,morningChat,setToday,updateTodo,updateProject,updateWorkbenchConfig,createBusiness,renameBusiness,deleteBusiness } from './domain.mjs';
 import { captureInbox } from './capture-domain.mjs';
 import { FeishuSourceError } from './feishu.mjs';
-import { nowIso } from './utils.mjs';
+import { nowIso,newId } from './utils.mjs';
 import { addActivity } from './store.mjs';
 import { createEndpointRateLimiter,endpointRateLimitConfig,requestClientKey } from './rate-limit.mjs';
 import { loadWorkbenchEnv } from './env.mjs';
 import { inspectReadiness } from './health.mjs';
 import { requestSchemas,validateRequestBody } from './request-validation.mjs';
 import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/registry.mjs';
-import { newId } from './utils.mjs';
 import { createHarnessNavigator } from './harness-navigator.mjs';
 import { createHarnessHttp } from './harness-http.mjs';
 import { harnessBridgeBaseUrl } from './harness-auth.mjs';
+import { createJoycrewClient, JoycrewClientError } from './joycrew-client.mjs';
+import { createJoycrewActionBroker } from './joycrew-actions.mjs';
+import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from './product.mjs';
 
 const __filename=fileURLToPath(import.meta.url);const SRC_DIR=path.dirname(__filename);const APP_ROOT=path.dirname(SRC_DIR);const PUBLIC_DIR=path.join(APP_ROOT,'public');
 await loadWorkbenchEnv({root:APP_ROOT});
@@ -76,12 +78,10 @@ catch(error){refuseStartup(error.message);}
 
 const store=new JsonStore(DATA_DIR);await store.ensure();
 const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,initialConfig);
-const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store});
-const harnessNavigator=createHarnessNavigator({
-  appRoot:APP_ROOT,
-  bridgeUrl:harnessBridgeBaseUrl(host,port),
-  env:process.env
-});
+const joycrewClient=createJoycrewClient({env:process.env});
+const joycrewActions=createJoycrewActionBroker({client:joycrewClient});
+const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store,joycrewClient,joycrewActions});
+const harnessNavigator=createHarnessNavigator({appRoot:APP_ROOT,bridgeUrl:harnessBridgeBaseUrl(host,port),env:process.env});
 const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry});
 const aiPlans=new Map();
 const AI_PLAN_TTL_MS=10*60*1000;
@@ -92,6 +92,7 @@ const endpointLimiter=createEndpointRateLimiter(rateLimitConfig);
 function withSecurity(res){const raw=res.writeHead.bind(res);res.writeHead=(status,headers={})=>raw(status,{...securityHeaders(),...headers});return res;}
 function notFound(res){return sendJson(res,404,{error:'Not found'});}
 function unauthorized(res){return sendJson(res,401,{error:'未登录'});}
+function methodNotAllowed(res,allowed){return sendJson(res,405,{error:'Method not allowed'},{Allow:allowed});}
 function rateLimited(req,res,scope){
   const result=endpointLimiter.consume(scope,requestClientKey(req));
   if(result.allowed)return false;
@@ -113,12 +114,12 @@ const server=http.createServer(async(req,rawRes)=>{
       try{
         const {workspaceRoot}=await inspectReadiness({appRoot:APP_ROOT,store});
         const enabled=aiEnabled();
-        const health={ok:true,version:'1.2.0',time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?aiRuntimeConfig():null,harnessNavigator:harnessNavigator.status()};
-        if((!publicExposure&&!authEnabled())||(authEnabled()&&isAuthenticated(req)))health.workspaceRoot=workspaceRoot;
+        const privateHealthVisible=(!publicExposure&&!authEnabled())||(authEnabled()&&isAuthenticated(req));
+        const joycrewStatus=joycrewClient.status();
+        const health={ok:true,version:PRODUCT_VERSION,time:nowIso(),authEnabled:authEnabled(),aiEnabled:enabled,aiConfig:enabled?aiRuntimeConfig():null,harnessNavigator:harnessNavigator.status(),joycrew:privateHealthVisible?joycrewStatus:{enabled:joycrewStatus.enabled,configured:joycrewStatus.configured}};
+        if(privateHealthVisible)health.workspaceRoot=workspaceRoot;
         return sendJson(res,200,health);
-      }catch{
-        return sendJson(res,503,{ok:false,status:'not_ready'});
-      }
+      }catch{return sendJson(res,503,{ok:false,status:'not_ready'});}
     }
     if(pathname==='/api/auth/status'&&req.method==='GET')return sendJson(res,200,{authEnabled:authEnabled(),authenticated:isAuthenticated(req)});
     if(pathname==='/api/auth/login'&&req.method==='POST'){
@@ -140,19 +141,52 @@ const server=http.createServer(async(req,rawRes)=>{
       const body=await requestBody(req,requestSchemas.capture);
       if(rateLimited(req,res,'capture'))return;
       const captured=await captureInbox({store,captureId:body.captureId??null,text:body.text});
-      return sendJson(res,captured.replayed?200:201,{
-        captureId:captured.captureId,
-        replayed:captured.replayed,
-        processed:captured.processed,
-        item:captured.item
-      });
+      return sendJson(res,captured.replayed?200:201,{captureId:captured.captureId,replayed:captured.replayed,processed:captured.processed,item:captured.item});
     }
 
     if(await harnessHttp.handleBridge(req,res,pathname))return;
-
     if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
-
     if(await harnessHttp.handleUser(req,res,pathname,{rateLimit:()=>rateLimited(req,res,'navigator')}))return;
+
+    if(pathname==='/api/joycrew/status'){
+      if(req.method!=='GET')return methodNotAllowed(res,'GET');
+      if(rateLimited(req,res,'joycrew'))return;
+      return sendJson(res,200,{joycrew:await joycrewClient.probe()});
+    }
+    if(pathname==='/api/joycrew/overview'){
+      if(req.method!=='GET')return methodNotAllowed(res,'GET');
+      if(rateLimited(req,res,'joycrew'))return;
+      return sendJson(res,200,{overview:await joycrewClient.overview()});
+    }
+    const joycrewProjectMatch=pathname.match(/^\/api\/joycrew\/projects\/([^/]+)$/);
+    if(joycrewProjectMatch){
+      if(req.method!=='GET')return methodNotAllowed(res,'GET');
+      if(rateLimited(req,res,'joycrew'))return;
+      return sendJson(res,200,{detail:await joycrewClient.project(joycrewProjectMatch[1])});
+    }
+    if(pathname==='/api/joycrew/actions'){
+      if(req.method!=='GET')return methodNotAllowed(res,'GET');
+      return sendJson(res,200,{actions:joycrewActions.list()});
+    }
+    if(pathname==='/api/joycrew/actions/prepare'){
+      if(req.method!=='POST')return methodNotAllowed(res,'POST');
+      if(rateLimited(req,res,'joycrew'))return;
+      const body=await requestBody(req,requestSchemas.joycrewActionPrepare);
+      return sendJson(res,201,{action:joycrewActions.prepare(body.type,body.payload,{source:body.source||'operations-ui'})});
+    }
+    const actionExecuteMatch=pathname.match(/^\/api\/joycrew\/actions\/([^/]+)\/execute$/);
+    if(actionExecuteMatch){
+      if(req.method!=='POST')return methodNotAllowed(res,'POST');
+      if(rateLimited(req,res,'joycrew'))return;
+      const body=await requestBody(req,requestSchemas.joycrewActionExecute);
+      return sendJson(res,200,{action:await joycrewActions.execute(actionExecuteMatch[1],{confirmed:body.confirmed})});
+    }
+    const actionCancelMatch=pathname.match(/^\/api\/joycrew\/actions\/([^/]+)\/cancel$/);
+    if(actionCancelMatch){
+      if(req.method!=='POST')return methodNotAllowed(res,'POST');
+      await requestBody(req,requestSchemas.empty);
+      return sendJson(res,200,{action:joycrewActions.cancel(actionCancelMatch[1])});
+    }
 
     if(pathname==='/api/ai/tools'&&req.method==='GET')return sendJson(res,200,{tools:mcpRegistry.list(),mcpTransport:'/api/mcp'});
     if(pathname==='/api/ai/plan'&&req.method==='POST'){
@@ -177,7 +211,7 @@ const server=http.createServer(async(req,rawRes)=>{
       try{
         if(body.jsonrpc!=='2.0')throw Object.assign(new Error('jsonrpc 必须是 2.0。'),{code:'MCP_INVALID_REQUEST'});
         const params=body.params&&typeof body.params==='object'?body.params:{};
-        if(body.method==='initialize')return sendJson(res,200,jsonRpcResult(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'personal-ai-workbench',version:'1.2.0'}}));
+        if(body.method==='initialize')return sendJson(res,200,jsonRpcResult(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'personal-ai-workbench',version:PRODUCT_VERSION}}));
         if(body.method==='notifications/initialized')return sendJson(res,200,jsonRpcResult(id,{}));
         if(body.method==='tools/list')return sendJson(res,200,jsonRpcResult(id,{tools:mcpRegistry.list()}));
         if(body.method==='tools/call'){
@@ -205,9 +239,7 @@ const server=http.createServer(async(req,rawRes)=>{
 
     if(pathname==='/api/inbox'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inbox);return sendJson(res,201,{item:await addInbox({store,text:body.text,source:'manual'})});}
     if(pathname==='/api/inbox/sync'&&req.method==='POST'){
-      await requestBody(req,requestSchemas.empty);
-      if(rateLimited(req,res,'sync'))return;
-      return sendJson(res,200,{sync:await syncFeishuInbox({store})});
+      await requestBody(req,requestSchemas.empty);if(rateLimited(req,res,'sync'))return;return sendJson(res,200,{sync:await syncFeishuInbox({store})});
     }
     if(pathname==='/api/inbox/command'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inboxCommand);return sendJson(res,200,await processInbox({store,itemId:body.itemId,command:body.command,targetProjectId:body.targetProjectId??null}));}
 
@@ -215,16 +247,11 @@ const server=http.createServer(async(req,rawRes)=>{
       const body=await requestBody(req,requestSchemas.projectCreate);const result=await createProject({appRoot:APP_ROOT,store,description:body.description,endDate:body.endDate,businessId:body.businessId??null,sourceInboxId:body.sourceInboxId});return sendJson(res,result.needsFollowup?400:201,result);
     }
     if(pathname==='/api/projects/sync'&&req.method==='POST'){
-      await requestBody(req,requestSchemas.empty);
-      if(rateLimited(req,res,'sync'))return;
-      const results=await syncAllProjects({appRoot:APP_ROOT,store});
-      return sendJson(res,200,{results});
+      await requestBody(req,requestSchemas.empty);if(rateLimited(req,res,'sync'))return;const results=await syncAllProjects({appRoot:APP_ROOT,store});return sendJson(res,200,{results});
     }
     const refreshMatch=pathname.match(/^\/api\/projects\/([^/]+)\/sync$/);
     if(refreshMatch&&req.method==='POST'){
-      await requestBody(req,requestSchemas.empty);
-      if(rateLimited(req,res,'sync'))return;
-      return sendJson(res,200,await syncProject({appRoot:APP_ROOT,store,projectId:refreshMatch[1]}));
+      await requestBody(req,requestSchemas.empty);if(rateLimited(req,res,'sync'))return;return sendJson(res,200,await syncProject({appRoot:APP_ROOT,store,projectId:refreshMatch[1]}));
     }
     const classifyMatch=pathname.match(/^\/api\/projects\/([^/]+)\/classify$/);
     if(classifyMatch&&req.method==='POST'){const body=await requestBody(req,requestSchemas.classify);return sendJson(res,200,{project:await assignProjectBusiness({appRoot:APP_ROOT,store,projectId:classifyMatch[1],businessId:body.businessId})});}
@@ -236,9 +263,7 @@ const server=http.createServer(async(req,rawRes)=>{
     if(todoMatch&&req.method==='PATCH'){const body=await requestBody(req,requestSchemas.todoPatch);return sendJson(res,200,{todo:await updateTodo({store,todoId:todoMatch[1],patch:body})});}
 
     if(pathname==='/api/morning/chat'&&req.method==='POST'){
-      const body=await requestBody(req,requestSchemas.morning);
-      if(rateLimited(req,res,'morning'))return;
-      return sendJson(res,200,await morningChat({store,message:body.message,sessionId:body.sessionId??null}));
+      const body=await requestBody(req,requestSchemas.morning);if(rateLimited(req,res,'morning'))return;return sendJson(res,200,await morningChat({store,message:body.message,sessionId:body.sessionId??null}));
     }
 
     if(pathname==='/api/confirmations/clear'&&req.method==='POST'){
@@ -254,12 +279,9 @@ const server=http.createServer(async(req,rawRes)=>{
   }catch(e){
     console.error('[server]',e);
     const explicitStatus=Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<=599?e.statusCode:500;
-    const publicMessage=(explicitStatus<500||e instanceof FeishuSourceError)&&typeof e?.message==='string'&&e.message?e.message:'服务器内部错误，请稍后重试。';
-    return sendJson(res,explicitStatus,{
-      error:publicMessage,
-      ...(typeof e?.code==='string'?{code:e.code}:{}),
-      ...(e?.recovery?{recovery:e.recovery}:{})
-    });
+    const safeExternal=e instanceof FeishuSourceError||e instanceof JoycrewClientError;
+    const publicMessage=(explicitStatus<500||safeExternal)&&typeof e?.message==='string'&&e.message?e.message:'服务器内部错误，请稍后重试。';
+    return sendJson(res,explicitStatus,{error:publicMessage,...(typeof e?.code==='string'?{code:e.code}:{}),...(e?.recovery?{recovery:e.recovery}:{}),...(e?.retryable!==undefined?{retryable:Boolean(e.retryable)}:{})});
   }
 });
 
@@ -267,15 +289,18 @@ server.on('close',()=>{void harnessNavigator.close();});
 
 const config=initialConfig;
 server.listen(port,host,()=>{
-  console.log(`\n个人 AI 项目管理工作台 v1.2.0`);
+  console.log(`\n${PRODUCT_DISPLAY_NAME} v${PRODUCT_VERSION}`);
   console.log(`http://${host==='0.0.0.0'?'127.0.0.1':host}:${port}`);
   console.log(`Data: ${DATA_DIR}`);
   console.log(`Workspace: ${resolveWorkspace(APP_ROOT,config)}`);
   const aiConfig=aiRuntimeConfig();
   console.log(`AI: ${aiEnabled()?`${aiConfig.provider} configured · ${aiConfig.profileId} · ${aiConfig.model} / ${aiConfig.reasoningEffort} (not live-verified)`:'local fallback'}`);
   const harnessStatus=harnessNavigator.status();
-  console.log(`Harness Navigator: ${harnessStatus.available?`${harnessStatus.harnessVersion} · ${harnessStatus.model} · read-only`:`${harnessStatus.reason||'unavailable'} (left workbench unaffected)`}`);
+  console.log(`Harness Copilot: ${harnessStatus.available?`${harnessStatus.harnessVersion} · ${harnessStatus.model} · read + preview`:`${harnessStatus.reason||'unavailable'} (left workbench unaffected)`}`);
+  const joycrewStatus=joycrewClient.status();
+  const joycrewConfig=joycrewClient.config();
+  console.log(`Joycrew: ${joycrewStatus.configured?`${joycrewConfig.baseUrl} · ${joycrewStatus.authMode} · configured (not live-verified)`:`${joycrewStatus.reason||'disabled'}`}`);
   console.log(`Auth: ${authEnabled()?'password enabled':'disabled (localhost recommended)'}`);
 });
 
-export { server, store, APP_ROOT, harnessNavigator };
+export { server, store, APP_ROOT, harnessNavigator, joycrewClient, joycrewActions };

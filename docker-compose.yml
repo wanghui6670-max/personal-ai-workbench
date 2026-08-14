@@ -13,6 +13,10 @@ services:
       PORT: "${WORKBENCH_PORT:-4173}"
       DATA_DIR: /data
       WORKSPACE_ROOT: /workspace
+    # Allows JOYCREW_BASE_URL=http://host.docker.internal:4000 when Joycrew
+    # runs on the same host. Authentication remains server-to-server.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - type: bind
         source: ${WORKBENCH_DATA_PATH:-./data}

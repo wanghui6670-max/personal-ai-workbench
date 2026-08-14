@@ -1,6 +1,7 @@
 {
-  "name":"个人 AI 项目管理工作台",
-  "short_name":"工作台",
+  "name":"动觉 AI 工作台",
+  "short_name":"AI 工作台",
+  "description":"个人工作连续性与 Joycrew AI 员工业务执行的统一工作台",
   "start_url":"/",
   "display":"standalone",
   "background_color":"#f5f6f8",

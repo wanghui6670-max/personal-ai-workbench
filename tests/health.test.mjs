@@ -5,12 +5,14 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { PRODUCT_VERSION } from '../src/product.mjs';
 
 function serverEnv(overrides={}){
   return{
     ...process.env,
     WORKBENCH_PASSWORD:'',SESSION_SECRET:'',CAPTURE_TOKEN:'',TRUSTED_ORIGINS:'',
     ALLOW_INSECURE_PUBLIC:'',COOKIE_SECURE:'',OPENAI_API_KEY:'',AI_PROVIDER_ENABLED:'',
+    JOYCREW_ENABLED:'0',JOYCREW_TRUSTED_PROXY_TOKEN:'',JOYCREW_SESSION_TOKEN:'',
     ...overrides
   };
 }
@@ -86,15 +88,16 @@ async function createAssignedProject(fixture){
   return result.body.project;
 }
 
-test('health is a compatible read-only readiness response',async t=>{
+test('health is a compatible read-only readiness response for the unified product',async t=>{
   const fixture=await startFixture(t,'ready');
   const {response,body}=fixture.health;
   assert.equal(response.status,200);
   assert.equal(body.ok,true);
-  assert.equal(body.version,'1.2.0');
+  assert.equal(body.version,PRODUCT_VERSION);
   assert.equal(typeof body.time,'string');
   assert.equal(body.authEnabled,false);
   assert.equal(body.aiEnabled,false);
+  assert.equal(body.joycrew.enabled,false);
   assert.equal(body.workspaceRoot,fixture.workspace);
 
   const before={data:await contentSnapshot(fixture.data),workspace:await contentSnapshot(fixture.workspace)};

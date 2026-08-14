@@ -1,0 +1,117 @@
+const nonEmptyString={type:'string',minLength:1,maxLength:4000};
+const shortString={type:'string',minLength:1,maxLength:180};
+const optionalString={anyOf:[{type:'string',maxLength:180},{type:'null'}]};
+const FILTER_OPS=['eq','ne','contains','in','lt','lte','gt','gte'];
+const TASK_STATUSES=['todo','in_progress','waiting','blocked','done','cancelled'];
+
+function descriptor({name,description,inputSchema={type:'object',additionalProperties:false,properties:{},required:[]},execute}){
+  return Object.freeze({name,description,inputSchema,readOnly:true,requiresConfirmation:false,execute});
+}
+function object(value,label='工具参数'){
+  if(!value||typeof value!=='object'||Array.isArray(value))throw Object.assign(new Error(`${label}必须是 JSON 对象。`),{code:'MCP_TOOL_INVALID_ARGUMENT',statusCode:400});
+  return value;
+}
+function string(value,label){
+  if(typeof value!=='string'||!value.trim())throw Object.assign(new Error(`${label}必须是非空字符串。`),{code:'MCP_TOOL_INVALID_ARGUMENT',statusCode:400});
+  return value.trim();
+}
+function actionResult(action){return{action,message:`已生成操作预览 ${action.id}。请在“业务执行”页面确认；未确认前 Joycrew 不会改变。`,navigation:{view:'operations',id:null,modal:'none'}};}
+
+const filterSchema={type:'object',additionalProperties:false,properties:{field:shortString,op:{type:'string',enum:FILTER_OPS},value:{}},required:['field','op','value']};
+const recordSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'records'},sourceId:shortString,entity:shortString,filters:{type:'array',maxItems:20,items:filterSchema}},required:['kind','sourceId','entity']};
+const fileSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'file'},sourceId:shortString,relativePath:{type:'string',minLength:1,maxLength:1000}},required:['kind','sourceId','relativePath']};
+
+export function createJoycrewTools({client,actions}={}){
+  if(!client||!actions)throw new Error('Joycrew tools require client and action broker');
+  return [
+    descriptor({
+      name:'joycrew_workspace_open',
+      description:'打开统一工作台中的“业务执行”页面；不会改变 Joycrew。',
+      execute:async()=>({navigation:{view:'operations',id:null,modal:'none'},message:'打开业务执行页面。'})
+    }),
+    descriptor({
+      name:'joycrew_status_read',
+      description:'检查 Joycrew 是否已配置、可访问，以及当前运行、持久化和认证模式；不返回凭证。',
+      execute:async()=>client.probe()
+    }),
+    descriptor({
+      name:'joycrew_dashboard_read',
+      description:'读取 Joycrew 业务总览、项目、AI 员工、最近 Run、待审批和交付；不会启动 Run。',
+      execute:async()=>client.overview()
+    }),
+    descriptor({
+      name:'joycrew_project_list',
+      description:'读取 Joycrew 企业项目列表。',
+      execute:async()=>client.projects()
+    }),
+    descriptor({
+      name:'joycrew_project_read',
+      description:'读取一个 Joycrew 项目以及其 Run、Evidence、审批和交付。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:shortString},required:['projectId']},
+      execute:async(_context,args)=>client.project(string(object(args).projectId,'projectId'))
+    }),
+    descriptor({
+      name:'joycrew_customer_list',
+      description:'读取 Joycrew 客户列表。',
+      execute:async()=>client.customers()
+    }),
+    descriptor({
+      name:'joycrew_task_list',
+      description:'按项目、客户或状态读取 Joycrew 业务任务。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:optionalString,customerId:optionalString,status:{anyOf:[{type:'string',enum:TASK_STATUSES},{type:'null'}]}},required:[]},
+      execute:async(_context,args)=>{
+        const input=object(args);const filters={};
+        for(const key of ['projectId','customerId','status'])if(typeof input[key]==='string'&&input[key].trim())filters[key]=input[key].trim();
+        return client.tasks(filters);
+      }
+    }),
+    descriptor({
+      name:'joycrew_approval_list',
+      description:'读取当前 Workspace 的 Joycrew 写回审批；只有管理员身份可以成功读取。',
+      execute:async()=>client.approvals()
+    }),
+    descriptor({
+      name:'joycrew_deliverable_list',
+      description:'读取 Joycrew 正式交付及其 Run、Evidence 来源链。',
+      execute:async()=>client.deliverables()
+    }),
+    descriptor({
+      name:'joycrew_pending_action_list',
+      description:'读取尚未确认的 Joycrew 操作预览；不会执行这些操作。',
+      execute:async()=>({actions:actions.list()})
+    }),
+    descriptor({
+      name:'joycrew_run_prepare',
+      description:'只生成“创建 Joycrew Run”的操作预览。不会立即运行 AI 员工；用户必须在业务执行页面确认。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{projectId:shortString,task:{type:'string',minLength:3,maxLength:4000},employeeId:shortString,sources:{type:'array',minItems:1,maxItems:20,items:{anyOf:[recordSourceSchema,fileSourceSchema]}}},required:['projectId','task','employeeId','sources']},
+      execute:async(_context,args)=>actionResult(actions.prepare('run.create',object(args),{source:'harness'}))
+    }),
+    descriptor({
+      name:'joycrew_deliverable_prepare',
+      description:'只生成“从成功 Run 创建正式交付”的操作预览。不会立即写服务器。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{runId:shortString,title:{type:'string',minLength:1,maxLength:120}},required:['runId','title']},
+      execute:async(_context,args)=>actionResult(actions.prepare('deliverable.create',object(args),{source:'harness'}))
+    }),
+    descriptor({
+      name:'joycrew_approval_prepare',
+      description:'只生成批准或拒绝 Joycrew 写回审批的操作预览。批准仍会在确认后由 Joycrew 重新检查源状态。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{approvalId:shortString,decision:{type:'string',enum:['approve','reject']}},required:['approvalId','decision']},
+      execute:async(_context,args)=>actionResult(actions.prepare('approval.decide',object(args),{source:'harness'}))
+    })
+  ];
+}
+
+function containsAny(text,patterns){return patterns.some(pattern=>pattern.test(text));}
+export function planJoycrewMessage({message}={}){
+  const text=String(message||'').trim();
+  if(!text)return null;
+  if(containsAny(text,[/打开.*业务执行/,/进入.*业务执行/,/打开.*Joycrew/i]))return{kind:'tool',toolName:'joycrew_workspace_open',args:{},reason:'打开统一产品中的 Joycrew 业务执行页面。'};
+  if(containsAny(text,[/Joycrew.*状态/i,/业务执行.*状态/,/连接.*Joycrew/i]))return{kind:'tool',toolName:'joycrew_status_read',args:{},reason:'检查 Joycrew 配置和连通状态。'};
+  if(containsAny(text,[/业务总览/,/AI员工.*总览/,/Joycrew.*总览/i]))return{kind:'tool',toolName:'joycrew_dashboard_read',args:{},reason:'读取业务、员工、Run、审批和交付总览。'};
+  if(containsAny(text,[/待审批/,/审批列表/,/写回审批/]))return{kind:'tool',toolName:'joycrew_approval_list',args:{},reason:'读取 Joycrew 待审批写回。'};
+  if(containsAny(text,[/交付列表/,/最近交付/,/正式交付/]))return{kind:'tool',toolName:'joycrew_deliverable_list',args:{},reason:'读取 Joycrew 正式交付。'};
+  if(containsAny(text,[/客户列表/,/有哪些客户/]))return{kind:'tool',toolName:'joycrew_customer_list',args:{},reason:'读取 Joycrew 客户列表。'};
+  if(containsAny(text,[/业务任务/,/团队任务/,/Joycrew.*任务/i]))return{kind:'tool',toolName:'joycrew_task_list',args:{},reason:'读取 Joycrew 业务任务。'};
+  if(containsAny(text,[/Joycrew.*项目/i,/企业项目/,/业务项目列表/]))return{kind:'tool',toolName:'joycrew_project_list',args:{},reason:'读取 Joycrew 企业项目。'};
+  return null;
+}
