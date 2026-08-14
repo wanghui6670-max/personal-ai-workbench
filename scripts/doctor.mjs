@@ -51,25 +51,31 @@ let externalIntegration=null;
 try{
   externalIntegration=config?integrationFromConfig(config):null;
   if(externalIntegration?.enabled){
-    check('滴答待办管线',true,`${externalIntegration.cliFlavor} · ${externalIntegration.journalDocumentUrl} · ${externalIntegration.calendarEnabled?'本机日历开启':'本机日历关闭'}`);
+    check('得到大脑待办管线',true,`最近 ${externalIntegration.noteLimit} 篇笔记 · ${externalIntegration.journalDocumentUrl} · ${externalIntegration.calendarEnabled?'本机日历开启':'本机日历关闭'}`);
     try{
-      await execFileAsync('ticktick',['--version'],{
-        timeout:3000,
-        windowsHide:true,
-        env:{...process.env,TICKTICK_HOST:externalIntegration.cliFlavor==='dida365'?'dida365.com':'ticktick.com'}
-      });
-      check('ticktick CLI',true,`已找到；账户区域 ${externalIntegration.cliFlavor==='dida365'?'dida365.com':'ticktick.com'}`);
-    }catch(error){check('ticktick CLI',false,error.code==='ENOENT'?'未找到 ticktick 可执行文件':'命令不可用，请检查安装和登录状态');}
+      const result=await execFileAsync('getnote',['doctor','-o','json'],{timeout:15_000,windowsHide:true,maxBuffer:2*1024*1024,env:{...process.env}});
+      const raw=String(result.stdout||'').trim();
+      if(raw){
+        const payload=JSON.parse(raw);
+        if(payload?.success===false)throw new Error(payload.message||payload.reason||'getnote doctor 返回失败');
+      }
+      check('getnote CLI',true,'已找到，安装、会员、登录和 API 连通性检查通过；未执行写入');
+    }catch(error){
+      check('getnote CLI',false,error.code==='ENOENT'?'未找到 getnote；请执行 npx -y @getnote/cli@latest setup':'getnote doctor 未通过，请检查安装、会员、登录状态和网络');
+    }
     try{await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true});check('lark-cli',true,'已找到；未执行真实文档读写');}
     catch(error){check('lark-cli',false,error.code==='ENOENT'?'未找到 lark-cli 可执行文件':'命令不可用，请检查安装和登录状态');}
     if(store&&externalIntegration.calendarEnabled){
       check('本机日历路径',true,localCalendarPath(store));
     }
   }else{
-    check('滴答待办管线',true,'未启用；不会调用 ticktick、lark-cli 或生成本机日历');
+    const detail=externalIntegration?.lastSyncStatus==='needs_reconfiguration'
+      ?'此前误配置为滴答清单，已停用；请在设置中重新确认得到大脑 CLI 与飞书日记'
+      :'未启用；不会调用 getnote、lark-cli 或生成本机日历';
+    check('得到大脑待办管线',true,detail);
   }
 }catch(error){
-  check('滴答待办管线',false,error.message);
+  check('得到大脑待办管线',false,error.message);
 }
 
 const aiConfig=aiRuntimeConfig();
@@ -81,5 +87,5 @@ for(const result of results)console.log(`${result.ok?'✓':'!'} ${result.name}: 
 console.log('');
 
 const required=new Set(['Node.js >= 20','文件系统','数据目录可写','工作区可写','业务板块配置']);
-if(externalIntegration?.enabled){required.add('滴答待办管线');required.add('ticktick CLI');required.add('lark-cli');}
+if(externalIntegration?.enabled){required.add('得到大脑待办管线');required.add('getnote CLI');required.add('lark-cli');}
 process.exit(results.some(result=>required.has(result.name)&&!result.ok)?1:0);

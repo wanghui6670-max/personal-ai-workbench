@@ -4,7 +4,7 @@
 
 所有 `POST`、`PATCH`、`DELETE` 请求必须发送 `Content-Type: application/json`。浏览器请求如果带 `Origin`，该值必须属于默认本机 origin 或 `TRUSTED_ORIGINS`。所有请求仍校验实际 `Host`，不会采信 `X-Forwarded-*` 自动放宽。
 
-个人待办的正式来源是固定 `ticktick` CLI；飞书《每日工作日记》是任务快照和每日总结的沉淀目标。本机日历通过私有 ICS 文件生成。外部任务主链路使用受限 MCP 工具，不提供任意 shell 或任意文件路径 API。
+个人待办的正式来源是固定得到大脑 CLI `getnote`；飞书《每日工作日记》是任务快照和每日总结的沉淀目标。本机日历通过私有 ICS 文件生成。飞书不再是个人待办来源。外部任务主链路使用受限 MCP 工具，不提供任意 shell、任意二进制或任意文件路径 API。
 
 ## 1. 健康、状态、导出与备份
 
@@ -16,7 +16,7 @@
 {"ok":false,"status":"not_ready"}
 ```
 
-`200` 只证明当前文件系统和配置可用，不证明 TickTick/Dida365、飞书、系统日历、OpenAI、浏览器或 iPhone 已 live 验证。
+`200` 只证明当前文件系统和配置可用，不证明得到大脑、飞书、系统日历、OpenAI、浏览器或 iPhone 已 live 验证。
 
 ### `GET /api/state`
 
@@ -28,39 +28,36 @@
 config.settings.externalTaskPipeline
 ```
 
-可能包含：
+示例：
 
 ```json
 {
   "enabled": true,
-  "provider": "dida_cli",
-  "cliFlavor": "dida365",
+  "provider": "getnote_cli",
+  "noteLimit": 100,
   "journalDocumentUrl": "https://example.feishu.cn/wiki/token",
   "journalHeading": "每日工作日记",
   "calendarEnabled": true,
   "calendarName": "个人 AI 工作台",
   "lastSyncAt": "2026-08-14T02:00:00.000Z",
   "lastSyncStatus": "ok",
+  "lastSourceNoteCount": 42,
+  "lastParsedTodoCount": 18,
   "lastCalendarPath": "/private/data/calendar/personal-ai-workbench.ics"
 }
 ```
 
-`cliFlavor` 表示账户区域，不是任意可执行文件名：
-
-```text
-ticktick → TICKTICK_HOST=ticktick.com
-dida365  → TICKTICK_HOST=dida365.com
-```
+若读取到历史误配置 `provider=dida_cli` 或 `cliFlavor`，领域规范化结果会把集成停用并返回 `lastSyncStatus=needs_reconfiguration`，直到用户明确保存得到大脑设置。
 
 ### `GET /api/export`
 
-导出当前 `state` 和 `config`，用于检查或迁移业务数据。它不是完整恢复包，不包含：
+`GET /api/export` 导出当前 `state` 和 `config`，用于检查或迁移业务数据。它**不是完整恢复包**，不包含：
 
 - `/workspace`；
 - Capture 幂等收据；
 - 项目记录跨资源恢复凭据；
 - 飞书项目或每日工作日记正文；
-- CLI 登录状态；
+- 得到大脑或飞书 CLI 登录状态；
 - 本机日历客户端配置；
 - 任何凭证。
 
@@ -109,7 +106,7 @@ npm run restore -- /path/to/backup.json
 
 模型只提出白名单调用；本地注册表负责 schema 校验、确认门、互斥锁、领域规则和执行后状态读回。
 
-### MCP 调用格式
+MCP 调用格式：
 
 ```json
 {
@@ -126,11 +123,26 @@ npm run restore -- /path/to/backup.json
 
 未确认写工具返回 `MCP_CONFIRMATION_REQUIRED`。
 
-## 3. 外部待办管线 MCP 工具
+## 3. 得到大脑外部待办管线
+
+### 固定 CLI 合同
+
+程序只执行：
+
+```text
+getnote notes --limit <20-500> [--cursor <cursor>] -o json
+getnote note todos <note_id> -o json
+getnote doctor -o json
+```
+
+- `getnote notes` 分页返回最近笔记；note ID 按字符串处理。
+- `getnote note todos` 返回 `meeting_todos.source` 和 `meeting_todos.items`。
+- 没有明确待办章节时，接受空列表；不使用模型猜测。
+- 设置不能提供 shell、二进制路径、命令模板、认证 token 或自定义 CLI 参数。
 
 ### `external_task_integration_read`
 
-只读，返回滴答账户区域、飞书日记目标、本机日历设置和最近同步机器状态，不返回 CLI 或飞书凭证。
+只读，返回最近笔记扫描数量、飞书日记目标、本机日历设置和最近同步机器状态，不返回得到大脑或飞书凭证。
 
 ```json
 {
@@ -151,7 +163,7 @@ npm run restore -- /path/to/backup.json
 ```json
 {
   "enabled": true,
-  "cliFlavor": "dida365",
+  "noteLimit": 100,
   "journalDocumentUrl": "https://example.feishu.cn/wiki/token",
   "journalHeading": "每日工作日记",
   "calendarEnabled": true,
@@ -161,20 +173,21 @@ npm run restore -- /path/to/backup.json
 
 约束：
 
-- `cliFlavor` 只允许 `ticktick` 或 `dida365`；
-- 程序始终执行固定 `ticktick` 二进制；
+- `noteLimit` 必须是 20–500 的整数；
+- 程序始终执行固定 `getnote` 二进制；
 - 启用时必须提供官方 Feishu/Lark HTTPS 文档 URL；
 - 不接受命令模板、shell、二进制路径、ICS 路径或凭证；
 - 启用后清除旧 `config.dataSource.provider=feishu_doc` 个人收件箱来源；
-- 历史本地收件箱事项不会自动删除。
+- 若历史配置误用了 `provider=dida_cli` 或 `cliFlavor`，用户确认新设置时仅清理 `source=dida_cli` 的机器导入待办和收件箱项；手工与 Capture 数据保留。
 
 ### `external_tasks_sync`
 
 需要确认。事务顺序：
 
 ```text
-ticktick CLI 完整读取
-→ 解析并按外部 task ID 去重
+分页读取最近笔记
+→ 对每篇笔记执行 getnote note todos
+→ 解析 meeting_todos 并生成稳定外部 ID
 → 生成实际飞书快照正文和 operationId
 → 飞书写入并读回
 → 私有 ICS 原子替换
@@ -182,28 +195,36 @@ ticktick CLI 完整读取
 → 不含正文的审计事件
 ```
 
+稳定外部 ID：
+
+```text
+SHA-256(来源 note ID + 规范化待办文本 + 同文出现序号)
+```
+
 映射：
 
-- active + 有截止日期 → 正式待办；
-- active + 无截止日期 → Workbench 收件箱；
-- CLI 明确完成 → 标记完成并移出今日；
-- `tasks completed` 不可用 → 不根据 active 列表缺失推断完成；
-- 同步不会自动加入今日，也不会反向修改滴答任务。
+- 未完成 + 有明确日期 → 正式待办；
+- 未完成 + 日期不确定 → Workbench 收件箱；
+- `completed=true` → 已有待办标记完成并移出今日；
+- 本轮扫描缺失 → 不推断完成；
+- 同步不会自动加入今日，也不会反向修改得到大脑。
 
 成功结果示例：
 
 ```json
 {
-  "provider": "dida_cli",
-  "cliFlavor": "dida365",
-  "host": "dida365.com",
-  "activeCount": 12,
+  "provider": "getnote_cli",
+  "fetchedAt": "2026-08-14T02:00:00.000Z",
+  "noteCount": 42,
+  "todoCount": 18,
+  "activeCount": 15,
   "completedCount": 3,
   "changes": {
     "created": 2,
     "updated": 4,
     "completed": 1,
-    "undated": 2
+    "undated": 3,
+    "scheduled": 12
   },
   "journal": {
     "operationId": "tasks-2026-08-14-...",
@@ -213,7 +234,7 @@ ticktick CLI 完整读取
   "calendar": {
     "enabled": true,
     "path": "/private/data/calendar/personal-ai-workbench.ics",
-    "eventCount": 10,
+    "eventCount": 12,
     "writtenAt": "2026-08-14T02:00:00.000Z"
   }
 }
@@ -229,7 +250,7 @@ ticktick CLI 完整读取
 }
 ```
 
-系统根据当天明确完成的滴答任务、今日到期事项和 Workbench 关键动作生成总结，并写入飞书固定章节。正文不复制到本地 activity。
+系统根据当天明确完成的得到大脑待办、今日到期事项和 Workbench 关键动作生成总结，并写入飞书固定章节。正文不复制到本地 activity。
 
 幂等规则：
 
@@ -261,10 +282,12 @@ daily_summary_publish
 - 文件权限 `0600`；
 - 临时文件写入后原子 rename；
 - 失败时清理临时文件；
-- 只包含未完成且有截止日期的外部任务；
+- 只包含未完成且已确定日期的得到大脑待办；
 - 非全天且具有完整开始/结束时间时生成定时事件；
-- 全天任务或缺少完整时段时生成全天事件；
-- UID 由外部 task ID 的 SHA-256 派生；
+- 只有明确截止时刻时生成只含 `DTSTART` 的瞬时事件，不猜 `DTEND`；
+- 只有明确日期时生成全天事件；
+- UID 由稳定外部 ID 的 SHA-256 派生；
+- DESCRIPTION 包含来源笔记 ID、标题和链接；
 - 不调用系统日历 API，不自动导入或订阅。
 
 没有单独的“写任意本机日历路径”API。
@@ -310,7 +333,7 @@ daily_summary_publish
 - 同 ID + 同正文：安全重放。
 - 同 ID + 不同正文：`409 CAPTURE_ID_CONFLICT`。
 - 已处理事项重放不会重新进入收件箱。
-- Capture 是独立快速采集入口，不是滴答主任务源。
+- Capture 是独立快速采集入口，不是得到大脑主来源。
 - Capture 不自动成为待办或加入今日。
 
 ## 7. 收件箱
@@ -320,7 +343,7 @@ daily_summary_publish
 - `POST /api/inbox/sync`：旧飞书 `[INBOX]` 来源兼容接口；新 UI 和 AI/MCP 不调用。
 - `POST /api/capture`：iPhone / 外部快速采集。
 
-正式待办仍必须有合法截止日期。无截止日期的滴答任务进入收件箱，等待用户明确处理，不会被自动赋予日期。
+正式待办仍必须有合法截止日期。无明确日期的得到大脑待办进入收件箱，等待用户明确处理，不会被自动赋予日期。
 
 项目名只有唯一完整名称命中时才允许直接处理。仅前缀命中或多个候选时返回 `needsProjectSelection`。
 
@@ -397,55 +420,41 @@ feishuRecordedAt
 feishuOperationId
 ```
 
-`summary`、`resume`、`blocker` 和其他项目叙事字段会被校验器拒绝。
+项目分析、卡点、恢复摘要、阶段总结和复盘正文只保存飞书项目文档。
 
-项目同步接口不返回分析正文，只返回机器状态、扫描信息和飞书记录指针。
+## 10. 今日与待办 API
 
-### 项目同步互斥与跨资源状态
+- `POST /api/today`：用户明确设置今日任务集合。
+- `POST /api/todos`：创建正式待办；必须提供合法截止日期。
+- `PATCH /api/todos/:id`：修改标题、上下文、日期或完成状态。
 
-- `PROJECT_SYNC_BUSY`：REST、AI 和 MCP 共用同步协调器；调用方不得并发自动重试。
-- `PROJECT_SYNC_STALE`：远端写入前发现项目或路径基准变化；没有新飞书记录。
-- `PROJECT_RECORD_REMOTE_SAVED_LOCAL_PENDING`：飞书已读回，但本地机器状态未提交；响应含恢复指针。
-- 远端结果不确定：保留 `remote_outcome_unknown` 恢复凭据；下一次同步复用同一 operationId 查重。
+已完成待办不能加入今日。外部同步不会自动调用 `POST /api/today`。
 
-恢复凭据不保存分析正文，并包含在 backup v2 中。详见 `docs/PROJECT_RECORDS.md`。
+## 11. 配置、业务板块与认证
 
-## 10. 待办、早晨对话和业务板块
+- `PATCH /api/config`：更新工作区和非敏感设置。
+- `POST /api/businesses`：新增业务板块。
+- `PATCH /api/businesses/:id`：重命名业务板块。
+- `DELETE /api/businesses/:id`：删除空业务板块。
+- `GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout`：本地访问控制。
 
-### 待办
+外部任务集成不通过普通配置 API 接受命令字符串；必须走受 schema 约束且需要确认的 MCP 工具。
 
-- `PATCH /api/todos/:id`
-- `POST /api/todos/today`
+## 12. 错误边界
 
-AI 不能自动加入今日。已完成待办加入今日返回 `409 TODO_ALREADY_COMPLETED`。
+常见错误码：
 
-### 早晨对话
+```text
+MCP_CONFIRMATION_REQUIRED
+EXTERNAL_TASK_PIPELINE_BUSY
+EXTERNAL_TASK_CLI_MISSING
+EXTERNAL_TASK_SOURCE_INVALID_JSON
+EXTERNAL_TASK_SOURCE_SCHEMA
+EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED
+INVALID_FEISHU_JOURNAL
+FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT
+LOCAL_CALENDAR_WRITE_FAILED
+CAPTURE_ID_CONFLICT
+```
 
-- `POST /api/morning/chat`
-
-分析最近 3 天和临近截止事项；不会写入 `todayPlan`。
-
-### 业务板块
-
-- `POST /api/businesses`
-- `PATCH /api/businesses/:id`
-- `DELETE /api/businesses/:id`
-
-删除业务板块只删除配置，不删除真实目录；板块下仍有项目时拒绝删除。
-
-## 11. AI Provider
-
-- 默认 Profile：`openai_luna`。
-- 默认模型：`gpt-5.6-luna`，推理档位固定 `xhigh`。
-- 第三方 Profile 由部署管理员通过 `AI_PROVIDER_*` 配置。
-- 模型不自动切换；通过 `AI_PROVIDER_ACTIVE_MODEL` 显式选择。
-- 配置无效、网络失败、输出不合约或工具不在白名单时 fail closed，并回退本地业务规则。
-- 配置存在不等于 live 可达。
-
-详细配置见 `docs/AI_PROVIDER.md`。
-
-## 12. 限流与验证边界
-
-`/api/capture`、项目同步和早晨对话使用有界内存、按客户端划分的固定窗口限流。
-
-自动化测试使用 fake CLI、fake Feishu、fake Provider 和临时数据目录。测试通过不等同于 live TickTick/Dida365、飞书、系统日历、OpenAI、真实浏览器、iPhone 或生产部署验证。
+错误响应不得包含 CLI stdout 原文、认证资料、飞书正文或本地绝对工作内容。

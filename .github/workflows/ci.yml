@@ -63,7 +63,7 @@ jobs:
           node --check scripts/harness-e2e.mjs
           node --check public/project-records.js
           node --check public/ux-enhancements.js
-          node --check public/dida-integration.js
+          node --check public/getnote-integration.js
           node --check public/harness-navigator.js
       - name: Run all Workbench contract tests
         env:

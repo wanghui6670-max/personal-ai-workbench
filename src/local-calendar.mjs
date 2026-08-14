@@ -57,21 +57,34 @@ function eventUid(externalId){
   return `paw-${crypto.createHash('sha256').update(String(externalId)).digest('hex').slice(0,32)}@personal-ai-workbench`;
 }
 
+function eventDescription(task){
+  const lines=['来源：得到大脑 CLI',`外部待办 ID：${task.externalId}`];
+  if(task.sourceNoteTitle)lines.push(`来源笔记：${task.sourceNoteTitle}`);
+  if(task.sourceNoteId)lines.push(`笔记 ID：${task.sourceNoteId}`);
+  if(task.sourceNoteUrl)lines.push(`笔记链接：${task.sourceNoteUrl}`);
+  if(task.dueAt)lines.push(`解析时间：${task.dueAt}`);
+  if(task.content)lines.push(task.content);
+  return lines.join('\n');
+}
+
 function eventLines(task,calendarName,generatedAt){
   if(task.done||!task.dueDate)return null;
   const lines=['BEGIN:VEVENT',`UID:${eventUid(task.externalId)}`,`DTSTAMP:${generatedAt}`];
-  const timed=task.allDay!==true&&hasExplicitTime(task.startAt)&&hasExplicitTime(task.dueAt);
-  const start=timed?utcStamp(task.startAt):null;
-  const end=timed?utcStamp(task.dueAt):null;
+  const startTimed=task.allDay!==true&&hasExplicitTime(task.startAt);
+  const dueTimed=task.allDay!==true&&hasExplicitTime(task.dueAt);
+  const start=startTimed?utcStamp(task.startAt):null;
+  const end=dueTimed?utcStamp(task.dueAt):null;
   if(start&&end&&new Date(task.dueAt)>new Date(task.startAt)){
     lines.push(`DTSTART:${start}`,`DTEND:${end}`);
+  }else if(end){
+    lines.push(`DTSTART:${end}`);
   }else{
     const date=task.dueDate.replaceAll('-','');
     lines.push(`DTSTART;VALUE=DATE:${date}`,`DTEND;VALUE=DATE:${addDays(task.dueDate,1)}`);
   }
   lines.push(
     `SUMMARY:${escapeText(task.title)}`,
-    `DESCRIPTION:${escapeText(`来源：滴答清单 CLI\n外部任务 ID：${task.externalId}${task.dueAt?`\n原始截止：${task.dueAt}`:''}${task.content?`\n${task.content}`:''}`)}`,
+    `DESCRIPTION:${escapeText(eventDescription(task))}`,
     `CATEGORIES:${escapeText(calendarName)}`,
     'STATUS:CONFIRMED',
     'END:VEVENT'
@@ -87,7 +100,7 @@ export function buildLocalCalendar(tasks,{calendarName='个人 AI 工作台',gen
   const lines=[
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Personal AI Workbench//Dida CLI Calendar//ZH-CN',
+    'PRODID:-//Personal AI Workbench//GetNote CLI Calendar//ZH-CN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeText(calendarName)}`

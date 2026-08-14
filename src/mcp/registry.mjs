@@ -88,7 +88,7 @@ export function createWorkbenchRegistry({appRoot,store}={}){
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口已经停用，当前待办来源是滴答清单 CLI。请说“同步滴答待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口已经停用，当前个人待办来源是得到大脑 CLI。请说“同步得到大脑待办”，或打开设置检查新管线。',toolName:null,args:{},reason:'旧飞书收件箱工具已从白名单移除。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){

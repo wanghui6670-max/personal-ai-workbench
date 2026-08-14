@@ -4,26 +4,28 @@
 
 ## 当前数据边界
 
-1. **滴答清单 CLI**：个人待办事实的单向来源。
-2. **Workbench**：解析、去重、收件箱、待办、今日、确认和项目总控。
+1. **得到大脑 CLI（`getnote`）**：个人笔记与会议待办的单向来源。
+2. **Workbench**：分页读取、待办解析、稳定去重、收件箱、正式待办、今日、确认和项目总控。
 3. **本地项目文件夹**：真实工作产物；Git 保存版本证据。
 4. **飞书项目文档**：项目分析、阶段总结、复盘和上下文恢复叙事的唯一真源。
-5. **飞书《每日工作日记》**：个人待办快照和每日总结的沉淀目标，不再作为待办来源。
-6. **本机 ICS**：只镜像源任务已有日期与时段，不猜测日期或时长。
+5. **飞书《每日工作日记》**：个人待办快照和每日总结的沉淀目标，不再作为个人待办来源。
+6. **本机 ICS**：只镜像从待办文字中能够确定的日期或时刻，不猜测模糊日期和持续时长。
 
 AI 不自动分类收件箱，不自动改截止日期，也不自动把任务加入今日。
 
 ## 主要能力
 
-- 固定 `ticktick` CLI 单向读取任务；国际版使用 `ticktick.com`，国内版使用 `dida365.com`
-- 外部 task ID 去重、截止日期解析、完成状态同步和外部元数据保留
-- 有截止日期进入正式待办；无截止日期进入收件箱等待用户处理
+- 固定执行 `getnote`，分页读取最近笔记，并对每篇笔记调用 `getnote note todos <note_id> -o json`
+- 使用得到大脑返回的 `meeting_todos.source` 和 `meeting_todos.items`，不让模型自行发明待办
+- 以“来源笔记 ID + 待办文本 + 同文出现序号”生成稳定外部 ID
+- 能确定日期的未完成事项进入正式待办；不能确定日期的事项进入收件箱等待用户处理
+- 得到大脑明确返回 `completed=true` 时同步完成状态；不会根据事项消失擅自推断完成
 - 任务快照先写飞书并读回，再原子更新本机 ICS 和 Workbench 缓存
 - 用户触发“沉淀今日总结”，正文只写飞书，不复制到本地审计日志
 - 项目主动同步、飞书项目记录、operationId 幂等和跨资源恢复
 - 最近 3 天与临近截止事项的早晨对焦；今日安排仍由用户决定
 - iPhone Shortcut `/api/capture`，支持 `captureId` 幂等和冲突检测
-- AI-native 双面板、受限 MCP、备份恢复、Docker 和 doctor
+- AI-native 双面板、受限 MCP、backup v2、恢复、Docker 和 doctor
 
 ## 本地运行
 
@@ -31,8 +33,22 @@ AI 不自动分类收件箱，不自动改截止日期，也不自动把任务�
 
 - Node.js 20+
 - Git
-- `ticktick` CLI（启用个人待办来源时）
+- 得到大脑 CLI `getnote`（启用个人待办来源时）
 - `lark-cli`（启用飞书项目记录或每日工作日记时）
+
+安装或更新得到大脑 CLI：
+
+```bash
+npx -y @getnote/cli@latest setup
+```
+
+可先执行只读自检：
+
+```bash
+getnote doctor -o json
+```
+
+启动工作台：
 
 ```bash
 cp .env.example .env
@@ -48,34 +64,30 @@ http://127.0.0.1:4173
 
 项目没有第三方 npm 运行依赖，不需要 `npm install`。
 
-## 滴答 CLI → 飞书日记 → 本机日历
+## 得到大脑 CLI → 飞书日记 → 本机日历
 
 工作台始终执行固定二进制：
 
 ```text
-ticktick
+getnote
 ```
 
-账户区域：
+受控只读命令：
 
 ```text
-国际版：TICKTICK_HOST=ticktick.com
-国内版：TICKTICK_HOST=dida365.com
+getnote notes --limit <20-500> [--cursor <cursor>] -o json
+getnote note todos <note_id> -o json
+getnote doctor -o json
 ```
 
-受控命令：
-
-```text
-ticktick sync --json
-ticktick tasks list --json
-ticktick tasks completed --json
-```
+`getnote notes` 用于分页列出最近笔记；`getnote note todos` 读取每篇笔记中由得到大脑明确识别的会议待办。若笔记没有明确待办章节，CLI 返回空列表，Workbench 不使用模型猜测。
 
 同步事务：
 
 ```text
-读取 CLI
-→ 解析和外部 task ID 去重
+分页读取最近笔记
+→ 逐篇读取 meeting_todos
+→ 解析明确日期并生成稳定外部 ID
 → 写飞书任务快照并按 operationId 读回
 → 原子生成本机 ICS
 → 提交 Workbench 待办/收件箱缓存
@@ -83,12 +95,13 @@ ticktick tasks completed --json
 
 规则：
 
-- 有截止日期：进入正式待办。
-- 无截止日期：进入收件箱，不猜日期。
-- 明确完成：标记完成、移出今日、从下一版 ICS 移除。
-- 没有完成证据：不根据“列表里消失”擅自判定完成。
-- 同步不反向修改滴答，也不自动加入今日。
-- 全天任务保持全天；没有完整时段时不猜持续时间。
+- 待办文字中有明确日期：进入正式待办。
+- 日期不可确定：进入收件箱，不猜日期。
+- 有明确时刻但没有开始时刻：生成一个只含 `DTSTART` 的瞬时日历事件，不猜持续时长。
+- 得到大脑明确标记完成：标记完成、移出今日、从下一版 ICS 移除。
+- 没有完成证据：不根据“本次结果里没有出现”擅自判定完成。
+- 同步不反向修改得到大脑，也不自动加入今日。
+- “下周”“稍后”“尽快”等模糊表达不会自动变成日期。
 
 飞书固定章节与记录类型：
 
@@ -111,7 +124,7 @@ ticktick tasks completed --json
 data/calendar/personal-ai-workbench.ics
 ```
 
-目录权限 `0700`，文件权限 `0600`。每次同步原子重写完整日历；UID 由外部 task ID 哈希生成。
+目录权限 `0700`，文件权限 `0600`。每次同步原子重写完整日历；UID 由稳定外部待办 ID 哈希生成。
 
 工作台只生成 ICS 文件，不调用系统日历 API，也不替用户排期。用户可在 macOS Calendar、Windows 日历或其他 iCalendar 客户端中导入或订阅。
 
@@ -160,7 +173,7 @@ MCP transport：`POST /api/mcp`。
 
 ## iPhone 快捷指令
 
-`POST /api/capture` 是独立快速采集入口，不是滴答主任务源。它只进入 Workbench 收件箱。
+`POST /api/capture` 是独立快速采集入口，不是得到大脑主来源。它只进入 Workbench 收件箱。
 
 ```json
 {
@@ -174,15 +187,24 @@ MCP transport：`POST /api/mcp`。
 
 详见 [`docs/IPHONE_SHORTCUT.md`](docs/IPHONE_SHORTCUT.md)。
 
-## 从旧飞书收件箱来源升级
+## 来源迁移与错误接入纠正
 
-启用新管线时，旧的：
+启用得到大脑管线时，旧的：
 
 ```text
 config.dataSource.provider = feishu_doc
 ```
 
-会被清除。飞书不再被 AI/MCP 当作个人待办来源。历史本地收件箱事项不会被自动删除，应先备份再逐项处理。
+会被清除，飞书不再被 AI/MCP 当作个人待办来源。
+
+如果已有配置包含误接入字段：
+
+```text
+provider = dida_cli
+cliFlavor = ...
+```
+
+工作台会将该管线标记为“需要重新配置”并保持停用。用户明确保存新的得到大脑设置时，只清理 `source=dida_cli` 的机器导入待办和收件箱项；手工事项、Capture 事项、项目和飞书项目记录不受影响。
 
 ## 数据、备份与恢复
 
@@ -191,7 +213,7 @@ config.dataSource.provider = feishu_doc
 ```text
 state.json   机器状态、任务、收件箱和确认项
 config.json  工作区、业务板块和集成设置
-calendar/    可从滴答重新生成的 ICS 镜像
+calendar/    可从得到大脑待办重新生成的 ICS 镜像
 backups/     自动与手工 backup v2
 migrations/  升级快照和迁移报告
 captures/    Capture 幂等收据
@@ -240,7 +262,7 @@ TRUSTED_ORIGINS="https://workbench.example.com"
 COOKIE_SECURE=1
 ```
 
-外部采集使用独立 `CAPTURE_TOKEN`。工作台不读取、请求或保存滴答与飞书凭证，只调用部署用户已经登录的本机 CLI。
+外部采集使用独立 `CAPTURE_TOKEN`。工作台不读取、请求或保存得到大脑与飞书凭证，只调用部署用户已经登录的本机 CLI。
 
 部署说明见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
@@ -250,6 +272,6 @@ COOKIE_SECURE=1
 npm test
 ```
 
-合同测试覆盖 CLI allowlist、账户区域、任务映射、飞书 operationId、ICS、真实 `JsonStore`、MCP 确认门、doctor、项目记录、Capture、备份和恢复。
+合同测试覆盖固定 `getnote` 命令、分页、字符串 note ID、`meeting_todos`、稳定去重、日期解析、飞书 operationId、ICS、真实 `JsonStore`、MCP 确认门、doctor、项目记录、Capture、backup v2 和恢复。
 
-测试使用 fake CLI、fake Provider 和 fake Feishu client，不等同于 live 滴答、飞书、系统日历、OpenAI、浏览器、iPhone 或生产部署验证。
+测试使用 fake CLI、fake Provider 和 fake Feishu client，不等同于 live 得到大脑、飞书、系统日历、OpenAI、浏览器、iPhone 或生产部署验证。

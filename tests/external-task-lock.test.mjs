@@ -5,14 +5,14 @@ import { withExternalTaskWriteLease } from '../src/mcp/external-task-tools.mjs';
 test('external task pipeline permits one mutation at a time and releases the lease after completion',async()=>{
   let release;
   const blocked=new Promise(resolve=>{release=resolve;});
-  const first=withExternalTaskWriteLease('同步滴答待办',async()=>{
+  const first=withExternalTaskWriteLease('同步得到大脑待办',async()=>{
     await blocked;
     return 'done';
   });
 
   await assert.rejects(
     withExternalTaskWriteLease('沉淀每日总结',async()=>true),
-    error=>error.statusCode===409&&error.code==='EXTERNAL_TASK_PIPELINE_BUSY'&&/同步滴答待办/.test(error.message)
+    error=>error.statusCode===409&&error.code==='EXTERNAL_TASK_PIPELINE_BUSY'&&/同步得到大脑待办/.test(error.message)
   );
 
   release();

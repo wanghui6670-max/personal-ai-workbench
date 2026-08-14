@@ -47,7 +47,7 @@ test('doctor preserves a pre-existing legacy write-test file and reports disable
   const result = await runDoctor({ DATA_DIR: dataDir, WORKSPACE_ROOT: workspaceRoot });
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /✓ 滴答待办管线: 未启用/);
+  assert.match(result.stdout, /✓ 得到大脑待办管线: 未启用/);
   assert.equal(await fsp.readFile(legacyProbe, 'utf8'), originalContent);
   const entries = await fsp.readdir(workspaceRoot);
   assert.deepEqual(
@@ -73,7 +73,7 @@ test('doctor exits non-zero when the workspace target is a file', async t => {
   assert.equal(await fsp.readFile(workspaceFile, 'utf8'), originalContent);
 });
 
-test('doctor fails closed when the enabled Dida pipeline is missing required local CLIs', async t => {
+test('doctor fails closed when the enabled GetNote pipeline is missing required local CLIs', async t => {
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-external-'));
   t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
 
@@ -90,8 +90,8 @@ test('doctor fails closed when the enabled Dida pipeline is missing required loc
       ...(config.settings || {}),
       externalTaskPipeline: {
         enabled: true,
-        provider: 'dida_cli',
-        cliFlavor: 'dida365',
+        provider: 'getnote_cli',
+        noteLimit: 100,
         journalDocumentUrl: 'https://example.feishu.cn/wiki/journal',
         journalHeading: '每日工作日记',
         calendarEnabled: true,
@@ -108,8 +108,8 @@ test('doctor fails closed when the enabled Dida pipeline is missing required loc
   });
 
   assert.equal(result.code, 1, result.stderr || result.stdout);
-  assert.match(result.stdout, /✓ 滴答待办管线: dida365/);
-  assert.match(result.stdout, /! ticktick CLI: 未找到 ticktick 可执行文件/);
+  assert.match(result.stdout, /✓ 得到大脑待办管线: 最近 100 篇笔记/);
+  assert.match(result.stdout, /! getnote CLI: 未找到 getnote/);
   assert.match(result.stdout, /! lark-cli: 未找到 lark-cli 可执行文件/);
   assert.match(result.stdout, /✓ 本机日历路径:/);
 });
