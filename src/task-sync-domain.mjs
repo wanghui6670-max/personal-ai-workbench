@@ -188,7 +188,7 @@ function taskSnapshotText(source,date){
   const overdue=due.filter(task=>task.dueDate<date);
   const lines=[
     `日期：${date}`,
-    `来源：滴答清单 CLI（${source.cliFlavor}）`,
+    `来源：滴答清单 CLI（${source.cliFlavor} / ${source.host||'unknown'}）`,
     `当前未完成：${active.length}；已设截止：${due.length}；无截止待确认：${undated.length}；逾期：${overdue.length}`
   ];
   if(due.length){
@@ -213,7 +213,9 @@ function summaryText(state,date,notes=''){
   const active=externalTodos.filter(todo=>!todo.done);
   const dueToday=active.filter(todo=>todo.dueDate===date);
   const overdue=active.filter(todo=>todo.dueDate<date);
-  const activities=state.activities.filter(activity=>String(activity.at||'').slice(0,10)===date).slice(0,30);
+  const activities=state.activities
+    .filter(activity=>activity.type!=='daily_summary_published'&&String(activity.at||'').slice(0,10)===date)
+    .slice(0,30);
   const lines=[
     `日期：${date}`,
     `今日完成：${completed.length}；今日到期未完成：${dueToday.length}；逾期待办：${overdue.length}；当前滴答待办：${active.length}`
@@ -224,6 +226,16 @@ function summaryText(state,date,notes=''){
   if(String(notes||'').trim())lines.push(`补充：${String(notes).trim().slice(0,4000)}`);
   if(!completed.length&&!dueToday.length&&!activities.length&&!String(notes||'').trim())lines.push('今天暂无可沉淀的完成事项或工作台关键动作。');
   return lines.join('\n');
+}
+
+function stableTaskIdentity(task){
+  return [task.externalId,task.title,task.startAt,task.dueAt,task.dueDate,task.allDay,task.updatedAt,task.completedAt];
+}
+
+function taskJournalOperation(source,date){
+  const active=[...source.active].sort((a,b)=>String(a.externalId).localeCompare(String(b.externalId))).map(stableTaskIdentity);
+  const completed=[...source.completed].sort((a,b)=>String(a.externalId).localeCompare(String(b.externalId))).map(stableTaskIdentity);
+  return operationId('tasks',date,{active,completed,completedAvailable:source.completedAvailable!==false,host:source.host||null});
 }
 
 async function recordSyncError(store,error){
@@ -249,10 +261,7 @@ export async function syncExternalTasks({
   try{
     const source=await taskClient.fetch(integration);
     const snapshot=taskSnapshotText(source,date);
-    const journalOp=operationId('tasks',date,{
-      active:source.active.map(task=>[task.externalId,task.title,task.dueAt,task.updatedAt]),
-      completed:source.completed.map(task=>[task.externalId,task.completedAt,task.updatedAt])
-    });
+    const journalOp=taskJournalOperation(source,date);
     const journal=await journalClient.appendTasks(integration.journalDocumentUrl,snapshot,{
       operationId:journalOp,heading:integration.journalHeading
     });
@@ -282,7 +291,7 @@ export async function syncExternalTasks({
       return true;
     });
     return{
-      provider:'dida_cli',cliFlavor:source.cliFlavor,fetchedAt:source.fetchedAt,
+      provider:'dida_cli',cliFlavor:source.cliFlavor,host:source.host||null,fetchedAt:source.fetchedAt,
       activeCount:source.active.length,completedCount:source.completed.length,
       completedAvailable:source.completedAvailable,completedWarning:source.completedWarning,
       changes,journal:{operationId:journalOp,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed)},
