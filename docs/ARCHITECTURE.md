@@ -3,40 +3,58 @@
 ## 1. 总体边界
 
 ```text
-滴答清单账户       ── 个人待办事实源
-固定 ticktick CLI ── 单向任务读取适配器
-本地项目文件夹     ── 真实工作产物
-Git                ── 版本与代码变化证据
-Workbench state    ── 最小机器状态、任务、确认和指针
-飞书每日工作日记   ── 个人任务快照与每日总结 sink
-飞书项目文档       ── 项目分析、总结、复盘和恢复叙事真源
-本机 ICS           ── 可重建日历镜像
-Capture receipts   ── 正文哈希与幂等标识
-Recovery receipts  ── 飞书跨资源事务机器凭据
-AI Provider         ── 临时分析，不成为资料真源
+得到大脑             ── 个人笔记与会议待办事实源
+固定 getnote CLI    ── 单向笔记和 meeting_todos 读取适配器
+本地项目文件夹       ── 真实工作产物
+Git                  ── 版本与代码变化证据
+Workbench state      ── 最小机器状态、任务、确认和来源指针
+飞书每日工作日记     ── 个人任务快照与每日总结 sink
+飞书项目文档         ── 项目分析、总结、复盘和恢复叙事真源
+本机 ICS             ── 可重建日历镜像
+Capture receipts     ── 正文哈希与幂等标识
+Recovery receipts    ── 飞书跨资源事务机器凭据
+AI Provider          ── 临时分析，不成为资料真源
 ```
 
 系统不替用户安排今日工作。AI 只能分析、建议和执行用户明确确认的白名单操作。
 
-## 2. 外部待办源
+## 2. 得到大脑外部待办源
 
 ### `src/task-cli.mjs`
 
-- 只执行固定 `ticktick` 二进制；
-- 国际版设置 `TICKTICK_HOST=ticktick.com`；
-- 国内版设置 `TICKTICK_HOST=dida365.com`；
-- 命令固定为 `sync --json`、`tasks list --json`、`tasks completed --json`；
-- 从受限 JSON envelope 提取任务数组；
-- 归一化外部 ID、标题、截止日期、时段、全天、时区、完成状态、优先级和标签；
-- 已完成列表不可用时继续导入 active tasks，但不根据缺失推断完成；
-- 设置不能提供任意 shell、二进制路径或命令模板。
+只执行固定二进制：
+
+```text
+getnote
+```
+
+受控只读命令：
+
+```text
+getnote notes --limit <20-500> [--cursor <cursor>] -o json
+getnote note todos <note_id> -o json
+getnote doctor -o json
+```
+
+适配器职责：
+
+- 分页读取最近笔记，所有 note ID 按字符串处理；
+- 对每篇笔记执行 `getnote note todos`；
+- 读取 `meeting_todos.source` 和 `meeting_todos.items`；
+- 保留来源笔记 ID、标题、链接、类型和待办解析来源；
+- 以来源笔记 ID、规范化待办文本和同文出现序号生成稳定外部 ID；
+- 从明确年月日、月日、今天、明天、后天和明确时刻中生成日期信息；
+- 对“下周”“稍后”“尽快”等模糊表达返回无日期；
+- 上游没有明确待办章节时接受空列表，不使用模型猜测；
+- 设置不能提供任意 shell、二进制路径、命令模板或凭证。
 
 ### `src/task-sync-domain.mjs`
 
 负责外部任务领域事务：
 
 ```text
-CLI 完整读取
+分页读取最近笔记
+→ 逐篇读取 meeting_todos
 → 生成实际飞书快照正文和稳定 operationId
 → 飞书任务快照写入并读回
 → 本机 ICS 原子替换
@@ -46,13 +64,18 @@ CLI 完整读取
 
 映射规则：
 
-- 有截止日期的 active task → 正式待办；
-- 无截止日期的 active task → `source=dida_cli` 收件箱；
-- 明确完成 → 待办完成、退出今日；
-- 外部 task ID 去重，不按标题去重；
+- 有明确日期的未完成 item → 正式待办；
+- 无法确定日期的未完成 item → `source=getnote_cli` 收件箱；
+- `completed=true` → 已有待办完成、退出今日；
+- 不根据本轮扫描缺失推断完成；
+- 稳定外部 ID 去重，不按标题跨笔记合并；
 - 不自动加入今日；
-- 不反向修改滴答任务；
+- 不反向修改得到大脑；
 - 启用新管线时清除旧 `config.dataSource.provider=feishu_doc`。
+
+### 错误来源迁移
+
+若历史配置包含 `provider=dida_cli` 或 `cliFlavor`，规范化层会将集成停用并标记为需要重新配置。用户明确保存得到大脑配置后，领域层只移除 `source=dida_cli` 的机器导入待办和收件箱项，不触碰手工、Capture、项目或其他来源数据。
 
 ## 3. 飞书每日工作日记 sink
 
@@ -103,12 +126,14 @@ fetch
 - 目录 `0700`，文件 `0600`；
 - 临时文件 + 原子 rename；
 - 失败清理临时文件；
-- UID 由外部 task ID 的 SHA-256 派生；
-- active + dueDate 才进入日历；
+- UID 由稳定外部待办 ID 的 SHA-256 派生；
+- 未完成 + dueDate 才进入日历；
 - 非全天且具有完整开始/结束时间时生成 UTC 定时事件；
-- 全天任务或缺少完整时段时生成全天事件；
+- 只有明确截止时刻时生成只含 `DTSTART` 的瞬时事件；
+- 只有明确日期时生成全天事件；
 - 不猜测日期、时长或优先级；
-- 完成任务在下一次完整重写时退出日历。
+- 完成任务在下一次完整重写时退出日历；
+- DESCRIPTION 保留来源笔记 ID、标题和链接。
 
 ICS 是可重建镜像，不属于 backup 真源，也不代表系统日历客户端已经导入成功。
 
@@ -124,15 +149,16 @@ ICS 是可重建镜像，不属于 backup 真源，也不代表系统日历客�
 
 外部待办主路径通过 MCP 工具调用，不新增任意 shell REST 接口。
 
-### `public/dida-integration.js`
+### `public/getnote-integration.js`
 
-- 在设置页展示账户区域、飞书工作日记 URL、ICS 开关与名称；
-- 接管旧“同步飞书”按钮，显示“同步滴答待办”；
+- 在设置页展示最近笔记扫描数量、飞书工作日记 URL、ICS 开关与名称；
+- 接管旧“同步飞书”按钮，显示“同步得到大脑待办”；
 - 提供“沉淀今日总结”；
 - 用户点击是写操作确认；
+- 对历史错误来源配置显示“需要重新配置”，不把它误显示为已启用；
 - 不把任务或日记正文写入 `localStorage`、`sessionStorage` 或 IndexedDB。
 
-### `public/dida-integration.css`
+### `public/getnote-integration.css`
 
 只提供集成设置、来源状态和操作回执样式，不定义业务状态。
 
@@ -147,7 +173,7 @@ external_tasks_sync
 daily_summary_publish
 ```
 
-后三个工具需要确认。
+后三个工具需要确认，写操作共享一把 mutation lease。
 
 ### `src/mcp/registry.mjs`
 
@@ -156,7 +182,7 @@ daily_summary_publish
 - 写工具确认门；
 - 规划后和执行后重新读取状态；
 - 旧 `feishu_inbox_sync` 从工具列表移除；
-- “同步滴答待办”“沉淀今日总结”由确定性 planner 安全映射；
+- “同步得到大脑待办”“从 Get笔记 拉取待办”“沉淀今日总结”由确定性 planner 安全映射；
 - Provider 失败时回退本地 planner。
 
 ## 7. 项目领域
@@ -213,9 +239,9 @@ feishuOperationId
 → 写哈希收据
 ```
 
-Capture 是独立快速采集入口，不是滴答主任务源，不自动成为正式待办或加入今日。
+Capture 是独立快速采集入口，不是得到大脑主来源，不自动成为正式待办或加入今日。
 
-## 9. Store、备份和恢复
+## 9. Store、backup v2 和恢复
 
 ### `src/store.mjs`
 
@@ -254,25 +280,27 @@ backup v2：
 
 - Node、Git；
 - 数据目录、工作区和业务板块；
-- 外部任务管线配置；
-- `ticktick` 与账户区域；
+- 得到大脑外部任务管线配置；
+- `getnote doctor -o json` 的安装、会员、登录与 API 连通性；
 - `lark-cli`；
 - ICS 路径；
 - AI 配置与访问密码。
 
-外部管线启用后，缺少 `ticktick` 或 `lark-cli` 使 doctor 失败。doctor 不执行 live 同步或写入。
+外部管线启用后，缺少 `getnote` 或 `lark-cli` 使 doctor 失败。doctor 不执行得到大脑写入、飞书写入或系统日历导入。
 
 ## 11. 测试边界
 
 合同测试使用 fake CLI、fake Feishu client、fake Provider 和临时数据目录，覆盖：
 
-- CLI allowlist 与账户区域；
+- 固定 `getnote` 命令、分页和字符串 note ID；
+- `meeting_todos.source/items` 与空待办列表；
+- 稳定外部 ID、明确日期解析和模糊日期拒绝；
 - 外部任务映射和真实 JsonStore；
 - 飞书 operationId 重放/冲突；
-- ICS 全天/定时事件、权限和原子写；
+- ICS 全天、定时、瞬时事件、权限和原子写；
 - MCP 确认门和旧工具退休；
 - browser 静态合同；
 - doctor 缺少依赖；
-- 项目、Capture、备份和恢复原有合同。
+- 项目、Capture、backup v2 和恢复原有合同。
 
-测试不等同于 live TickTick/Dida365、飞书、系统日历、OpenAI、浏览器、iPhone 或生产部署验证。
+测试不等同于 live 得到大脑、飞书、系统日历、OpenAI、浏览器、iPhone 或生产部署验证。
