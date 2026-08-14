@@ -60,7 +60,7 @@ function eventUid(externalId){
 function eventLines(task,calendarName,generatedAt){
   if(task.done||!task.dueDate)return null;
   const lines=['BEGIN:VEVENT',`UID:${eventUid(task.externalId)}`,`DTSTAMP:${generatedAt}`];
-  const timed=hasExplicitTime(task.startAt)&&hasExplicitTime(task.dueAt);
+  const timed=task.allDay!==true&&hasExplicitTime(task.startAt)&&hasExplicitTime(task.dueAt);
   const start=timed?utcStamp(task.startAt):null;
   const end=timed?utcStamp(task.dueAt):null;
   if(start&&end&&new Date(task.dueAt)>new Date(task.startAt)){
@@ -122,6 +122,7 @@ export function localCalendarPath(store){
 export async function writeLocalCalendar({store,tasks,calendarName='个人 AI 工作台'}={}){
   const target=localCalendarPath(store);
   const directory=path.dirname(target);
+  let tmp=null;
   try{
     const existingDirectory=await assertSafeDirectory(directory);
     if(!existingDirectory)await fsp.mkdir(directory,{recursive:true,mode:DIRECTORY_MODE});
@@ -129,15 +130,17 @@ export async function writeLocalCalendar({store,tasks,calendarName='个人 AI �
     await fsp.chmod(directory,DIRECTORY_MODE);
     await assertSafeFile(target);
     const content=buildLocalCalendar(tasks,{calendarName});
-    const tmp=`${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    tmp=`${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await fsp.writeFile(tmp,content,{encoding:'utf8',flag:'wx',mode:FILE_MODE});
     await fsp.chmod(tmp,FILE_MODE);
     await assertSafeFile(target);
     await fsp.rename(tmp,target);
+    tmp=null;
     await fsp.chmod(target,FILE_MODE);
     const eventCount=(content.match(/BEGIN:VEVENT/g)||[]).length;
     return {enabled:true,path:target,eventCount,writtenAt:new Date().toISOString()};
   }catch(error){
+    if(tmp)await fsp.unlink(tmp).catch(()=>{});
     if(error instanceof LocalCalendarError)throw error;
     throw new LocalCalendarError('本机日历文件写入失败。',{cause:error});
   }
