@@ -10,6 +10,10 @@ const ALLOWED_RAW_NAMES=new Set([
   'business_list',
   'project_records_read'
 ]);
+const HARNESS_SCHEMA_KEYS=new Set([
+  'type','oneOf','properties','required','additionalProperties','items',
+  'enum','const','description','title','default','examples'
+]);
 
 function config(){
   const url=String(process.env.JOYCREW_BRIDGE_URL||'').trim();
@@ -66,14 +70,47 @@ function resultText(value){
   return text.length<=50_000?text:`${text.slice(0,49_999)}…`;
 }
 
+function cloneJson(value){
+  if(Array.isArray(value))return value.map(cloneJson);
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,cloneJson(item)]));
+  return value;
+}
+
+/**
+ * Project the Workbench schema into the smaller JSON Schema subset enforced by
+ * Harness. The parent Workbench registry still validates every call against
+ * the original full schema, so dropping presentation-only constraints here
+ * does not weaken execution authority.
+ */
 export function normalizeInputSchema(value){
-  if(Array.isArray(value))return value.map(normalizeInputSchema);
-  if(!value||typeof value!=='object')return value;
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
   if(Object.hasOwn(value,'anyOf')&&Object.hasOwn(value,'oneOf')){
     throw new Error('Joycrew tool schema cannot declare both anyOf and oneOf');
   }
   const normalized={};
-  for(const [key,item] of Object.entries(value))normalized[key==='anyOf'?'oneOf':key]=normalizeInputSchema(item);
+  for(const [sourceKey,item] of Object.entries(value)){
+    const key=sourceKey==='anyOf'?'oneOf':sourceKey;
+    if(!HARNESS_SCHEMA_KEYS.has(key))continue;
+    if(key==='properties'){
+      if(item&&typeof item==='object'&&!Array.isArray(item)){
+        normalized.properties=Object.fromEntries(Object.entries(item).map(([name,schema])=>[name,normalizeInputSchema(schema)]));
+      }
+      continue;
+    }
+    if(key==='items'){
+      normalized.items=normalizeInputSchema(item);
+      continue;
+    }
+    if(key==='oneOf'){
+      if(Array.isArray(item))normalized.oneOf=item.map(normalizeInputSchema);
+      continue;
+    }
+    if(key==='default'||key==='examples'||key==='enum'||key==='required'){
+      normalized[key]=cloneJson(item);
+      continue;
+    }
+    normalized[key]=item;
+  }
   return normalized;
 }
 
@@ -126,17 +163,15 @@ export async function apply(ctx){
   }
   if(seen.size!==ALLOWED_RAW_NAMES.size)throw new Error('Joycrew bridge tool catalog is incomplete');
 
-  // Tool registrations are lifecycle resources. Keep every disposer inside a
-  // Cordis effect so activation publishes the full generation and unloading
-  // removes it. Direct registration in an async continuation is not durable.
+  // Publish one atomic generation and keep it bound to this plugin fiber.
   ctx.effect(()=>{
     const disposers=[];
     try{
       for(const definition of definitions)disposers.push(ctx.tools.register(definition));
     }catch(error){
-      for(const dispose of disposers.reverse())dispose();
+      for(const dispose of [...disposers].reverse())dispose();
       throw error;
     }
-    return()=>{for(const dispose of disposers.reverse())dispose();};
+    return()=>{for(const dispose of [...disposers].reverse())dispose();};
   },'joycrew-readonly-tool-bridge.tools');
 }

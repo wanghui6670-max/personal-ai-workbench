@@ -35,6 +35,36 @@ test('bridge normalizes Workbench nullable anyOf schemas to the Harness subset',
   assert.deepEqual(normalized.properties.id.oneOf,[{type:'string'},{type:'null'}]);
 });
 
+test('bridge removes unsupported presentation constraints but preserves original structural validation',()=>{
+  const normalized=normalizeInputSchema({
+    type:'object',
+    additionalProperties:false,
+    properties:{
+      query:{type:'string',minLength:1,maxLength:100,pattern:'^[a-z]+$'},
+      limit:{type:'integer',minimum:1,maximum:50},
+      nested:{type:'array',minItems:1,items:{type:'string',minLength:2}}
+    },
+    required:['query'],
+    description:'search input',
+    default:{query:'keep arbitrary annotation keys',limit:10}
+  });
+  assert.deepEqual(normalized,{
+    type:'object',
+    additionalProperties:false,
+    properties:{
+      query:{type:'string'},
+      limit:{type:'integer'},
+      nested:{type:'array',items:{type:'string'}}
+    },
+    required:['query'],
+    description:'search input',
+    default:{query:'keep arbitrary annotation keys',limit:10}
+  });
+  assert.equal(JSON.stringify(normalized).includes('minimum'),false);
+  assert.equal(JSON.stringify(normalized).includes('minLength'),false);
+  assert.equal(JSON.stringify(normalized).includes('pattern'),false);
+});
+
 test('child bridge repeats the exact P0 allow-list instead of trusting discovery labels',async()=>{
   const source=await fsp.readFile('harness/joycrew-tool-bridge.mjs','utf8');
   for(const name of ['panel_navigate','inbox_search','project_list','todo_list','journal_read','confirmation_list','business_list','project_records_read']){
@@ -45,8 +75,7 @@ test('child bridge repeats the exact P0 allow-list instead of trusting discovery
 
 test('Harness dependencies are pinned to one reviewed developer-preview release',async()=>{
   const packageJson=JSON.parse(await fsp.readFile('harness/package.json','utf8'));
-  for(const [name,version] of Object.entries(packageJson.dependencies)){
-    if(name==='@deepseek-ai/cordis')assert.equal(version,'4.0.1');
-    else assert.equal(version,'0.1.0-rc.6',name);
+  for(const [name,version] of Object.entries({...packageJson.dependencies,...packageJson.devDependencies})){
+    assert.equal(version,'0.1.0-rc.6',name);
   }
 });
