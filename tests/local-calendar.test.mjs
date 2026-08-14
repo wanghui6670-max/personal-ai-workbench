@@ -16,19 +16,20 @@ const tasks=[
 
 test('local calendar mirrors only explicit GetNote dates and never invents duration',()=>{
   const ics=buildLocalCalendar(tasks,{calendarName:'测试日历',generatedAt:new Date('2026-08-14T00:00:00Z')});
-  assert.match(ics,/PRODID:-\/\/Personal AI Workbench\/\/GetNote CLI Calendar/);
-  assert.match(ics,/X-WR-CALNAME:测试日历/);
-  assert.match(ics,/DTSTART;VALUE=DATE:20260820/);
-  assert.match(ics,/DTEND;VALUE=DATE:20260821/);
-  assert.match(ics,/DTSTART:20260821T010000Z/);
-  assert.match(ics,/DTEND:20260821T023000Z/);
-  assert.match(ics,/DTSTART:20260822T103000Z/);
-  assert.doesNotMatch(ics,/DTEND:20260822/);
-  assert.match(ics,/来源：得到大脑 CLI/);
-  assert.match(ics,/来源笔记：产品周会/);
-  assert.match(ics,/DTSTART;VALUE=DATE:20260823/);
-  assert.doesNotMatch(ics,/已完成任务|无截止任务/);
-  assert.equal((ics.match(/BEGIN:VEVENT/g)||[]).length,4);
+  const unfolded=ics.replace(/\r\n /g,'');
+  assert.match(unfolded,/PRODID:-\/\/Personal AI Workbench\/\/GetNote CLI Calendar/);
+  assert.match(unfolded,/X-WR-CALNAME:测试日历/);
+  assert.match(unfolded,/DTSTART;VALUE=DATE:20260820/);
+  assert.match(unfolded,/DTEND;VALUE=DATE:20260821/);
+  assert.match(unfolded,/DTSTART:20260821T010000Z/);
+  assert.match(unfolded,/DTEND:20260821T023000Z/);
+  assert.match(unfolded,/DTSTART:20260822T103000Z/);
+  assert.doesNotMatch(unfolded,/DTEND:20260822/);
+  assert.match(unfolded,/来源：得到大脑 CLI/);
+  assert.match(unfolded,/来源笔记：产品周会/);
+  assert.match(unfolded,/DTSTART;VALUE=DATE:20260823/);
+  assert.doesNotMatch(unfolded,/已完成任务|无截止任务/);
+  assert.equal((unfolded.match(/BEGIN:VEVENT/g)||[]).length,4);
 });
 
 test('local calendar writes one fixed private ICS file under the workbench data directory',async t=>{
