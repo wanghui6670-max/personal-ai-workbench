@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/AI-Work-OS" "$RUNNER_TEMP/workbench-data"
-          git branch -M main
+          git switch -C main HEAD
           git update-ref refs/remotes/origin/main HEAD
           SMOKE_PORT="$(node -e "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close();});")"
           WORKBENCH_INSTALL_NO_PAUSE=1 node scripts/macos-bootstrap.mjs \
