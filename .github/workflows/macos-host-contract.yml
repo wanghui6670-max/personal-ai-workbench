@@ -5,23 +5,34 @@ on:
     branches:
       - main
       - agent/macos-host-p0
+      - agent/macos-one-click-bootstrap
     paths:
       - 'src/host-p0.mjs'
+      - 'src/macos-bootstrap.mjs'
       - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-bootstrap.mjs'
       - 'scripts/macos-launch-agent.mjs'
       - 'scripts/p0-deployment-acceptance.mjs'
+      - 'install-macos.command'
       - 'tests/host-p0.test.mjs'
+      - 'tests/macos-bootstrap.test.mjs'
       - 'docs/MACOS_HOST_P0.md'
+      - 'docs/MACOS_ONE_CLICK.md'
       - 'package.json'
       - '.github/workflows/macos-host-contract.yml'
   pull_request:
     paths:
       - 'src/host-p0.mjs'
+      - 'src/macos-bootstrap.mjs'
       - 'scripts/p0-host-preflight.mjs'
+      - 'scripts/macos-bootstrap.mjs'
       - 'scripts/macos-launch-agent.mjs'
       - 'scripts/p0-deployment-acceptance.mjs'
+      - 'install-macos.command'
       - 'tests/host-p0.test.mjs'
+      - 'tests/macos-bootstrap.test.mjs'
       - 'docs/MACOS_HOST_P0.md'
+      - 'docs/MACOS_ONE_CLICK.md'
       - 'package.json'
       - '.github/workflows/macos-host-contract.yml'
   workflow_dispatch:
@@ -38,8 +49,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
+      - name: Validate one-click entry and host scripts
+        run: |
+          test -x install-macos.command
+          bash -n install-macos.command
+          node --check src/macos-bootstrap.mjs
+          node --check scripts/macos-bootstrap.mjs
+          node --check scripts/macos-launch-agent.mjs
       - name: Run macOS host contract tests
-        run: node --test tests/host-p0.test.mjs
+        run: node --test tests/host-p0.test.mjs tests/macos-bootstrap.test.mjs
       - name: Validate generated LaunchAgent with plutil
         run: |
           node --input-type=module <<'NODE'
