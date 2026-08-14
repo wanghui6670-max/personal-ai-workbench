@@ -3,6 +3,7 @@ import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
+import { createExternalTaskTools, planExternalTaskMessage } from './external-task-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -28,7 +29,7 @@ function planGuard(tool,args,state){
 
 export function createWorkbenchRegistry({appRoot,store}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  const tools=[...createWorkbenchTools(),...createProjectRecordTools()];
+  const tools=[...createWorkbenchTools(),...createProjectRecordTools(),...createExternalTaskTools()];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -73,6 +74,7 @@ export function createWorkbenchRegistry({appRoot,store}={}){
         console.warn('[AI console planner fallback]',error.message);
       }
     }
+    if(!planned)planned=planExternalTaskMessage({message,state:derived});
     if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
