@@ -48,6 +48,7 @@ jobs:
           node --check src/mcp/registry.mjs
           node --check src/mcp/project-record-tools.mjs
           node --check src/mcp/external-task-tools.mjs
+          node --check scripts/doctor.mjs
           node --check scripts/migrate-project-records.mjs
           node --check scripts/test-by-file.mjs
           node --check public/project-records.js
