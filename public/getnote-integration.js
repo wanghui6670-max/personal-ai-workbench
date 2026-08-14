@@ -69,7 +69,7 @@ function integrationSettingsHtml(value){
     </div>
     <label><span>飞书每日工作日记 URL</span><input id="getnote-journal-url" type="url" placeholder="https://你的租户.feishu.cn/wiki/..." value="${esc(value.journalDocumentUrl||'')}"></label>
     <label class="getnote-check"><input id="getnote-calendar-enabled" type="checkbox" ${value.calendarEnabled!==false?'checked':''}> 同步生成本机 ICS 日历</label>
-    <p>程序固定执行 <code>getnote notes ... -o json</code> 和 <code>getnote note todos &lt;note_id&gt; -o json</code>。得到大脑只作为笔记和会议待办来源；飞书只保存待办快照与每日总结。只有待办文字中能确定日期的事项才进入本机日历，其余进入收件箱等待人工定日期。</p>
+    <p>程序固定执行 <code>getnote notes ... -o json</code> 读取最近笔记，并从笔记标题与内容提取待办。得到大脑只作为笔记来源；飞书只保存待办快照与每日总结。只有待办文字中能确定日期的事项才进入本机日历，其余进入收件箱等待人工定日期。</p>
     ${showStatus?`<div class="getnote-status"><strong>来源状态</strong><span>${esc(statusTime)} · ${value.lastSyncStatus==='ok'?'成功':value.lastSyncStatus==='needs_reconfiguration'?'需要重新配置':'失败'} · 扫描 ${Number(value.lastSourceNoteCount||0)} 篇笔记 · 解析 ${Number(value.lastParsedTodoCount||0)} 条待办${value.lastSyncError?` · ${esc(value.lastSyncError)}`:''}</span>${value.lastCalendarPath?`<code>${esc(value.lastCalendarPath)}</code>`:''}</div>`:''}
   </section>`;
 }
@@ -94,15 +94,11 @@ function enhanceSettings(){
 
 function enhanceSyncButtons(){
   const value=pipeline();
+  const label=value.enabled?'同步得到大脑待办':'配置得到大脑';
+  const title=value.enabled?'从 getnote 读取最近笔记并提取待办，写入飞书日记并更新本机日历':'先配置得到大脑 CLI、飞书日记与本机日历';
   for(const button of document.querySelectorAll('[data-action="sync-feishu"]')){
-    button.textContent=value.enabled?'同步得到大脑待办':'配置得到大脑';
-    button.title=value.enabled?'从 getnote CLI 读取最近笔记的会议待办，写入飞书日记并更新本机日历':'先配置得到大脑 CLI、飞书日记与本机日历';
-  }
-  const actions=document.querySelector('.topbar .actions');
-  if(actions&&!actions.querySelector('[data-getnote-action="publish-summary"]')){
-    const button=document.createElement('button');
-    button.type='button';button.className='btn desktop-only';button.dataset.getnoteAction='publish-summary';button.textContent='沉淀今日总结';
-    actions.prepend(button);
+    if(button.textContent!==label)button.textContent=label;
+    if(button.title!==title)button.title=title;
   }
 }
 
