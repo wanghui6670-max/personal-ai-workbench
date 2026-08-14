@@ -163,15 +163,21 @@ export async function apply(ctx){
   }
   if(seen.size!==ALLOWED_RAW_NAMES.size)throw new Error('Joycrew bridge tool catalog is incomplete');
 
-  // Publish one atomic generation and keep it bound to this plugin fiber.
-  ctx.effect(()=>{
-    const disposers=[];
-    try{
-      for(const definition of definitions)disposers.push(ctx.tools.register(definition));
-    }catch(error){
+  // Harness registration APIs are lifecycle effects already. Register during
+  // plugin startup exactly as the official MCP bridge does; keep explicit
+  // disposers only for atomic rollback if any definition is rejected.
+  const disposers=[];
+  try{
+    for(const definition of definitions)disposers.push(ctx.tools.register(definition));
+  }catch(error){
+    for(const dispose of [...disposers].reverse())dispose();
+    throw error;
+  }
+
+  for(const definition of definitions){
+    if(ctx.tools.get(definition.name)===undefined){
       for(const dispose of [...disposers].reverse())dispose();
-      throw error;
+      throw new Error(`Joycrew tool registration did not become visible: ${definition.name}`);
     }
-    return()=>{for(const dispose of [...disposers].reverse())dispose();};
-  },'joycrew-readonly-tool-bridge.tools');
+  }
 }
