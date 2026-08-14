@@ -1,6 +1,12 @@
 # 部署说明
 
-Personal AI Workbench v1.2.0 是本地文件系统优先的应用。服务进程必须能够直接访问持久化数据目录和真实项目工作区；普通无状态云函数不能直接读取笔记本上的项目目录。
+Personal AI Workbench 是本地文件系统优先的应用。服务进程必须能够直接访问：
+
+- 持久化数据目录；
+- 真实项目工作区；
+- 已登录的 `ticktick` CLI；
+- 已登录的 `lark-cli`；
+- 本机日历 ICS 输出目录。
 
 本文档中的命令和占位符不代表真实凭证、真实飞书文档或 live 验证结果。
 
@@ -19,48 +25,135 @@ HOST=127.0.0.1
 PORT=4173
 ```
 
-在工作台“设置”中把工作区根目录改成真实项目根目录。`npm run doctor` 只检查本机配置和文件系统条件，不主动调用 OpenAI 或飞书，也不证明外部服务当前可达。
+在工作台“设置”中配置：
 
-### 飞书每日工作日记收件箱
+1. 真实项目工作区；
+2. 滴答账户区域；
+3. 飞书《每日工作日记》URL；
+4. 是否生成本机 ICS 日历；
+5. 日历名称。
 
-在设置页填写你自己的官方飞书/Lark HTTPS 云文档链接，例如：
+## 2. 滴答 CLI
+
+程序固定执行：
+
+```text
+ticktick
+```
+
+不会从配置中执行任意命令。
+
+账户区域：
+
+```text
+国际版：TICKTICK_HOST=ticktick.com
+国内版：TICKTICK_HOST=dida365.com
+```
+
+受控命令：
+
+```text
+ticktick sync --json
+ticktick tasks list --json
+ticktick tasks completed --json
+```
+
+安装后应在运行工作台的同一操作系统用户下完成登录。不要把 token、cookie、配置目录或命令输出中的敏感信息复制到仓库、日志或聊天。
+
+`tasks completed` 不可用时，工作台仍可导入 active tasks，但不会把缺失任务擅自判定为完成。
+
+## 3. 飞书每日工作日记
+
+飞书不再作为个人待办来源，而是沉淀目标。
+
+设置中填写官方 Feishu/Lark HTTPS 文档链接，例如：
 
 ```text
 https://<tenant>.feishu.cn/wiki/<document-token>
 ```
 
-工作台只读取一级标题“收件箱”下以 `[INBOX]` 开头的段落或待办。其他章节不会自动变成收件箱事项，也不会自动安排到今日。
+前置条件：
 
-启用前置条件：
+1. 在运行工作台的同一台机器、同一个用户下安装 `lark-cli`；
+2. 以飞书用户身份完成授权；
+3. 确认目标文档可读可写；
+4. 不把授权文件或凭证打包进仓库或镜像。
 
-1. 在运行工作台的同一台机器、同一个操作系统用户下安装 `lark-cli`。
-2. 用飞书用户身份完成授权，并确认该用户对目标文档有读取和编辑权限。
-3. 仅在本机检查 CLI 和登录状态；不要把 token、app secret、cookie、授权文件或 `.env` 输出复制到项目、日志或聊天中。
-
-```bash
-command -v lark-cli
-lark-cli auth status --json --verify
-```
-
-新增收件箱采用：
+任务快照和每日总结只操作固定章节：
 
 ```text
-写飞书
-→ 按 block ID 读回
-→ 读回确认后提交本地缓存
+每日工作日记
 ```
 
-飞书读取、写入或读回失败时，工作台不会伪装成已同步。
+记录前缀：
 
-### 飞书项目分析与总结
+```text
+[WORKBENCH_DAILY_TODOS]
+[WORKBENCH_DAILY_SUMMARY]
+```
 
-每个项目可绑定独立的官方飞书/Lark HTTPS 云文档。项目分析、阶段总结、卡点说明和上下文恢复叙事只写固定的“项目分析与总结”章节；本地仅保存机器进度、revision/block/operation 指针和恢复凭据。
+写入顺序：
 
-完整边界见 [`PROJECT_RECORDS.md`](PROJECT_RECORDS.md)。
+```text
+读取
+→ 按 operationId 查重
+→ 写入
+→ 按 operationId 读回确认
+```
 
-## 2. 局域网、Tailscale 或内网部署
+同一 operationId 若已对应不同正文，工作台返回冲突并停止。
 
-需要从另一台设备访问时，至少设置：
+完整合同见 [`TASK_SOURCE_PIPELINE.md`](TASK_SOURCE_PIPELINE.md)。
+
+## 4. 本机日历
+
+生成文件：
+
+```text
+<data-dir>/calendar/personal-ai-workbench.ics
+```
+
+默认数据目录下对应：
+
+```text
+./data/calendar/personal-ai-workbench.ics
+```
+
+安全边界：
+
+- 目录权限 `0700`；
+- 文件权限 `0600`；
+- 写临时文件后原子替换；
+- 失败时清理临时文件；
+- UID 来自外部任务 ID 哈希；
+- 完成任务在下一次同步时退出日历；
+- 全天任务保持全天；
+- 没有完整时段时不猜测时长。
+
+工作台只生成 ICS 文件，不调用系统日历 API。部署完成后，由用户在 macOS Calendar、Windows 日历或其他客户端中导入或订阅该文件。
+
+## 5. 环境自检
+
+```bash
+npm run doctor
+```
+
+启用外部任务管线后，doctor 会检查：
+
+- Node.js；
+- Git；
+- 数据目录和工作区可写性；
+- `ticktick` 二进制；
+- 账户区域对应的 `TICKTICK_HOST`；
+- `lark-cli` 二进制；
+- 飞书工作日记配置；
+- 本机 ICS 路径。
+
+doctor 不会执行真实任务同步、飞书写入或系统日历导入，因此“通过”不等同于 live 验证。
+
+## 6. 局域网、Tailscale 或内网部署
+
+需要从其他设备访问时，至少设置：
 
 ```text
 HOST=0.0.0.0
@@ -69,98 +162,74 @@ SESSION_SECRET=<至少 24 字符的长随机字符串>
 TRUSTED_ORIGINS=http://<受信任主机或IP>:4173
 ```
 
-建议使用可信局域网、Tailscale 或受控内网，而不是直接开放公网端口。
+建议使用可信局域网、Tailscale 或受控内网，不要直接开放公网端口。
 
-### iPhone 快捷指令采集
-
-```text
-CAPTURE_TOKEN=<独立的长随机采集 token>
-```
-
-快捷指令请求：
+HTTPS 时设置：
 
 ```text
-POST http://<Mac局域网IP>:4173/api/capture
-Authorization: Bearer <CAPTURE_TOKEN>
+COOKIE_SECURE=1
 ```
 
-请求必须为每条新事项生成一个 `captureId`，并在不确定重试时复用同一个 ID。iPhone 不携带飞书凭证；工作台使用运行用户已经登录的 `lark-cli`。详细配置见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
+应用校验实际 `Host` 和 `Origin`，不会采信 `X-Forwarded-*` 自动放宽。
 
-局域网地址变化后，应同时更新快捷指令 URL 和 `TRUSTED_ORIGINS`，再重启工作台。
+## 7. iPhone Shortcut
 
-## 3. Docker Compose
+`POST /api/capture` 仍是独立快速采集入口，不是滴答主任务源。
 
-先检查配置：
+```text
+CAPTURE_TOKEN=<独立长随机 token>
+```
+
+每条新事项生成一个 `captureId`；同一次不确定重试复用原 ID。采集只进入工作台收件箱，不自动成为正式待办或加入今日。
+
+详见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
+
+## 8. Docker Compose
 
 ```bash
 docker compose config
-```
-
-启动前：
-
-1. 复制 `.env.example` 为 `.env`。
-2. 设置非空的 `WORKBENCH_PASSWORD` 和至少 24 字符的 `SESSION_SECRET`。
-3. 把 `WORKBENCH_WORKSPACE_PATH` 设置为宿主机真实项目目录的绝对路径。
-4. 确保数据目录和工作区对容器运行 UID/GID 可写。
-5. 启动：
-
-```bash
 docker compose up -d --build
 ```
 
 容器内：
 
 ```text
-/data       工作台持久化数据
+/data       工作台持久化数据和 ICS
 /workspace  真实项目目录
 ```
 
-镜像不会复制本机 `.env`、`data/` 或 `workspace/`。首次挂载空 `/data` 时会创建：
+默认镜像不会包含：
 
-```text
-state.json
-config.json
-backups/
-migrations/
-captures/
-recovery/
-```
+- 你的 `ticktick` 二进制或登录状态；
+- 你的 `lark-cli` 登录状态；
+- 飞书授权文件；
+- 系统日历客户端。
 
-默认只发布到宿主机 `127.0.0.1:4173`。确需局域网发布时设置：
+因此启用新管线时优先使用原生运行。
 
-```text
-WORKBENCH_BIND_ADDRESS=0.0.0.0
-```
+需要容器化时，部署者必须自行：
 
-并保留密码、会话密钥和受信任 origin。
+1. 安装受控版本的 `ticktick` 和 `lark-cli`；
+2. 以非 root 用户提供登录状态；
+3. 持久化 `/data`；
+4. 挂载真实 `/workspace`；
+5. 确保 CLI 配置目录权限正确；
+6. 不把个人凭证烘焙进公开镜像。
 
-可选 Compose 变量：
+仅挂载 `/data` 和 `/workspace` 不会自动获得 CLI 授权。
 
-- `WORKBENCH_PORT`：同时设置宿主机发布端口、容器端口和应用 `PORT`，默认 `4173`
-- `WORKBENCH_DATA_PATH`：宿主机数据目录，默认 `./data`
-- `WORKBENCH_WORKSPACE_PATH`：宿主机真实项目目录，默认 `./workspace`
-- `WORKBENCH_UID` / `WORKBENCH_GID`：容器进程 UID/GID，默认 `1000:1000`
+## 9. Readiness
 
-不要使用 `chmod 777` 解决挂载权限。Linux 上应让目录归属或 ACL 与容器 UID/GID 对齐。
+`GET /api/health` 只证明本地 state/config、数据目录和工作区可用，不证明：
 
-### Docker 与飞书 CLI
-
-当前镜像不内置你的 `lark-cli` 用户登录态。仅挂载 `/data` 和 `/workspace` 不会让容器自动获得飞书授权。需要飞书集成时优先使用原生运行；把授权文件直接打包进镜像不受支持。
-
-## 4. Readiness 与健康检查
-
-容器健康检查使用镜像自带 Node.js 请求 `/api/health`。
-
-只有 state/config 可读且合法、数据目录和工作区路径安全且具备所需权限时返回 `200`；其他情况返回通用 `503 not_ready`。
-
-readiness 只证明当前文件系统依赖可用，不证明：
-
-- OpenAI 当前可达；
+- TickTick/Dida365 当前可达；
+- `ticktick` 登录仍有效；
 - 飞书当前可达或有编辑权限；
-- 浏览器和真实 iPhone 已验收；
-- 磁盘未来不会耗尽。
+- ICS 已被某个日历客户端成功导入；
+- OpenAI 当前可达；
+- 浏览器和真实 iPhone 已验收。
 
-## 5. AI Provider
+## 10. AI Provider
 
 默认 Luna Profile：
 
@@ -169,133 +238,78 @@ OPENAI_API_KEY=<你的 Key>
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
-项目把推理档位固定为 `xhigh`，并使用结构化结果与本机校验。超时、拒绝、不可达或输出校验失败时回退本地规则。
+推理档位固定为 `xhigh`。Provider 失败时回退本地规则，不会自动改变截止日期、收件箱或今日计划。
 
-`npm run doctor` 显示“已配置（未联网验证）”不等于 live success。文件正文默认不出站；只有显式开启受支持的正文发送开关时才会发送，且高敏感项目不应启用。
+配置和 doctor 只证明参数存在，不证明 live success。详见 [`AI_PROVIDER.md`](AI_PROVIDER.md)。
 
-第三方 Provider 的固定 endpoint、origin allowlist、模型、凭证和显式降级门见 [`AI_PROVIDER.md`](AI_PROVIDER.md)。未进行真实 endpoint smoke test 前，只能称本地合同已通过。
-
-## 6. 反向代理与公开暴露
-
-HTTPS 反向代理示例：
+## 11. 数据目录
 
 ```text
-TRUSTED_ORIGINS=https://workbench.example.com
-COOKIE_SECURE=1
+state.json   项目、任务、收件箱、今日、确认项和机器指针
+config.json  工作区、业务板块和外部任务管线设置
+calendar/    可重建的本机 ICS 日历镜像
+backups/     自动每日快照与手工 backup v2
+migrations/  升级快照和迁移报告
+captures/    Capture 哈希收据
+recovery/    飞书跨资源事务恢复凭据
 ```
 
-多个 origin 用逗号分隔。协议、主机和端口必须与浏览器实际访问地址一致。
+ICS 是可重建镜像，不是待办真源。滴答清单仍是外部任务事实源。
 
-代理应保留对应的实际 `Host`。应用不会信任 `X-Forwarded-Host`、`X-Forwarded-Proto` 自动放宽安全检查。不要把公网代理的上游 Host 重写为 localhost 后省略 `TRUSTED_ORIGINS`。
+## 12. 备份与恢复
 
-只要启用 `WORKBENCH_PASSWORD`，即使监听 localhost，也必须设置非示例值且至少 24 字符的 `SESSION_SECRET`。公开绑定或非本机 origin 在默认情况下没有密码会拒绝启动。
+手工备份：
 
-## 7. 主要环境变量
-
-- `PORT`：应用端口，默认 `4173`
-- `HOST`：监听地址，默认 `127.0.0.1`
-- `DATA_DIR`：持久化数据目录
-- `WORKSPACE_ROOT`：覆盖配置中的工作区根目录
-- `WORKBENCH_PASSWORD`：访问密码
-- `SESSION_SECRET`：登录 cookie 签名密钥
-- `CAPTURE_TOKEN`：iPhone / 外部采集专用 Bearer token
-- `TRUSTED_ORIGINS`：允许的完整浏览器 origin，多个值逗号分隔
-- `COOKIE_SECURE=1`：HTTPS 时给登录 Cookie 加 `Secure`
-- `OPENAI_API_KEY`：默认 Luna Profile 凭证
-- `OPENAI_MODEL`：默认 `gpt-5.6-luna`
-- `OPENAI_SEND_FILE_CONTENT=1`：显式允许默认 Profile 发送受支持文件正文；默认关闭
-- `AI_PROVIDER_*`：第三方 Provider 固定适配配置
-- `ALLOW_INSECURE_PUBLIC=1`：明确允许无密码公开绑定；不建议使用
-
-## 8. 数据目录
-
-```text
-state.json   机器状态、任务、收件箱、确认项和飞书指针
-config.json  工作区、业务板块和数据源配置
-backups/     自动每日快照与手工备份
-migrations/  升级前原始快照、PROJECT.md 备份和迁移报告
-captures/    Capture 幂等收据；只含正文 SHA-256 和标识符
-recovery/    飞书跨资源事务恢复凭据；只含机器数据和指针
+```bash
+npm run backup
 ```
 
-`captures/` 与 `recovery/` 都是恢复正确性的一部分，不是可随意删除的缓存。
-
-## 9. 备份 v2
-
-`npm run backup` 和每日快照生成 JSON backup v2：
-
-```json
-{
-  "backupVersion": 2,
-  "backedUpAt": "...",
-  "state": {},
-  "config": {},
-  "captureReceipts": [],
-  "projectRecordReceipts": []
-}
-```
-
-包含：
-
-- 持久化 state；不包含运行时派生的临时确认；
-- config；
-- Capture 哈希收据，用于恢复后继续去重；
-- 飞书项目记录恢复凭据，用于恢复后继续 operationId 对账。
-
-不包含：
-
-- `/workspace` 中的真实项目资料；
-- 飞书项目分析或总结正文；
-- OpenAI / 飞书凭证、cookie、`.env` 或 `lark-cli` 登录文件。
-
-自动每日快照是当天第一次状态或配置变更前的本机回滚点。手工备份和每日快照默认与主数据位于同一宿主目录，不等同于异机灾备。
-
-## 10. 原生恢复
-
-先用实际进程管理器停止工作台，再执行：
+恢复前停止工作台：
 
 ```bash
 npm run restore -- /path/to/backup.json
 npm start
 ```
 
-不要使用宽泛的 `pkill node`，以免误停其他 Node 进程。
+backup v2 包含：
 
-恢复脚本会先创建恢复前安全备份。backup v2 会同时替换 state、可选 config、Capture 收据和项目恢复凭据；任一阶段失败时会尝试回滚全部已修改部分。
+- state；
+- config；
+- Capture 幂等收据；
+- 项目飞书记录恢复凭据。
 
-旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段，恢复时会保留当前凭据目录，而不是把它们静默清空。这保证向后兼容，但也意味着旧备份不是这些凭据的历史快照。
+不包含：
 
-恢复后至少核对：
+- `/workspace` 中的真实项目资料；
+- 飞书正文；
+- CLI 登录状态或凭证；
+- `.env`；
+- OpenAI、飞书或滴答凭证；
+- 本机日历客户端配置。
 
-- 今日工作台、全部待办和项目列表；
-- 一条已处理 Capture 使用原 `captureId` 重放时不会复活；
-- 待确认中仍能显示未完成的项目记录对账项；
-- `GET /api/health` 返回就绪。
-
-## 11. Docker Compose 恢复
-
-备份文件需位于宿主机 `WORKBENCH_DATA_PATH` 内。示例：
+恢复后应重新运行：
 
 ```bash
-docker compose stop workbench
-docker compose run --rm --no-deps workbench node scripts/restore.mjs /data/backups/backup-YYYY-MM-DDTHH-MM-SS-UUID.json
-docker compose up -d workbench
-docker compose ps
+npm run doctor
 ```
 
-不要在服务仍运行并可能写状态或凭据时恢复。恢复完成后登录网页或读取 `/api/state` 核对业务记录。
+然后由用户明确执行一次滴答同步，重新生成 ICS。
 
-## 12. 灾备边界
+## 13. 灾备边界
 
-完整灾备至少要分别保护：
+完整灾备至少分别保护：
 
-1. `/data`：工作台状态、配置、备份、迁移快照和恢复凭据；
-2. `/workspace`：真实项目资料和 Git 工作树；
+1. `/data`；
+2. `/workspace`；
 3. 远端 Git 仓库；
-4. 飞书项目文档。
+4. 飞书项目文档和每日工作日记；
+5. CLI 登录恢复方式；
+6. 滴答清单账户本身。
 
-应由部署者自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。仓库中的本地测试不构成生产灾备演练。
+部署者应自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
 
-## 13. 云部署限制
+## 14. 云部署限制
 
-Vercel、Netlify Serverless 等无状态环境不能直接读取你电脑的本地项目路径。若一定要远程部署，需要在项目文件所在机器运行受控 agent/服务，或把项目工作区安全挂载到远程主机；这属于另一套架构，不是当前 v1.2.0 的默认部署模型。
+无状态 Serverless 环境不能直接读取本地项目目录，也不能天然访问本机 CLI 登录态或生成本机日历文件。
+
+若必须远程部署，需要在项目文件所在机器运行受控服务，或把工作区、数据目录和 CLI 登录环境安全地迁移到长期主机。这属于另一套架构，不是默认部署模型。
