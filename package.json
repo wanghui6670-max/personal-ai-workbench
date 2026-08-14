@@ -14,7 +14,9 @@
     "restore": "node scripts/restore.mjs",
     "migrate:project-records": "node scripts/migrate-project-records.mjs",
     "harness:install": "npm install --prefix harness --ignore-scripts --no-audit --no-fund",
-    "harness:check": "node scripts/harness-check.mjs"
+    "harness:check": "node scripts/harness-check.mjs",
+    "harness:e2e": "node scripts/harness-e2e.mjs",
+    "verify": "npm run test:files && npm run harness:check && npm run harness:e2e"
   },
   "engines": {
     "node": ">=20"

@@ -1,15 +1,19 @@
-FROM node:22-alpine
+FROM node:24-alpine
 RUN apk add --no-cache git
 WORKDIR /app
 
 COPY --chown=node:node package.json ./
+COPY --chown=node:node harness/package.json ./harness/package.json
+RUN npm install --prefix harness --omit=dev --ignore-scripts --no-audit --no-fund
+
 COPY --chown=node:node src ./src
 COPY --chown=node:node public ./public
 COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node harness ./harness
 
 # Runtime state is initialized by the app in /data. Keep it outside the image.
 RUN mkdir -p /data /workspace \
-    && chown -R node:node /data /workspace
+    && chown -R node:node /data /workspace /app/harness
 
 ENV HOST=0.0.0.0 PORT=4173 DATA_DIR=/data WORKSPACE_ROOT=/workspace
 VOLUME ["/data", "/workspace"]

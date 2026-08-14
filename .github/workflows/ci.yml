@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Syntax check control-plane, external tasks, Harness and browser modules
+      - name: Syntax check all runtime surfaces
         run: |
           node --check src/server.mjs
           node --check src/request-validation.mjs
@@ -58,18 +58,19 @@ jobs:
           node --check scripts/migrate-project-records.mjs
           node --check scripts/test-by-file.mjs
           node --check scripts/harness-check.mjs
+          node --check scripts/harness-e2e.mjs
           node --check public/project-records.js
           node --check public/ux-enhancements.js
           node --check public/dida-integration.js
           node --check public/harness-navigator.js
-      - name: Run all contract tests
+      - name: Run all Workbench contract tests
         env:
           OPENAI_API_KEY: ''
           AI_PROVIDER_ENABLED: '0'
           HARNESS_ENABLED: '0'
         run: npm run test:files
 
-  harness-smoke:
+  harness-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -79,5 +80,27 @@ jobs:
           node-version: '24'
       - name: Install pinned isolated Harness runtime
         run: npm run harness:install
-      - name: Compile and initialize Navigator composition
+      - name: Compile production Navigator composition
         run: npm run harness:check
+      - name: Run deterministic Agent-to-tool end-to-end
+        run: npm run harness:e2e
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build production image with Harness runtime
+        run: docker build -t personal-ai-workbench:harness .
+      - name: Initialize Harness inside production image
+        run: docker run --rm --entrypoint node personal-ai-workbench:harness scripts/harness-check.mjs
+      - name: Start Workbench and verify health plus Navigator asset
+        run: |
+          docker run -d --name workbench-harness-smoke -p 127.0.0.1:49173:4173 -e ALLOW_INSECURE_PUBLIC=1 personal-ai-workbench:harness
+          trap 'docker rm -f workbench-harness-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:49173/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:49173/api/health | grep '"ok": true'
+          curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'

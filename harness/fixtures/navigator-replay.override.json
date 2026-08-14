@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      {"type":"block-start","index":0,"blockType":"tool-call"},
+      {"type":"tool-call-delta","index":0,"id":"call_nav_1","name":"joycrew__project_list","argumentsDelta":"{}"},
+      {"type":"block-end","index":0,"block":{"type":"tool-call","id":"call_nav_1","name":"joycrew__project_list","arguments":"{}"}},
+      {"type":"finish","reason":{"kind":"tool-calls"}}
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {"type":"block-start","index":0,"blockType":"text"},
+      {"type":"text-delta","index":0,"text":"已读取 1 个项目：端到端测试项目。"},
+      {"type":"block-end","index":0,"block":{"type":"text","text":"已读取 1 个项目：端到端测试项目。"}},
+      {"type":"finish","reason":{"kind":"stop"}}
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {"type":"block-start","index":0,"blockType":"text"},
+      {"type":"text-delta","index":0,"text":"同一会话可以继续。"},
+      {"type":"block-end","index":0,"block":{"type":"text","text":"同一会话可以继续。"}},
+      {"type":"finish","reason":{"kind":"stop"}}
+    ]
+  }
+]
