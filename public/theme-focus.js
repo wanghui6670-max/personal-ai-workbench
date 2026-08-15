@@ -25,20 +25,28 @@ function syncThemeButton(){
   const button=document.querySelector('[data-theme-toggle]');
   if(!button)return;
   const dark=document.documentElement.dataset.theme==='dark';
-  button.innerHTML=`<span aria-hidden="true">${dark?'☀':'☾'}</span><span class="theme-label">${dark?'切换到日间模式':'切换到夜间模式'}</span>`;
-  button.title=dark?'切换到日间模式':'切换到夜间模式';
-  button.setAttribute('aria-label',button.title);
+  const label=dark?'切换到日间模式':'切换到夜间模式';
+  const html=`<span aria-hidden="true">${dark?'☀':'☾'}</span><span class="theme-label">${label}</span>`;
+  if(button.innerHTML!==html)button.innerHTML=html;
+  if(button.title!==label)button.title=label;
+  if(button.getAttribute('aria-label')!==label)button.setAttribute('aria-label',label);
 }
 
 function ensureThemeButton(){
   const actions=document.querySelector('.topbar .actions');
-  if(!actions||actions.querySelector('[data-theme-toggle]'))return;
+  if(!actions)return;
+  const existing=actions.querySelector('[data-theme-toggle]');
+  if(existing){syncThemeButton();return;}
   const button=document.createElement('button');
   button.type='button';
   button.className='btn ghost theme-toggle';
   button.dataset.themeToggle='';
   actions.prepend(button);
   syncThemeButton();
+}
+
+function setTextIfChanged(node,text){
+  if(node&&node.textContent!==text)node.textContent=text;
 }
 
 function wrapSecondary(node,{className,label}){
@@ -81,18 +89,21 @@ function compactRecentWork(primary){
 function simplifyDecisionCard(card){
   if(!card)return;
   card.classList.add('today-decision-minimal');
-  const desc=card.querySelector('.card-desc');
-  if(desc)desc.textContent='只处理需要你拍板的事项。';
-  card.querySelector('.decision-rule')?.setAttribute('hidden','');
+  setTextIfChanged(card.querySelector('.card-desc'),'只处理需要你拍板的事项。');
+  const rule=card.querySelector('.decision-rule');
+  if(rule&&!rule.hidden)rule.hidden=true;
   const askTitle=[...card.querySelectorAll('.section-title')].find(node=>node.textContent.includes('可以这样问右侧 AI'));
   if(askTitle){
     askTitle.dataset.todaySecondaryCopy='';
-    askTitle.setAttribute('hidden','');
+    if(!askTitle.hidden)askTitle.hidden=true;
     const next=askTitle.nextElementSibling;
-    if(next){next.dataset.todaySecondaryCopy='';next.setAttribute('hidden','');}
+    if(next){
+      next.dataset.todaySecondaryCopy='';
+      if(!next.hidden)next.hidden=true;
+    }
   }
-  const attention=[...card.querySelectorAll('.section-title')].find(node=>node.textContent.includes('当前需要你留意'));
-  if(attention)attention.textContent='需要处理';
+  const attention=[...card.querySelectorAll('.section-title')].find(node=>node.textContent.includes('当前需要你留意')||node.textContent==='需要处理');
+  setTextIfChanged(attention,'需要处理');
 }
 
 function simplifyToday(){
@@ -105,8 +116,7 @@ function simplifyToday(){
   if(!grid)return;
 
   const primary=grid.querySelector('section.card.pad');
-  const primaryDesc=primary?.querySelector('.card-desc');
-  if(primaryDesc)primaryDesc.textContent='只显示你明确加入今天的任务。';
+  setTextIfChanged(primary?.querySelector('.card-desc'),'只显示你明确加入今天的任务。');
   const empty=primary?.querySelector('.empty');
   if(empty&&empty.textContent.includes('今天还没有正式安排任务')){
     empty.innerHTML='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';

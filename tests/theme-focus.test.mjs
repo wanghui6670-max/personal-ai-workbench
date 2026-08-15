@@ -39,6 +39,17 @@ test('今日工作台首屏只保留做事与拍板，统计、现场和项目�
   assert.match(script,/只处理需要你拍板的事项/);
 });
 
+test('MutationObserver 增强层是幂等的，不会通过重复文本写入自触发微任务死循环',async()=>{
+  const script=await read('public/theme-focus.js');
+  assert.match(script,/function setTextIfChanged\(node,text\)\{\s*if\(node&&node\.textContent!==text\)node\.textContent=text;/);
+  assert.match(script,/setTextIfChanged\(card\.querySelector\('\.card-desc'\),'只处理需要你拍板的事项。'\)/);
+  assert.match(script,/setTextIfChanged\(attention,'需要处理'\)/);
+  assert.match(script,/setTextIfChanged\(primary\?\.querySelector\('\.card-desc'\),'只显示你明确加入今天的任务。'\)/);
+  assert.match(script,/if\(button\.innerHTML!==html\)button\.innerHTML=html/);
+  assert.doesNotMatch(script,/if\(desc\)desc\.textContent='只处理需要你拍板的事项。'/);
+  assert.doesNotMatch(script,/if\(primaryDesc\)primaryDesc\.textContent='只显示你明确加入今天的任务。'/);
+});
+
 test('聚焦层不引入自动排期、自动同步或写入 DSH 权限边界',async()=>{
   const script=await read('public/theme-focus.js');
   assert.doesNotMatch(script,/\/api\/projects\/sync|\/api\/inbox\/sync|\/api\/joycrew\/actions|\/api\/mcp/);
