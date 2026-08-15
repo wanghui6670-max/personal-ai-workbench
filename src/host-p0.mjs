@@ -73,22 +73,24 @@ function ignored(relative,ignorePrefixes){
   return ignorePrefixes.some(prefix=>normalized===prefix||normalized.startsWith(`${prefix}/`));
 }
 
-export async function snapshotTree(root,{maxEntries=100_000,maxDurationMs=60_000,hashFiles=false,maxHashBytes=16*1024*1024,ignorePrefixes=[],ignoreNames=[]}={}){
+export async function snapshotTree(root,{maxEntries=100_000,maxDurationMs=60_000,hashFiles=false,maxHashBytes=16*1024*1024,ignorePrefixes=[],ignoreNames=[],maxDepth=Infinity}={}){
   const resolved=await fsp.realpath(root);
   const started=Date.now();
   const entries=[];
   const counts={files:0,directories:0,symlinks:0,other:0,contentHashedFiles:0};
+  if(maxDepth!==Infinity&&(!Number.isInteger(maxDepth)||maxDepth<0))throw new Error('maxDepth 必须是非负整数或 Infinity。');
 
-  async function walk(full,relative){
+  async function walk(full,relative,depth){
     if(Date.now()-started>maxDurationMs)throw Object.assign(new Error('目录快照超时。'),{code:'HOST_P0_SNAPSHOT_TIMEOUT'});
-    if(entries.length>=maxEntries)throw Object.assign(new Error('目录快照超过条目上限。'),{code:'HOST_P0_SNAPSHOT_LIMIT'});
     if(relative!=='.'&&(ignored(relative,ignorePrefixes)||ignoreNames.includes(path.basename(relative))))return;
+    if(entries.length>=maxEntries)throw Object.assign(new Error('目录快照超过条目上限。'),{code:'HOST_P0_SNAPSHOT_LIMIT'});
     const stat=await fsp.lstat(full);
     const base={path:relative.split(path.sep).join('/'),mode:stat.mode&0o7777};
     if(stat.isDirectory()){
       counts.directories+=1;entries.push({...base,type:'directory'});
+      if(depth>=maxDepth)return;
       const names=(await fsp.readdir(full)).sort((a,b)=>a.localeCompare(b));
-      for(const name of names)await walk(path.join(full,name),relative==='.'?name:path.join(relative,name));
+      for(const name of names)await walk(path.join(full,name),relative==='.'?name:path.join(relative,name),depth+1);
       return;
     }
     if(stat.isFile()){
@@ -108,10 +110,10 @@ export async function snapshotTree(root,{maxEntries=100_000,maxDurationMs=60_000
     counts.other+=1;entries.push({...base,type:'other',size:stat.size,mtimeMs:Math.trunc(stat.mtimeMs)});
   }
 
-  await walk(resolved,'.');
+  await walk(resolved,'.',0);
   entries.sort((a,b)=>a.path.localeCompare(b.path));
   const digest=crypto.createHash('sha256').update(JSON.stringify(entries)).digest('hex');
-  return Object.freeze({rootFingerprint:pathFingerprint(resolved),entryCount:entries.length,digest,counts});
+  return Object.freeze({rootFingerprint:pathFingerprint(resolved),entryCount:entries.length,digest,counts,maxDepth:Number.isFinite(maxDepth)?maxDepth:null});
 }
 
 export function compareSnapshots(before,after){
