@@ -70,6 +70,7 @@ test('real JsonStore persists GetNote integration and imported note metadata',as
   assert.equal(todo.source,'getnote_cli');
   assert.equal(todo.externalIdentityKind,'text_fingerprint');
   assert.equal(todo.dueDate,'2026-08-20');
+  assert.equal(todo.sourceDueDate,'2026-08-20');
   assert.equal(todo.dueAt,'2026-08-20T10:00:00');
   assert.equal(todo.timeZone,'Asia/Shanghai');
   assert.equal(todo.sourceNoteId,'note-1');
@@ -86,7 +87,7 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
       id:'p_local',name:'本地项目',intro:'',businessId:'biz_ai',folder:'本地项目',createdAt:'2026-08-01T00:00:00Z',startDate:'2026-08-01',endDate:'2026-09-01',git:'',feishu:'',sourceDescription:'',completed:false,archived:false
     });
     state.todos.push({
-      id:'td_stable',title:'联系供应商',context:'',dueDate:'2026-08-20',done:false,projectId:'p_local',createdAt:'2026-08-10T00:00:00Z',
+      id:'td_stable',title:'联系供应商',context:'',dueDate:'2026-08-20',sourceDueDate:'2026-08-20',done:false,projectId:'p_local',createdAt:'2026-08-10T00:00:00Z',
       priority:6,priorityLabel:'用户重要',tags:['客户','本地'],source:'getnote_cli',externalId:'stable-external',sourceNoteId:'note-stable'
     });
   });
@@ -104,6 +105,8 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
   assert.equal(inbox.localPriority,6);
   assert.equal(inbox.localPriorityLabel,'用户重要');
   assert.deepEqual(inbox.localTags,['客户','本地']);
+  assert.equal(inbox.sourceDueDate,null);
+  assert.equal(inbox.sourcePreviousDueDate,'2026-08-20');
 
   await store.updateState(state=>applyGetnoteTaskSnapshot(state,{active:[sourceTask({
     externalId:'stable-external',sourceNoteId:'note-stable',title:'联系供应商',dueDate:'2026-08-28',dueAt:'2026-08-28'
@@ -118,6 +121,7 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
   assert.equal(todo.priorityLabel,'用户重要');
   assert.deepEqual(todo.tags,['客户','本地']);
   assert.equal(todo.createdAt,'2026-08-10T00:00:00Z');
+  assert.equal(todo.sourceDueDate,'2026-08-28');
 });
 
 test('unsafe Feishu journal URLs are rejected even when the integration remains disabled',async t=>{
