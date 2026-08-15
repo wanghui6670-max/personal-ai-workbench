@@ -68,21 +68,17 @@ VPS/Docker 可以通过 `private_http` 连接宿主机只读 Runtime sidecar；W
 
 ### 稳定身份
 
-优先使用上游稳定 todo ID：
+当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只有 `text` 和 `completed`，**没有 per-todo 稳定 ID**。
 
-```text
-todo_id / todoId / task_id / taskId / id
-```
-
-有 source todo ID 时，以 `noteId + sourceTodoId` 派生外部 ID；文本编辑不改变身份。
-
-没有稳定 source ID 时，继续使用历史兼容公式：
+当前版本固定使用历史兼容 `text_fingerprint`：
 
 ```text
 noteId + 规范化待办文本 + 同文出现序号
 ```
 
-旧 fingerprint 向 source ID 的迁移必须无歧义；fallback 文案改名也只有同 note 恰好一旧一新时才自动继承。不能按相似度批量猜测合并。
+文案编辑会改变原始 fingerprint。去掉精确匹配后，只有同一 note 恰好一旧一新时，才允许新 fingerprint 继承旧 Workbench 实体；多个同时变化属于歧义，不按语义相似度猜测合并。
+
+即使响应未来出现未文档化的 `id` 字段，当前版本也不会偷偷改变身份算法。只有官方合同明确提供稳定 per-todo ID 后，才能通过新的显式、受测版本升级身份模型。
 
 ### 日期与时区
 
@@ -100,7 +96,7 @@ noteId + 规范化待办文本 + 同文出现序号
 - 来源标题；
 - 来源明确日期/时刻；
 - 来源笔记引用；
-- source todo ID；
+- `externalIdentityKind=text_fingerprint` 与来源身份元数据；
 - 上游明确完成状态。
 
 来源同步不得擅自覆盖：
@@ -190,6 +186,7 @@ journal.status = not_configured
 - operationId 必须根据实际写入正文生成。
 - 相同 operationId + 相同正文是安全重放。
 - 相同 operationId + 不同正文返回 `409` 并停止。
+- 飞书可能把单个段落中的换行在读回时折叠；幂等校验只把这种换行边界视为等价，不忽略普通空格或其他正文差异。
 - 飞书 sink 写入/读回失败只影响该 sink 状态，不撤销已经成功的 Workbench 核心提交。
 - 飞书日记正文不得复制到本地 activity。
 
