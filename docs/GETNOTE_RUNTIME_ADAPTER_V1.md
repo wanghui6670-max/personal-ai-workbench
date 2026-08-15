@@ -46,6 +46,16 @@ GET /v1/notes/:noteId
 
 All data routes require a bearer service token of at least 32 characters. The health route contains no note data.
 
+## Pagination contract
+
+Current official GetNote CLI uses `data.cursor` as the recommended continuation cursor. Workbench therefore prefers:
+
+```text
+data.cursor
+```
+
+and accepts `next_cursor` / `nextCursor` only as compatibility fallbacks. Cursor values stay strings end to end so 64-bit note identifiers are never coerced through JavaScript numbers.
+
 ## Runtime modes
 
 Default development mode:
@@ -67,7 +77,7 @@ The client rejects public Internet origins. Accepted runtime locations are loopb
 
 ## Sidecar process
 
-The sidecar still requires a real authenticated GetNote CLI on the machine where it runs. This repository does not yet package GetNote credentials into the Workbench image.
+The sidecar still requires a real authenticated GetNote CLI on the machine where it runs. This repository does not package GetNote credentials into the Workbench image.
 
 ```dotenv
 GETNOTE_RUNTIME_HOST=127.0.0.1
@@ -88,6 +98,21 @@ GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1
 ```
 
 and a valid service token is configured.
+
+## Child-process environment isolation
+
+`local_cli` and the sidecar do **not** forward the full Workbench process environment to `getnote`. The child receives only the minimum runtime/network environment plus GetNote authentication overrides:
+
+```text
+HOME / PATH / USER / LOGNAME / TMPDIR
+LANG / LC_*
+XDG_CONFIG_HOME
+HTTP(S)_PROXY / ALL_PROXY / NO_PROXY
+SSL_CERT_FILE / SSL_CERT_DIR / NODE_EXTRA_CA_CERTS
+GETNOTE_API_KEY / GETNOTE_CLIENT_ID
+```
+
+Workbench password/session secrets, AI Provider keys, Joycrew tokens and the private Runtime service token are not exposed to the GetNote CLI child process. `npm run doctor` uses the same environment policy for `getnote doctor -o json`.
 
 ## Security and product boundaries
 
