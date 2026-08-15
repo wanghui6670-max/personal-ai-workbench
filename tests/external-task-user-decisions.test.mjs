@@ -156,3 +156,48 @@ test('editing a GetNote Todo due date explicitly transfers due-date ownership to
   assert.equal(state.todos[0].sourceDueDate,'2026-08-26');
   assert.equal(state.todos[0].dueDateOwner,'user');
 });
+
+test('source-decision state rejects narrative payload fields and unsupported dispositions',async t=>{
+  const store=await fixture(t);
+  await assert.rejects(
+    store.updateState(state=>{
+      state.externalTaskDecisions=[{
+        id:'xd_safe',
+        source:'getnote_cli',
+        externalId:'getnote-task-1',
+        sourceNoteId:'note-1',
+        disposition:'dismissed',
+        decidedAt:'2026-08-16T00:00:00Z',
+        text:'不应进入 tombstone 的正文'
+      }];
+    }),
+    /不是允许的来源决策字段/
+  );
+
+  await assert.rejects(
+    store.updateState(state=>{
+      state.externalTaskDecisions=[{
+        id:'xd_safe',
+        source:'getnote_cli',
+        externalId:'getnote-task-1',
+        sourceNoteId:'note-1',
+        disposition:'archive_forever',
+        decidedAt:'2026-08-16T00:00:00Z'
+      }];
+    }),
+    /disposition 不受支持/
+  );
+});
+
+test('GetNote due-date ownership is fail-closed to source or user',async t=>{
+  const store=await fixture(t);
+  await store.updateState(state=>applyGetnoteTaskSnapshot(state,{active:[sourceTask({
+    dueDate:'2026-08-20',
+    dueAt:'2026-08-20'
+  })]}));
+
+  await assert.rejects(
+    store.updateState(state=>{state.todos[0].dueDateOwner='assistant';}),
+    /dueDateOwner 必须是 source 或 user/
+  );
+});
