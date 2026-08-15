@@ -52,7 +52,7 @@ test('external task API documents exact MCP tools, confirmation boundary, and fi
   assert.match(pipeline,/旧的 `feishu_inbox_sync` 已从 AI\/MCP 白名单移除/);
 
   assert.match(taskCli,/createGetnoteReader/);
-  assert.match(taskCli,/runtime\.listNotes/);
+  assert.match(taskCli,/reader\.listNotes/);
   assert.match(taskCli,/runtime\.fetchTodos/);
   assert.match(taskCli,/meeting_todos/);
   assert.doesNotMatch(taskCli,/node:child_process|execFile\(/);
