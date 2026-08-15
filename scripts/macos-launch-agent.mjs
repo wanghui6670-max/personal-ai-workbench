@@ -41,9 +41,9 @@ async function loaded(){return (await execResult('launchctl',['print',target()])
 async function bootout(){await execResult('launchctl',['bootout',domain(),plistPath]);}
 async function bootstrap(){
   const result=await execResult('launchctl',['bootstrap',domain(),plistPath]);
-  if(result.code!==0)throw new Error(`launchctl bootstrap 失败：${String(result.stderr).trim()}`);
-  const kick=await execResult('launchctl',['kickstart','-k',target()]);
-  if(kick.code!==0)throw new Error(`launchctl kickstart 失败：${String(kick.stderr).trim()}`);
+  if(result.code!==0)throw new Error(`launchctl bootstrap 失败：${String(result.stderr||result.stdout).trim()}`);
+  // The plist uses RunAtLoad=true, so a successful bootstrap is the start trigger.
+  // A second immediate kickstart can race launchd registration on real macOS hosts.
 }
 function portInUse(host,port){return new Promise(resolve=>{const socket=net.connect({host,port});const finish=value=>{socket.destroy();resolve(value);};socket.setTimeout(500);socket.once('connect',()=>finish(true));socket.once('timeout',()=>finish(false));socket.once('error',()=>finish(false));});}
 async function waitForPortFree(host,port,timeoutMs=5000){const started=Date.now();while(Date.now()-started<timeoutMs){if(!(await portInUse(host,port)))return true;await new Promise(resolve=>setTimeout(resolve,100));}return false;}
