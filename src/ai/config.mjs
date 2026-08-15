@@ -9,10 +9,12 @@ export const AI_DEFAULT_TIMEOUT_MS=120_000;
 export const AI_DEFAULT_MAX_OUTPUT_TOKENS=32_000;
 export const AI_MAX_OUTPUT_TOKENS_LIMIT=64_000;
 export const AI_DEFAULT_MAX_RESPONSE_BYTES=2_000_000;
-// The console planner is deliberately a first-class workflow.  It may only
+// The console planner is deliberately a first-class workflow. It may only
 // propose one registered MCP tool call (or ask a clarification); the registry
-// still owns argument validation, confirmation and execution.
-export const AI_WORKFLOWS=Object.freeze(['project_creation','project_progress','morning_dialogue','ai_console']);
+// still owns argument validation, confirmation and execution. GetNote insight
+// is also registered explicitly so note content cannot piggy-back on another
+// workflow's provider allow-list.
+export const AI_WORKFLOWS=Object.freeze(['project_creation','project_progress','morning_dialogue','ai_console','getnote_insight']);
 
 const PROFILE_ALIASES=new Map([
   ['openai','openai_luna'],
