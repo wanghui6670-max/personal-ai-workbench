@@ -167,6 +167,7 @@ getnote doctor -o json
 
 - `listNotes` 分页返回最近笔记；note ID 按字符串处理。
 - `fetchTodos` / `getnote note todos` 返回 `meeting_todos.source` 和 `meeting_todos.items`。
+- 当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只有 `text` 和 `completed`，没有 per-todo 稳定 ID。
 - 没有明确待办章节时接受空列表；不使用模型猜测。
 - 设置不能提供 shell、二进制路径、命令模板、认证 token 或自定义 CLI 参数。
 
@@ -244,21 +245,14 @@ Workbench committed
 
 稳定外部 ID：
 
-```text
-有 source todo ID:
-SHA-256(noteId + sourceTodoId)
+当前版本固定使用历史兼容 `text_fingerprint`：
 
-无 source todo ID:
+```text
 SHA-256(noteId + 规范化待办文本 + 同文出现序号)
+externalIdentityKind = text_fingerprint
 ```
 
-上游 source todo ID 识别字段：
-
-```text
-todo_id / todoId / task_id / taskId / id
-```
-
-旧 fingerprint 向 source ID 迁移只有无歧义时才发生；不会按语义相似度批量猜测合并。
+文案变化会改变原始 fingerprint。去掉精确匹配后，只有同一 note 恰好一旧一新时才继承旧 Workbench 实体；多项同时变化不做语义相似度猜测。未文档化的未来 `id` 字段不会偷偷改变当前身份语义。只有官方合同明确提供稳定 per-todo ID 后，才能通过新版本显式升级身份模型。
 
 日期语义：
 
@@ -271,6 +265,7 @@ todo_id / todoId / task_id / taskId / id
 - 未完成 + 有明确日期 → 正式 Todo；
 - 未完成 + 日期不确定 → Workbench Inbox；
 - Todo ↔ Inbox 因来源日期变化迁移时保留 Workbench 实体 ID、`projectId`、本地 priority/priorityLabel、tags 和创建时间；
+- 用户手工覆盖本地 `dueDate` 后，后续来源只更新 `sourceDueDate`，不覆盖用户日期；
 - 已被用户选入 Today 的 Todo，如果来源日期消失，仍保留 Todo 与 Today，`sourceDueDate=null`；
 - `completed=true` → 已有 Todo 标记完成并移出 Today；
 - 本轮扫描缺失 → 不推断完成；
@@ -298,7 +293,8 @@ todo_id / todoId / task_id / taskId / id
     "reconciled": 1,
     "todayPreserved": 1,
     "movedToInbox": 1,
-    "movedToTodo": 0
+    "movedToTodo": 0,
+    "localDuePreserved": 1
   },
   "journal": {
     "enabled": false,
@@ -345,8 +341,9 @@ todo_id / todoId / task_id / taskId / id
 幂等规则：
 
 - 同一 operationId + 同正文：安全重放；
+- `lark-cli` 读回同一段落时可能折叠段内换行；幂等比较只把这种换行边界视为等价，不忽略普通空格或其他正文差异；
 - 同一 operationId + 不同正文：`409 FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT`；
-- 写入后必须按 operationId 唯一读回，并校验正文一致。
+- 写入后必须按 operationId 唯一读回，并在上述规范化后校验正文一致。
 
 ### 外部管线互斥
 
