@@ -4,10 +4,11 @@ import fsp from 'node:fs/promises';
 
 async function read(file){return fsp.readFile(file,'utf8');}
 
-test('Harness Copilot 未启用时不渲染卡片',async()=>{
+test('DSH 未启用时仍保留 DSH 占位，不回退旧 AI 面板',async()=>{
   const script=await read('public/harness-navigator.js');
-  assert.match(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
-  assert.match(script,/if\(!visible\)\{root\?\.remove\(\);panel\.classList\.remove\('harness-native'\);lastMountedHtml='';return;\}/);
+  assert.match(script,/panel\.classList\.add\('harness-primary'\)/);
+  assert.match(script,/unavailableHtml\(status,statusMessage\)/);
+  assert.doesNotMatch(script,/if\(!visible\)\{root\?\.remove/);
 });
 
 test('AI 面板文案是大白话，工程术语已移除',async()=>{
