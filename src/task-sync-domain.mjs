@@ -175,13 +175,23 @@ function taskSnapshotText(source,date){
   return lines.join('\n');
 }
 
-function summaryText(state,date,notes=''){
+function timestampDateOnly(value,timeZone){
+  const text=String(value||'').trim();
+  if(!text)return null;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(text))return text;
+  const date=new Date(text);
+  if(!Number.isFinite(date.getTime()))return null;
+  return getnoteDateOnlyInTimeZone(date,timeZone);
+}
+function summaryText(state,date,notes='',timeZone='Asia/Shanghai'){
   const externalTodos=state.todos.filter(todo=>todo.source==='getnote_cli');
-  const completed=externalTodos.filter(todo=>todo.done&&String(todo.completedAt||'').slice(0,10)===date);
+  const completed=externalTodos.filter(todo=>todo.done&&timestampDateOnly(todo.completedAt,timeZone)===date);
   const active=externalTodos.filter(todo=>!todo.done);
   const dueToday=active.filter(todo=>todo.dueDate===date);
   const overdue=active.filter(todo=>todo.dueDate<date);
-  const activities=state.activities.filter(activity=>activity.type!=='daily_summary_published'&&String(activity.at||'').slice(0,10)===date).slice(0,30);
+  const activities=state.activities
+    .filter(activity=>activity.type!=='daily_summary_published'&&timestampDateOnly(activity.at,timeZone)===date)
+    .slice(0,30);
   const lines=[`日期：${date}`,`今日完成：${completed.length}；今日到期未完成：${dueToday.length}；逾期待办：${overdue.length}；当前得到大脑待办：${active.length}`];
   if(completed.length){lines.push('完成事项：');completed.slice(0,30).forEach((todo,index)=>lines.push(`${index+1}. ${todo.title}`));}
   if(dueToday.length){lines.push('今日仍未完成：');dueToday.slice(0,30).forEach((todo,index)=>lines.push(`${index+1}. ${todo.title}`));}
@@ -305,7 +315,7 @@ export async function publishDailySummary({
   if(!integration.journalDocumentUrl)throw new ExternalTaskIntegrationError('尚未配置飞书每日工作日记 URL；任务同步不受影响，但每日总结需要先配置飞书沉淀目标。',{code:'FEISHU_DAILY_JOURNAL_NOT_CONFIGURED',statusCode:409});
   const summaryDate=date||getnoteDateOnlyInTimeZone(new Date(),integration.timeZone);
   const state=await store.readState();
-  const text=summaryText(state,summaryDate,notes);
+  const text=summaryText(state,summaryDate,notes,integration.timeZone);
   const op=operationId('summary',summaryDate,text);
   const journal=await journalClient.appendSummary(integration.journalDocumentUrl,text,{operationId:op,heading:integration.journalHeading});
   await store.updateState(current=>{addActivity(current,{type:'daily_summary_published',text:`${summaryDate} 的每日总结已沉淀到飞书工作日记。`});});
