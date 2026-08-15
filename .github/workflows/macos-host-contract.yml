@@ -75,18 +75,21 @@ jobs:
       - name: Validate generated LaunchAgent with plutil
         run: |
           node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
           import fsp from 'node:fs/promises';
           import os from 'node:os';
           import path from 'node:path';
           import { buildMacosLaunchAgentPlist } from './src/host-p0.mjs';
           const target=path.join(os.tmpdir(),'com.dongjue.personal-ai-workbench.plist');
+          const buildCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
           await fsp.writeFile(target,buildMacosLaunchAgentPlist({
             appRoot:process.cwd(),
             nodePath:process.execPath,
             home:os.homedir(),
             pathEnv:process.env.PATH,
             stdoutPath:path.join(os.tmpdir(),'workbench.log'),
-            stderrPath:path.join(os.tmpdir(),'workbench.error.log')
+            stderrPath:path.join(os.tmpdir(),'workbench.error.log'),
+            buildCommit
           }),'utf8');
           console.log(target);
           NODE
