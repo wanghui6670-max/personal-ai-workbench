@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
+import {larkCliEnv} from './external-cli-env.mjs';
 
 const execFileAsync=promisify(execFile);
 const DEFAULT_TIMEOUT_MS=30_000;
@@ -90,9 +91,9 @@ function cliError(error,action){
   return new FeishuDailyJournalError(message,{cause:error});
 }
 
-async function runCli(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
+async function runCli(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
   try{
-    const result=await exec('lark-cli',args,{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true});
+    const result=await exec('lark-cli',args,{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true,env:larkCliEnv(processEnv)});
     return extractJson(result.stdout);
   }catch(error){throw cliError(error,action);}
 }
@@ -163,8 +164,8 @@ function normalizeText(value){
   return text;
 }
 
-export function createFeishuDailyJournalClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
-  const options={exec,timeoutMs};
+export function createFeishuDailyJournalClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
+  const options={exec,timeoutMs,processEnv};
   async function fetchRecords(documentUrl,{heading=DAILY_JOURNAL_HEADING}={}){
     const document=await fetchDocument(documentUrl,options);
     return{...document,...parseFeishuDailyJournalXml(document.content,{heading}),heading};
