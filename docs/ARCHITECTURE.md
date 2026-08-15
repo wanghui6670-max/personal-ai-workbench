@@ -62,8 +62,8 @@ CLI 登录和凭证因此留在宿主机，不打进 Workbench 镜像。
 - 两组笔记按 note ID 去重后逐篇执行 `fetchTodos` / `getnote note todos`；
 - 只读取 `meeting_todos.source` 和 `meeting_todos.items`；
 - 上游没有明确待办章节时接受空列表，不使用模型猜测；
-- 如果 item 有 `todo_id / todoId / task_id / taskId / id`，优先用 `noteId + sourceTodoId` 派生稳定外部 ID；
-- 没有 source todo ID 时，继续使用历史兼容的 `noteId + 规范化文本 + 同文序号` fingerprint；
+- 当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只有 `text + completed`，没有 per-todo 稳定 ID；
+- 当前身份固定为历史兼容 `noteId + 规范化文本 + 同文序号` 的 `text_fingerprint`；未文档化 `id` 字段不会改变身份语义；
 - 相对日期锚点固定为 `createdAt → updatedAt → 当前日期 fallback`；
 - 显式携带 IANA 时区，默认 `Asia/Shanghai`；
 - 对“下周”“稍后”“尽快”等模糊表达返回无日期；
@@ -73,11 +73,12 @@ CLI 登录和凭证因此留在宿主机，不打进 Workbench 镜像。
 
 负责来源身份和 Workbench 本地状态对账：
 
-- 新 source todo ID 只在同 note + 同规范化标题唯一匹配时迁移旧 fingerprint 实体；
-- fallback 文案变化只在同 note 恰好一旧一新的无歧义场景自动继承；
+- 文案变化会改变原始 fingerprint；去掉精确匹配后，仅在同 note 恰好一旧一新的无歧义场景继承旧 Workbench 实体；
+- 同一 note 多项同时变化时不做语义猜测或批量自动合并；
 - 已存在 Todo 更新时保留用户拥有的 `projectId / priority / priorityLabel / tags / createdAt`；
 - Todo 与 Inbox 因来源日期出现/消失互相迁移时保留 Workbench 实体 ID 和上述本地字段；
 - 已经由用户选入 Today 的 Todo，即使来源日期后来消失，也保留 Todo 与 Today 选择，并以 `sourceDueDate=null` 表示来源计划已撤回；
+- 用户手工修改过本地截止日期后，以 `sourceDueDate` 和 `dueDate` 分离来源计划与用户决定，后续来源更新不覆盖本地日期；
 - 只有来源明确 `completed=true` 才标记完成并移出 Today；
 - 某条来源任务本轮没有出现，不据此猜测完成。
 
@@ -156,7 +157,8 @@ fetch
 
 - 同 ID + 同正文安全重放；
 - 同 ID + 不同正文返回冲突；
-- 写后读回正文必须一致；
+- `lark-cli` 可能把同一段落内部换行在读回时折叠，正文比较只把这种换行边界视为等价；普通空格和其他正文差异仍保留，因此真实不同正文继续 fail closed；
+- 写后读回正文必须在上述规范化后等价；
 - 任务快照和每日总结正文只保存飞书，不进入本地 activity；
 - 每日总结只能由用户明确触发；
 - 每日总结要求已经配置飞书日记 URL，但这不影响 GetNote → Workbench 核心同步。
@@ -348,11 +350,11 @@ backup v2：
 - 固定 `getnote` 命令、Reader transport 边界、分页和字符串 note ID；
 - 最近 N 篇 + 未完成旧 note 追踪；
 - `meeting_todos.source/items` 与空待办列表；
-- source todo ID 优先、legacy fallback ID 兼容和保守身份迁移；
+- 当前 `text + completed` schema、`text_fingerprint` 身份、未文档化 `id` 不改变语义，以及同 note 一对一文案继承；
 - `createdAt` 相对日期锚点与显式 IANA 时区；
 - Todo/Inbox 跨状态时的 Workbench 实体 ID、项目、优先级、tags 和 Today 所有权；
 - Workbench-first 事务顺序与飞书/ICS sink fail-isolation；
-- 飞书 operationId 重放/冲突；
+- 飞书 operationId 重放/冲突和段落换行折叠读回兼容；
 - ICS 全天、TZID 定时、瞬时事件、权限和原子写；
 - MCP 确认门和旧工具退休；
 - browser 静态合同；
