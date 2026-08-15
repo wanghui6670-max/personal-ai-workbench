@@ -62,12 +62,15 @@ jobs:
           node --check harness/joycrew-schema.mjs
           node --check harness/joycrew-mcp-server.mjs
           node --check harness/joycrew-sdk-server.mjs
+          node --check harness/employee-sdk-server.mjs
+          node --check harness/employee-runtime-server.mjs
           node --check harness/runtime-bin.mjs
           node --check scripts/doctor.mjs
           node --check scripts/migrate-project-records.mjs
           node --check scripts/test-by-file.mjs
           node --check scripts/harness-check.mjs
           node --check scripts/harness-e2e.mjs
+          node --check scripts/harness-employee-e2e.mjs
           node --check scripts/p0-deployment-acceptance.mjs
           node --check scripts/p0-host-preflight.mjs
           node --check scripts/macos-bootstrap.mjs
@@ -96,10 +99,12 @@ jobs:
           node-version: '24'
       - name: Install pinned isolated Harness runtime
         run: npm run harness:install
-      - name: Compile unified Copilot composition
+      - name: Compile unified Copilot and employee compositions
         run: npm run harness:check
-      - name: Run deterministic Agent-to-tool end-to-end
+      - name: Run deterministic Navigator Agent-to-tool end-to-end
         run: npm run harness:e2e
+      - name: Run deterministic employee Agent end-to-end
+        run: npm run harness:employee:e2e
 
   docker-smoke:
     runs-on: ubuntu-latest
@@ -110,6 +115,28 @@ jobs:
         run: docker build -t personal-ai-workbench:v2 .
       - name: Initialize Harness inside production image
         run: docker run --rm --entrypoint node personal-ai-workbench:v2 scripts/harness-check.mjs
+      - name: Start employee Harness sidecar from production image
+        run: |
+          set -euo pipefail
+          docker run -d --name employee-harness-smoke \
+            -p 127.0.0.1:49300:49300 \
+            -e EMPLOYEE_HARNESS_HOST=0.0.0.0 \
+            -e EMPLOYEE_HARNESS_PORT=49300 \
+            -e EMPLOYEE_HARNESS_ALLOW_PRIVATE_BIND=1 \
+            -e EMPLOYEE_HARNESS_SERVICE_TOKEN=employee-harness-smoke-token-1234567890 \
+            --entrypoint node personal-ai-workbench:v2 harness/employee-runtime-server.mjs
+          trap 'docker rm -f employee-harness-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:49300/health >/tmp/employee-harness-health.json; then break; fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs employee-harness-smoke || true
+              exit 1
+            fi
+            sleep 1
+          done
+          node -e "const fs=require('node:fs'); const v=JSON.parse(fs.readFileSync('/tmp/employee-harness-health.json','utf8')); if(v.status!=='ok'||v.protocol!=='joycrew.deepseek-harness.v1'||v.harnessVersion!=='0.1.0-rc.6'||v.mode!=='evidence_only') throw new Error('unexpected employee harness health');"
+          docker rm -f employee-harness-smoke >/dev/null
+          trap - EXIT
       - name: Start unified Workbench with Joycrew disabled and verify fail-isolation
         run: |
           set -euo pipefail

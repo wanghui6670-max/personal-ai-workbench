@@ -20,7 +20,9 @@
     "harness:install": "npm ci --prefix harness --ignore-scripts --no-audit --no-fund",
     "harness:check": "node scripts/harness-check.mjs",
     "harness:e2e": "node scripts/harness-e2e.mjs",
-    "verify": "npm run test:files && npm run harness:check && npm run harness:e2e"
+    "harness:employee": "node harness/employee-runtime-server.mjs",
+    "harness:employee:e2e": "node scripts/harness-employee-e2e.mjs",
+    "verify": "npm run test:files && npm run harness:check && npm run harness:e2e && npm run harness:employee:e2e"
   },
   "engines": {
     "node": ">=24"
