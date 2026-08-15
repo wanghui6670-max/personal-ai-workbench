@@ -4,7 +4,7 @@
 
 所有 `POST`、`PATCH`、`DELETE` 请求必须发送 `Content-Type: application/json`。浏览器请求如果带 `Origin`，该值必须属于默认本机 origin 或 `TRUSTED_ORIGINS`。所有请求仍校验实际 `Host`，不会采信 `X-Forwarded-*` 自动放宽。
 
-个人待办的正式来源是固定得到大脑 CLI `getnote`；飞书《每日工作日记》是任务快照和每日总结的沉淀目标。本机日历通过私有 ICS 文件生成。飞书不再是个人待办来源。外部任务主链路使用受限 MCP 工具，不提供任意 shell、任意二进制或任意文件路径 API。
+个人待办事实来自得到大脑明确 `meeting_todos`；Personal AI Workbench 是个人 Todo、Inbox、Today 和本地任务状态真源。GetNote 通过统一只读 `GetNoteReader` 接入；飞书《每日工作日记》和私有 ICS 都是可选派生 sink。飞书不再是个人待办来源。外部任务主链路使用受限 MCP 工具，不提供任意 shell、任意二进制或任意文件路径 API。
 
 ## 1. 健康、状态、导出与备份
 
@@ -16,11 +16,11 @@
 {"ok":false,"status":"not_ready"}
 ```
 
-`200` 只证明当前文件系统和配置可用，不证明得到大脑、飞书、系统日历、OpenAI、浏览器或 iPhone 已 live 验证。
+`200` 只证明当前文件系统和配置可用，不证明得到大脑、GetNote Runtime、飞书、系统日历、OpenAI、浏览器或 iPhone 已 live 验证。
 
 ### `GET /api/state`
 
-返回前端派生状态和非敏感集成设置。项目分析正文、飞书每日总结正文和 CLI 凭证不在响应中。
+返回前端派生状态和非敏感集成设置。项目分析正文、飞书每日总结正文、GetNote service token 和 CLI 凭证不在响应中。
 
 外部任务管线设置位于：
 
@@ -35,17 +35,34 @@ config.settings.externalTaskPipeline
   "enabled": true,
   "provider": "getnote_cli",
   "noteLimit": 100,
-  "journalDocumentUrl": "https://example.feishu.cn/wiki/token",
+  "timeZone": "Asia/Shanghai",
+  "journalDocumentUrl": "",
   "journalHeading": "每日工作日记",
   "calendarEnabled": true,
   "calendarName": "个人 AI 工作台",
-  "lastSyncAt": "2026-08-14T02:00:00.000Z",
+  "lastSyncAt": "2026-08-15T12:00:00.000Z",
   "lastSyncStatus": "ok",
-  "lastSourceNoteCount": 42,
+  "lastRecentNoteCount": 100,
+  "lastTrackedNoteCount": 4,
+  "lastSourceNoteCount": 104,
   "lastParsedTodoCount": 18,
+  "lastJournalStatus": "not_configured",
+  "lastCalendarStatus": "ok",
   "lastCalendarPath": "/private/data/calendar/personal-ai-workbench.ics"
 }
 ```
+
+`lastSyncStatus` 可能为：
+
+```text
+not_synced
+ok
+ok_with_sink_errors
+error
+needs_reconfiguration
+```
+
+其中 `ok_with_sink_errors` 表示 GetNote → Workbench 核心事务已经成功，飞书或 ICS 某个派生 sink 失败；不会回滚个人任务状态。
 
 若读取到历史误配置 `provider=dida_cli` 或 `cliFlavor`，领域规范化结果会把集成停用并返回 `lastSyncStatus=needs_reconfiguration`，直到用户明确保存得到大脑设置。
 
@@ -58,6 +75,7 @@ config.settings.externalTaskPipeline
 - 项目记录跨资源恢复凭据；
 - 飞书项目或每日工作日记正文；
 - 得到大脑或飞书 CLI 登录状态；
+- GetNote Runtime service token；
 - 本机日历客户端配置；
 - 任何凭证。
 
@@ -125,24 +143,36 @@ MCP 调用格式：
 
 ## 3. 得到大脑外部待办管线
 
-### 固定 CLI 合同
+### GetNoteReader 合同
 
-程序只执行：
+业务层只依赖：
+
+```text
+listNotes
+fetchTodos
+fetchNote
+status
+```
+
+`local_cli` transport 只执行固定命令：
 
 ```text
 getnote notes --limit <20-500> [--cursor <cursor>] -o json
 getnote note todos <note_id> -o json
+getnote note <note_id> -o json
 getnote doctor -o json
 ```
 
-- `getnote notes` 分页返回最近笔记；note ID 按字符串处理。
-- `getnote note todos` 返回 `meeting_todos.source` 和 `meeting_todos.items`。
-- 没有明确待办章节时，接受空列表；不使用模型猜测。
+`private_http` transport 只连接受控 loopback/私网/Docker 内部 Runtime，并使用 32+ 字符 service token；拒绝公网 origin、redirect、任意 URL 和任意命令。
+
+- `listNotes` 分页返回最近笔记；note ID 按字符串处理。
+- `fetchTodos` / `getnote note todos` 返回 `meeting_todos.source` 和 `meeting_todos.items`。
+- 没有明确待办章节时接受空列表；不使用模型猜测。
 - 设置不能提供 shell、二进制路径、命令模板、认证 token 或自定义 CLI 参数。
 
 ### `external_task_integration_read`
 
-只读，返回最近笔记扫描数量、飞书日记目标、本机日历设置和最近同步机器状态，不返回得到大脑或飞书凭证。
+只读，返回最近笔记扫描数量、任务时区、可选飞书日记目标、ICS 设置和最近同步机器状态，不返回得到大脑、Runtime 或飞书凭证。
 
 ```json
 {
@@ -164,7 +194,8 @@ getnote doctor -o json
 {
   "enabled": true,
   "noteLimit": 100,
-  "journalDocumentUrl": "https://example.feishu.cn/wiki/token",
+  "timeZone": "Asia/Shanghai",
+  "journalDocumentUrl": "",
   "journalHeading": "每日工作日记",
   "calendarEnabled": true,
   "calendarName": "个人 AI 工作台"
@@ -174,48 +205,87 @@ getnote doctor -o json
 约束：
 
 - `noteLimit` 必须是 20–500 的整数；
-- 程序始终执行固定 `getnote` 二进制；
-- 启用时必须提供官方 Feishu/Lark HTTPS 文档 URL；
+- `timeZone` 必须是有效 IANA 时区；默认 `Asia/Shanghai`；
+- `journalDocumentUrl` 可为空；飞书日记不是核心同步前置条件；
+- 非空时必须是受支持的 Feishu/Lark HTTPS 文档 URL；
 - 不接受命令模板、shell、二进制路径、ICS 路径或凭证；
 - 启用后清除旧 `config.dataSource.provider=feishu_doc` 个人收件箱来源；
-- 若历史配置误用了 `provider=dida_cli` 或 `cliFlavor`，用户确认新设置时仅清理 `source=dida_cli` 的机器导入待办和收件箱项；手工与 Capture 数据保留。
+- 若历史配置误用了 `provider=dida_cli` 或 `cliFlavor`，用户确认新设置时仅清理 `source=dida_cli` 的机器导入 Todo 和 Inbox；手工与 Capture 数据保留。
 
 ### `external_tasks_sync`
 
-需要确认。事务顺序：
+需要确认。每次同步读取：
 
 ```text
-分页读取最近笔记
-→ 对每篇笔记执行 getnote note todos
-→ 解析 meeting_todos 并生成稳定外部 ID
-→ 生成实际飞书快照正文和 operationId
-→ 飞书写入并读回
-→ 私有 ICS 原子替换
-→ Workbench 待办/收件箱状态提交
-→ 不含正文的审计事件
+最近 N 篇笔记
++
+Workbench 中仍未完成 GetNote Todo/Inbox 对应的旧 sourceNoteId
 ```
+
+按 note ID 去重后逐篇读取 `meeting_todos`。
+
+核心事务顺序：
+
+```text
+GetNote read
+→ Normalize / Reconcile
+→ Workbench state 原子提交
+```
+
+Workbench 提交成功后才尝试：
+
+```text
+Workbench committed
+       ├─→ 飞书每日任务快照（可选 sink）
+       └─→ 私有 ICS 原子重建（可选 sink）
+```
+
+飞书或 ICS 失败不回滚 Workbench；返回独立 sink 状态，并把 `lastSyncStatus` 记为 `ok_with_sink_errors`。
 
 稳定外部 ID：
 
 ```text
-SHA-256(来源 note ID + 规范化待办文本 + 同文出现序号)
+有 source todo ID:
+SHA-256(noteId + sourceTodoId)
+
+无 source todo ID:
+SHA-256(noteId + 规范化待办文本 + 同文出现序号)
 ```
 
-映射：
+上游 source todo ID 识别字段：
 
-- 未完成 + 有明确日期 → 正式待办；
-- 未完成 + 日期不确定 → Workbench 收件箱；
-- `completed=true` → 已有待办标记完成并移出今日；
+```text
+todo_id / todoId / task_id / taskId / id
+```
+
+旧 fingerprint 向 source ID 迁移只有无歧义时才发生；不会按语义相似度批量猜测合并。
+
+日期语义：
+
+- 相对日期锚点：`note.createdAt → note.updatedAt → 当前日期 fallback`；
+- “下周”“稍后”“尽快”等模糊时间保持无日期；
+- 明确本地时刻携带配置的 IANA 时区，不依赖 VPS 系统时区。
+
+映射与用户所有权：
+
+- 未完成 + 有明确日期 → 正式 Todo；
+- 未完成 + 日期不确定 → Workbench Inbox；
+- Todo ↔ Inbox 因来源日期变化迁移时保留 Workbench 实体 ID、`projectId`、本地 priority/priorityLabel、tags 和创建时间；
+- 已被用户选入 Today 的 Todo，如果来源日期消失，仍保留 Todo 与 Today，`sourceDueDate=null`；
+- `completed=true` → 已有 Todo 标记完成并移出 Today；
 - 本轮扫描缺失 → 不推断完成；
-- 同步不会自动加入今日，也不会反向修改得到大脑。
+- 同步不会自动加入 Today、替用户排优先级、修改项目归属，也不会反向修改得到大脑。
 
 成功结果示例：
 
 ```json
 {
   "provider": "getnote_cli",
-  "fetchedAt": "2026-08-14T02:00:00.000Z",
-  "noteCount": 42,
+  "committed": true,
+  "fetchedAt": "2026-08-15T12:00:00.000Z",
+  "noteCount": 104,
+  "recentNoteCount": 100,
+  "trackedNoteCount": 4,
   "todoCount": 18,
   "activeCount": 15,
   "completedCount": 3,
@@ -224,21 +294,35 @@ SHA-256(来源 note ID + 规范化待办文本 + 同文出现序号)
     "updated": 4,
     "completed": 1,
     "undated": 3,
-    "scheduled": 12
+    "scheduled": 12,
+    "reconciled": 1,
+    "todayPreserved": 1,
+    "movedToInbox": 1,
+    "movedToTodo": 0
   },
   "journal": {
-    "operationId": "tasks-2026-08-14-...",
-    "blockId": "block_...",
-    "replayed": false
+    "enabled": false,
+    "configured": false,
+    "status": "not_configured",
+    "operationId": null,
+    "error": null
   },
   "calendar": {
     "enabled": true,
+    "status": "ok",
     "path": "/private/data/calendar/personal-ai-workbench.ics",
     "eventCount": 12,
-    "writtenAt": "2026-08-14T02:00:00.000Z"
+    "writtenAt": "2026-08-15T12:00:00.000Z",
+    "error": null
+  },
+  "metadata": {
+    "status": "ok",
+    "error": null
   }
 }
 ```
+
+`committed=true` 表示 Workbench 核心状态已经成功落地。之后即使 `journal.status=error` 或 `calendar.status=error`，调用方也不得把任务同步显示为“未提交”。
 
 ### `daily_summary_publish`
 
@@ -250,7 +334,13 @@ SHA-256(来源 note ID + 规范化待办文本 + 同文出现序号)
 }
 ```
 
-系统根据当天明确完成的得到大脑待办、今日到期事项和 Workbench 关键动作生成总结，并写入飞书固定章节。正文不复制到本地 activity。
+每日总结是独立飞书 sink 操作，**要求 `journalDocumentUrl` 已配置**。未配置返回：
+
+```text
+409 FEISHU_DAILY_JOURNAL_NOT_CONFIGURED
+```
+
+系统根据当天明确完成的得到大脑 Todo、今日到期事项和 Workbench 关键动作生成总结，并写入飞书固定章节。正文不复制到本地 activity。
 
 幂等规则：
 
@@ -282,15 +372,16 @@ daily_summary_publish
 - 文件权限 `0600`；
 - 临时文件写入后原子 rename；
 - 失败时清理临时文件；
-- 只包含未完成且已确定日期的得到大脑待办；
-- 非全天且具有完整开始/结束时间时生成定时事件；
+- 只包含未完成且已确定日期的得到大脑 Todo；
+- 全天任务使用 `VALUE=DATE`；
+- 无 offset 的明确本地时刻使用任务 `TZID`，不依赖 VPS 系统时区；
+- 已带 offset 的时刻可规范化为 UTC；
 - 只有明确截止时刻时生成只含 `DTSTART` 的瞬时事件，不猜 `DTEND`；
-- 只有明确日期时生成全天事件；
 - UID 由稳定外部 ID 的 SHA-256 派生；
-- DESCRIPTION 包含来源笔记 ID、标题和链接；
+- DESCRIPTION 包含来源笔记 ID、标题、链接和时区；
 - 不调用系统日历 API，不自动导入或订阅。
 
-没有单独的“写任意本机日历路径”API。
+没有单独的“写任意本机日历路径”API。ICS 写失败只影响 calendar sink，不回滚已经成功的 Workbench 核心提交。
 
 ## 5. 飞书个人工作日记合同
 
@@ -308,7 +399,9 @@ daily_summary_publish
 [WORKBENCH_OP:<operationId>]
 ```
 
-飞书不再是个人待办来源。旧 `POST /api/inbox/sync` 和 `config.dataSource.provider=feishu_doc` 仅为旧安装/独立 Capture 兼容保留，不属于 AI/MCP 个人待办主路径，也不会由新 UI 调用。
+飞书日记是可选派生 sink，不是 GetNote Task Sync 的启用条件。未配置时核心同步返回 `journal.status=not_configured`。飞书不再是个人待办来源。
+
+旧 `POST /api/inbox/sync` 和 `config.dataSource.provider=feishu_doc` 仅为旧安装/独立 Capture 兼容保留，不属于 AI/MCP 个人待办主路径，也不会由新 UI 调用。
 
 ## 6. iPhone / 外部采集
 
@@ -428,7 +521,7 @@ feishuOperationId
 - `POST /api/todos`：创建正式待办；必须提供合法截止日期。
 - `PATCH /api/todos/:id`：修改标题、上下文、日期或完成状态。
 
-已完成待办不能加入今日。外部同步不会自动调用 `POST /api/today`。
+已完成待办不能加入 Today。GetNote 外部同步不会自动调用 `POST /api/today`；来源日期消失也不会把已经由用户明确选入 Today 的事项擅自移出。
 
 ## 11. 配置、业务板块与认证
 
@@ -438,7 +531,7 @@ feishuOperationId
 - `DELETE /api/businesses/:id`：删除空业务板块。
 - `GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout`：本地访问控制。
 
-外部任务集成不通过普通配置 API 接受命令字符串；必须走受 schema 约束且需要确认的 MCP 工具。
+外部任务集成不通过普通配置 API 接受命令字符串；必须走受 schema 约束且需要确认的 MCP 工具。GetNote Runtime 的 base URL 和 service token 属于服务端 `.env`，不进入普通业务配置响应。
 
 ## 12. 错误边界
 
@@ -447,14 +540,21 @@ feishuOperationId
 ```text
 MCP_CONFIRMATION_REQUIRED
 EXTERNAL_TASK_PIPELINE_BUSY
-EXTERNAL_TASK_CLI_MISSING
+EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED
+GETNOTE_CLI_MISSING
+GETNOTE_RUNTIME_INVALID
+GETNOTE_RUNTIME_NOT_CONFIGURED
+GETNOTE_RUNTIME_AUTH_FAILED
+GETNOTE_RUNTIME_NETWORK_ERROR
+GETNOTE_RUNTIME_TIMEOUT
+GETNOTE_RUNTIME_UNAVAILABLE
 EXTERNAL_TASK_SOURCE_INVALID_JSON
 EXTERNAL_TASK_SOURCE_SCHEMA
-EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED
 INVALID_FEISHU_JOURNAL
+FEISHU_DAILY_JOURNAL_NOT_CONFIGURED
 FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT
 LOCAL_CALENDAR_WRITE_FAILED
 CAPTURE_ID_CONFLICT
 ```
 
-错误响应不得包含 CLI stdout 原文、认证资料、飞书正文或本地绝对工作内容。
+错误响应不得包含 CLI stdout 原文、GetNote service token、认证资料、飞书正文或本地绝对工作内容。
