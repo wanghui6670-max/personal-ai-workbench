@@ -15,6 +15,17 @@ test('DSH 右栏使用 IDE 风格极简顶部和内容流，不保留产品介�
   assert.doesNotMatch(script,/连续会话 · Workbench/);
 });
 
+test('DSH 空态靠前展示，并提供真实只读工作入口而不是装饰卡片',async()=>{
+  const [script,theme]=await Promise.all([read('public/harness-navigator.js'),read('public/theme-focus.css')]);
+  assert.match(script,/class="harness-nav-empty-actions"/);
+  assert.match(script,/data-harness-suggest="帮我看今天/);
+  assert.match(script,/data-harness-suggest="查看收件箱/);
+  assert.match(script,/data-harness-suggest="查看项目/);
+  assert.match(script,/const suggestion=event\.target\.closest\?\.\('\[data-harness-suggest\]'\);if\(suggestion\)\{void sendMessage\(suggestion\.dataset\.harnessSuggest\);return;\}/);
+  assert.match(theme,/\.harness-nav-empty\{margin:72px auto auto!important/);
+  assert.match(theme,/\.harness-nav-empty-actions button\{/);
+});
+
 test('工具轨迹只有真实工具调用时出现，并以轻量折叠摘要呈现',async()=>{
   const [script,styles]=await Promise.all([read('public/harness-navigator.js'),read('public/harness-navigator.css')]);
   assert.match(script,/const calls=items\.filter\(item=>item\.type==='tool_call'\);if\(!calls\.length\)return''/);

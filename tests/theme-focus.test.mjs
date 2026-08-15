@@ -22,11 +22,14 @@ test('日间和夜间是全局主题，不只给 DSH 换皮',async()=>{
   assert.match(script,/data-theme-toggle/);
   assert.match(styles,/html\[data-theme="light"\]/);
   assert.match(styles,/html\[data-theme="dark"\]/);
+  assert.match(styles,/--canvas:#fbfcfd/);
+  assert.match(styles,/--side:#edf1f5/);
+  assert.match(styles,/--dsh-bg:#f4f7fa/);
   for(const selector of ['.sidebar','.topbar','.card','.ai-panel.harness-primary','.harness-nav-card','.harness-nav-form'])assert.match(styles,new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
 });
 
 test('今日工作台首屏只保留做事与拍板，统计、现场和项目进度降为默认折叠次要信息',async()=>{
-  const script=await read('public/theme-focus.js');
+  const [script,styles]=await Promise.all([read('public/theme-focus.js'),read('public/theme-focus.css')]);
   assert.match(script,/today-focus/);
   assert.match(script,/today-stats-details/);
   assert.match(script,/label:'工作概览'/);
@@ -35,8 +38,14 @@ test('今日工作台首屏只保留做事与拍板，统计、现场和项目�
   assert.match(script,/today-project-details/);
   assert.match(script,/label:'项目进度'/);
   assert.match(script,/decision-rule/);
+  assert.match(script,/today-decision-row/);
+  assert.match(script,/if\(decision\?\.parentElement===grid\)grid\.insertAdjacentElement\('afterend',decision\)/);
+  assert.match(script,/if\(recent\?\.parentElement===primary\)\(decision\|\|grid\)\.insertAdjacentElement\('afterend',recent\)/);
   assert.match(script,/只显示你明确加入今天的任务/);
   assert.match(script,/只处理需要你拍板的事项/);
+  assert.match(styles,/html\.today-focus \.grid\{grid-template-columns:1fr/);
+  assert.match(styles,/html\.today-focus \.today-decision-row\{margin-top:14px;display:grid/);
+  assert.match(styles,/html\.today-focus \.today-secondary-details\{margin-top:0;border:0;border-top:1px solid var\(--line\)/);
 });
 
 test('MutationObserver 增强层是幂等的，不会通过重复文本写入自触发微任务死循环',async()=>{

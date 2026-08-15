@@ -14,7 +14,7 @@ function applyTheme(theme,{persist=false}={}){
   const next=THEME_VALUES.has(theme)?theme:'light';
   document.documentElement.dataset.theme=next;
   const meta=document.querySelector('meta[name="theme-color"]');
-  if(meta)meta.setAttribute('content',next==='dark'?'#0f1115':'#f6f7f9');
+  if(meta)meta.setAttribute('content',next==='dark'?'#0f1115':'#f8fafc');
   if(persist){
     try{localStorage.setItem(THEME_KEY,next);}catch{}
   }
@@ -64,9 +64,11 @@ function wrapSecondary(node,{className,label}){
 }
 
 function compactRecentWork(primary){
-  if(!primary||primary.querySelector('.today-recent-details'))return;
+  if(!primary)return null;
+  const existing=primary.querySelector('.today-recent-details')||document.querySelector('.main > .today-recent-details');
+  if(existing)return existing;
   const title=[...primary.querySelectorAll('.section-title')].find(node=>node.textContent.trim()==='最近工作现场');
-  if(!title)return;
+  if(!title)return null;
   const details=document.createElement('details');
   details.className='today-secondary-details today-recent-details';
   const summary=document.createElement('summary');
@@ -84,11 +86,12 @@ function compactRecentWork(primary){
   for(const item of activities)body.append(item);
   title.replaceWith(details);
   details.append(summary,body);
+  return details;
 }
 
 function simplifyDecisionCard(card){
   if(!card)return;
-  card.classList.add('today-decision-minimal');
+  card.classList.add('today-decision-minimal','today-decision-row');
   setTextIfChanged(card.querySelector('.card-desc'),'只处理需要你拍板的事项。');
   const rule=card.querySelector('.decision-rule');
   if(rule&&!rule.hidden)rule.hidden=true;
@@ -122,13 +125,17 @@ function simplifyToday(){
     const emptyHtml='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';
     if(empty.innerHTML!==emptyHtml)empty.innerHTML=emptyHtml;
   }
-  compactRecentWork(primary);
-  simplifyDecisionCard(grid.querySelector('.human-decision-card'));
+
+  const recent=compactRecentWork(primary);
+  const decision=main.querySelector('.human-decision-card');
+  simplifyDecisionCard(decision);
+  if(decision?.parentElement===grid)grid.insertAdjacentElement('afterend',decision);
+  if(recent?.parentElement===primary)(decision||grid).insertAdjacentElement('afterend',recent);
 
   const statRow=main.querySelector(':scope > .stat-row');
   if(statRow){
     const wrapped=wrapSecondary(statRow,{className:'today-stats-details',label:'工作概览'});
-    if(wrapped)grid.insertAdjacentElement('afterend',wrapped);
+    if(wrapped)(recent||decision||grid).insertAdjacentElement('afterend',wrapped);
   }
 
   const projectSection=[...main.querySelectorAll(':scope > section.card.pad')].find(section=>section.querySelector('.card-title')?.textContent.trim()==='所有项目进度');
