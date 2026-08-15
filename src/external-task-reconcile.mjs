@@ -1,4 +1,5 @@
 import {newId,nowIso,compactText} from './utils.mjs';
+import {clearGetnoteSourceDecision,hasGetnoteSourceDecision} from './external-task-decisions.mjs';
 
 function normalizeText(value){return String(value??'').replace(/\s+/g,' ').trim().toLocaleLowerCase('zh-CN');}
 function isGetnoteTodo(todo){return todo?.source==='getnote_cli'&&todo.done!==true&&todo.externalStatus!=='completed';}
@@ -115,6 +116,8 @@ function localDueReference(todo,incomingSourceDueDate=null){
 }
 function hasLocalDueOverride(todo,incomingSourceDueDate=null){
   if(!todo||typeof todo.dueDate!=='string'||!todo.dueDate)return false;
+  if(todo.dueDateOwner==='user')return true;
+  if(todo.dueDateOwner==='source')return false;
   const reference=localDueReference(todo,incomingSourceDueDate);
   if(reference)return todo.dueDate!==reference;
   // No sourceDueDate/sourcePreviousDueDate means this is a legacy v1 entity and
@@ -141,11 +144,17 @@ function priorSourceDue(todo){return todo?.sourceDueDate||todo?.sourcePreviousDu
 
 export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
   const now=nowIso();
-  const all=[...active,...completed];
+  let clearedDecisions=0;
+  for(const task of completed){
+    if(clearGetnoteSourceDecision(state,task.externalId))clearedDecisions+=1;
+  }
+  const effectiveActive=active.filter(task=>!hasGetnoteSourceDecision(state,task.externalId));
+  const suppressed=active.length-effectiveActive.length;
+  const all=[...effectiveActive,...completed];
   const reconciled=reconcileFingerprintRename(state,all);
   let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0,movedToInbox=0,movedToTodo=0,localDuePreserved=0;
 
-  for(const task of active){
+  for(const task of effectiveActive){
     const existingTodo=todoByExternalId(state,task.externalId);
     const existingInbox=inboxByExternalId(state,task.externalId);
     if(!task.dueDate){
@@ -163,7 +172,7 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
         if(JSON.stringify(existingTodo)!==before)updated+=1;
         if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
         if(todayOwned)todayPreserved+=1;
-        if(localOverride)localDuePreserved+=1;
+        if(localOverride){existingTodo.dueDateOwner='user';localDuePreserved+=1;}
         continue;
       }
 
@@ -195,7 +204,9 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
     }
 
     scheduled+=1;
-    const sourceSchedule={dueDate:task.dueDate,startAt:task.startAt,dueAt:task.dueAt,allDay:task.allDay,timeZone:task.timeZone};
+    const sourceSchedule={
+      dueDate:task.dueDate,startAt:task.startAt,dueAt:task.dueAt,allDay:task.allDay,timeZone:task.timeZone,dueDateOwner:'source'
+    };
     if(existingTodo){
       if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
       const before=JSON.stringify(existingTodo);
@@ -219,7 +230,7 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
         localOverride?localSchedule(existingTodo):sourceSchedule,
         local
       );
-      if(localOverride)localDuePreserved+=1;
+      if(localOverride){existingTodo.dueDateOwner='user';localDuePreserved+=1;}
       if(JSON.stringify(existingTodo)!==before)updated+=1;
     }else{
       const local=localStateFromInbox(existingInbox,task,now);
@@ -247,5 +258,8 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
     });
     state.todayPlan=state.todayPlan.filter(id=>id!==todo.id);
   }
-  return{created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved,movedToInbox,movedToTodo,localDuePreserved};
+  return{
+    created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved,movedToInbox,movedToTodo,
+    localDuePreserved,suppressed,clearedDecisions
+  };
 }
