@@ -36,9 +36,12 @@ function decodeXmlText(value){
 
 function comparableText(value){
   return String(value??'')
-    .replace(/\r\n/g,'\n')
+    .replace(/\r\n?/g,'\n')
     .replace(/[ \t]+/g,' ')
-    .replace(/\s*\n\s*/g,'\n')
+    // lark-cli may round-trip line breaks inside one paragraph as no separator.
+    // Ignore only those line-break boundaries; preserve ordinary spaces so a
+    // substantive text edit with the same operationId still fails closed.
+    .replace(/[ \t]*\n[ \t]*/g,'')
     .trim();
 }
 
