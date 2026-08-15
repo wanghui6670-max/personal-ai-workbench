@@ -174,12 +174,6 @@ try{
     ?macosUpgradeUpdates({workspaceRoot,dataDir,port})
     :macosP0Updates({workspaceRoot,dataDir,port});
 
-  if(previousServiceLoaded){
-    console.log('检测到现有 Workbench LaunchAgent，先暂停服务；失败时会恢复。');
-    await serviceCommand('stop');
-  }
-  if(!(await waitForPortFree(port)))throw new Error(`端口 127.0.0.1:${port} 被非 Workbench 进程占用，未执行覆盖。`);
-
   const updatedSource=upsertEnvSource(existingSource,updates);
   const updatedValues=envValuesFromSource(updatedSource);
   const processKeys=new Set([...Object.keys(updatedValues),...Object.keys(updates)]);
@@ -192,6 +186,7 @@ try{
   console.log(`已绑定持久化数据目录：${dataDir}`);
   console.log(`本机地址：${baseUrl(port)}`);
   if(envRecord.backupPath)console.log(`原 .env 已备份：${envRecord.backupPath}`);
+  if(previousServiceLoaded)console.log('检测到现有 Workbench LaunchAgent；升级 P0 期间保持旧服务运行，P0 通过后由安装器原子切换。');
 
   // Preflight 始终在外部 Runtime 关闭的只读环境中执行，但升级模式不会改写
   // .env 里已经通过现场验收的 Joycrew/Harness/Provider 开关和凭据。
@@ -201,20 +196,22 @@ try{
     HARNESS_ENABLED:'0',
     AI_PROVIDER_ENABLED:'0'
   };
-  const preflight=await runNode('scripts/p0-host-preflight.mjs',[],{env:preflightEnv});
+  const preflightArgs=previousServiceLoaded?['--allow-configured-port-in-use']:[];
+  const preflight=await runNode('scripts/p0-host-preflight.mjs',preflightArgs,{env:preflightEnv});
   if(preflight.code!==0)throw new Error('真实主机 P0 未通过，未安装常驻服务。');
 
   if(flag('--prepare-only')){
-    if(previousServiceLoaded)await serviceCommand('start');
-    await writeReport({schemaVersion:2,status:'prepared',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
+    await writeReport({schemaVersion:2,status:'prepared',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,previousServicePreservedDuringPreflight:previousServiceLoaded,finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
     succeeded=true;
     console.log('真实主机 P0 已通过；按 --prepare-only 要求未替换常驻服务。');
   }else{
+    // LaunchAgent install 自己负责 bootout、端口释放、plist 备份和失败回滚。
+    // 这里不提前停止旧服务，避免 P0 或安装前错误造成不必要停机。
     await serviceCommand('install',preserveRuntime?['--preserve-runtime']:[]);
     await serviceCommand('status');
     const url=baseUrl(port);
     if(!flag('--no-open'))await execResult('open',[url],{timeout:10_000});
-    await writeReport({schemaVersion:2,status:'installed',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
+    await writeReport({schemaVersion:2,status:'installed',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,previousServicePreservedDuringPreflight:previousServiceLoaded,finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
     succeeded=true;
     console.log(`\n${PRODUCT_DISPLAY_NAME} v${PRODUCT_VERSION} 已在真实 Mac 上启动。`);
     console.log(`Git 提交：${repository.commit.slice(0,12)}`);
@@ -233,10 +230,7 @@ try{
       else delete process.env[key];
     }
   }
-  if(previousServiceLoaded){
-    await serviceCommand('start').catch(startError=>console.error(`恢复旧服务失败：${startError.message}`));
-  }
-  await writeReport({schemaVersion:2,status:'failed',deploymentMode,runtimeRecovery,finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord),previousServiceRestored:previousServiceLoaded}).catch(()=>undefined);
+  await writeReport({schemaVersion:2,status:'failed',deploymentMode,runtimeRecovery,previousServicePreservedDuringPreflight:previousServiceLoaded,finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord)}).catch(()=>undefined);
   process.exitCode=1;
 }finally{
   if(!succeeded&&envRecord?.backupPath)console.error(`原配置备份仍保留：${envRecord.backupPath}`);

@@ -47,6 +47,17 @@ test('content snapshot ignores safe rewrite timestamps but detects real data cha
   assert.equal(before.counts.contentHashedFiles,1);
 });
 
+test('bounded snapshot stops at the requested depth before large descendants',async t=>{
+  const root=await temp(t);
+  const deep=path.join(root,'top','deep');
+  await fsp.mkdir(deep,{recursive:true});
+  await Promise.all(Array.from({length:50},(_,index)=>fsp.writeFile(path.join(deep,`file-${index}.txt`),String(index),'utf8')));
+  const bounded=await snapshotTree(root,{maxDepth:1,maxEntries:3});
+  assert.equal(bounded.entryCount,2,'root and its first-level directory are enough for the bounded sentinel');
+  assert.equal(bounded.counts.directories,2);
+  assert.equal(bounded.maxDepth,1);
+});
+
 test('macOS LaunchAgent plist uses direct Node arguments, pins the Git commit, and contains no service secrets',()=>{
   const commit='a'.repeat(40);
   const plist=buildMacosLaunchAgentPlist({
@@ -94,6 +105,8 @@ test('host scripts never use shell evaluation for service control',async()=>{
     assert.doesNotMatch(source,/\beval\s*\(/);
   }
   assert.match(preflight,/JOYCREW_ENABLED:'0'/);
+  assert.match(preflight,/--allow-configured-port-in-use/);
+  assert.match(preflight,/maxDepth:2/);
   assert.match(service,/validateHostReadinessReport/);
   assert.match(service,/WORKBENCH_BUILD_COMMIT/);
   assert.match(service,/--preserve-runtime/);
