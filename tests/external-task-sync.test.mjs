@@ -26,13 +26,13 @@ function taskSource(active){
   return{
     provider:'getnote_cli',noteCount:3,recentNoteCount:2,trackedNoteCount:1,todoCount:3,fetchedAt:'2026-08-14T00:00:00Z',completedAvailable:true,completedWarning:null,
     active,
-    completed:[{externalId:'done-1',title:'旧的得到大脑任务',done:true,completedAt:'2026-08-14T08:00:00Z',sourceNoteId:'old-note',sourceNoteTitle:'复盘会',sourceTodoId:'todo-done',identityKind:'source_id'}]
+    completed:[{externalId:'done-1',externalIdentityKind:'text_fingerprint',title:'旧的得到大脑任务',done:true,completedAt:'2026-08-14T08:00:00Z',sourceNoteId:'old-note',sourceNoteTitle:'复盘会'}]
   };
 }
 
 const activeTasks=[
-  {externalId:'active-1',title:'2026-08-20 提交方案',content:'',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,allDay:true,timeZone:'Asia/Shanghai',updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[],sourceNoteId:'n1',sourceNoteTitle:'产品周会',sourceNoteCreatedAt:'2026-08-10T00:00:00Z',sourceNoteUrl:'https://www.biji.com/note/n1',sourceTodoId:'todo-active',identityKind:'source_id',todoSource:'summary'},
-  {externalId:'undated-1',title:'确认下一版预算',content:'',dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:'Asia/Shanghai',updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[],sourceNoteId:'n2',sourceNoteTitle:'预算会',sourceNoteCreatedAt:'2026-08-11T00:00:00Z',sourceNoteUrl:'https://www.biji.com/note/n2',sourceTodoId:'todo-undated',identityKind:'source_id',todoSource:'summary'}
+  {externalId:'active-1',externalIdentityKind:'text_fingerprint',title:'2026-08-20 提交方案',content:'',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,allDay:true,timeZone:'Asia/Shanghai',updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[],sourceNoteId:'n1',sourceNoteTitle:'产品周会',sourceNoteCreatedAt:'2026-08-10T00:00:00Z',sourceNoteUrl:'https://www.biji.com/note/n1',todoSource:'summary'},
+  {externalId:'undated-1',externalIdentityKind:'text_fingerprint',title:'确认下一版预算',content:'',dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:'Asia/Shanghai',updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[],sourceNoteId:'n2',sourceNoteTitle:'预算会',sourceNoteCreatedAt:'2026-08-11T00:00:00Z',sourceNoteUrl:'https://www.biji.com/note/n2',todoSource:'summary'}
 ];
 
 test('GetNote core commits to Workbench before Feishu/ICS sinks and never auto-adds Today',async t=>{
