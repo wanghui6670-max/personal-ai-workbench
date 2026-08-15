@@ -1,0 +1,11 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      {"type":"block-start","index":0,"blockType":"text"},
+      {"type":"text-delta","index":0,"text":"{\"summary\":\"项目 Evidence 已完成受控分析。\",\"recommendations\":[\"由用户确认下一步后再执行\"],\"proposedNextAction\":\"确认项目下一步\",\"proposedStatus\":\"active\"}"},
+      {"type":"block-end","index":0,"block":{"type":"text","text":"{\"summary\":\"项目 Evidence 已完成受控分析。\",\"recommendations\":[\"由用户确认下一步后再执行\"],\"proposedNextAction\":\"确认项目下一步\",\"proposedStatus\":\"active\"}"}},
+      {"type":"finish","reason":{"kind":"stop"}}
+    ]
+  }
+]
