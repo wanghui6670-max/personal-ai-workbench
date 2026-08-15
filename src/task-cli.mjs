@@ -32,16 +32,23 @@ function validDate(year,month,day){
   if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
   return `${year}-${pad(month)}-${pad(day)}`;
 }
-function referenceDateOnly(value,fallbackDateOnly=null){
+function referenceDateOnly(value,fallbackDateOnly=null,timeZone=DEFAULT_TIME_ZONE){
   const text=String(value||'').trim();
-  const direct=text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const direct=text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(direct&&validDate(Number(direct[1]),Number(direct[2]),Number(direct[3])))return `${direct[1]}-${direct[2]}-${direct[3]}`;
   if(text){
+    const offsetTimestamp=/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+    if(offsetTimestamp){
+      const date=new Date(text);
+      if(Number.isFinite(date.getTime()))return getnoteDateOnlyInTimeZone(date,timeZone);
+    }
+    const localPrefix=text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T])/);
+    if(localPrefix&&validDate(Number(localPrefix[1]),Number(localPrefix[2]),Number(localPrefix[3])))return `${localPrefix[1]}-${localPrefix[2]}-${localPrefix[3]}`;
     const date=new Date(text);
-    if(Number.isFinite(date.getTime()))return date.toISOString().slice(0,10);
+    if(Number.isFinite(date.getTime()))return getnoteDateOnlyInTimeZone(date,timeZone);
   }
   if(fallbackDateOnly&&/^\d{4}-\d{2}-\d{2}$/.test(fallbackDateOnly))return fallbackDateOnly;
-  return new Date().toISOString().slice(0,10);
+  return getnoteDateOnlyInTimeZone(new Date(),timeZone);
 }
 function addDays(dateOnly,days){
   const date=new Date(`${dateOnly}T00:00:00.000Z`);
@@ -101,7 +108,7 @@ export function getnoteDateOnlyInTimeZone(value=new Date(),timeZone=DEFAULT_TIME
 export function parseTodoSchedule(text,{referenceDate=null,timeZone=DEFAULT_TIME_ZONE}={}){
   const zone=normalizeGetnoteTimeZone(timeZone);
   const fallback=getnoteDateOnlyInTimeZone(new Date(),zone);
-  const base=referenceDateOnly(referenceDate,fallback);
+  const base=referenceDateOnly(referenceDate,fallback,zone);
   const dueDate=parseDate(String(text||''),base);
   if(!dueDate)return{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:zone};
   const time=parseTime(String(text||''));
@@ -169,7 +176,7 @@ export function parseMeetingTodos(payload,note={},options={}){
   const items=Array.isArray(container.items)?container.items:[];
   const timeZone=normalizeGetnoteTimeZone(options.timeZone||DEFAULT_TIME_ZONE);
   const fallbackReferenceDate=getnoteDateOnlyInTimeZone(new Date(),timeZone);
-  const referenceDate=referenceDateOnly(note.createdAt||note.updatedAt||'',fallbackReferenceDate);
+  const referenceDate=referenceDateOnly(note.createdAt||note.updatedAt||'',fallbackReferenceDate,timeZone);
   const occurrences=new Map();
   const tasks=[];
   for(const item of items){
