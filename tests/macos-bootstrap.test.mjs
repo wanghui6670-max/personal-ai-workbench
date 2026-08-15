@@ -162,6 +162,9 @@ test('one-click entry, bootstrap, service controls, package scripts, and docs st
   assert.match(bootstrap,/legacyBootstrapBackup/);
   assert.match(bootstrap,/deploymentMode/);
   assert.match(bootstrap,/--preserve-runtime/);
+  assert.match(bootstrap,/--allow-configured-port-in-use/);
+  assert.match(bootstrap,/previousServicePreservedDuringPreflight/);
+  assert.doesNotMatch(bootstrap,/serviceCommand\('stop'/,'bootstrap must not pre-stop the old service before P0');
   assert.match(bootstrap,/serviceCommand\('install'/);
   assert.match(service,/WORKBENCH_BUILD_COMMIT/);
   assert.match(service,/--preserve-runtime/);
