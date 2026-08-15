@@ -77,5 +77,5 @@ test('local planner maps explicit GetNote sync and daily summary commands withou
 
   const legacy=await registry.plan('同步飞书收件箱');
   assert.equal(legacy.kind,'clarification');
-  assert.match(legacy.message,/待办来源是得到大脑 CLI/);
+  assert.match(legacy.message,/待办事实来源是得到大脑只读管线/);
 });
