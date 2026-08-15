@@ -23,6 +23,9 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
   // The exposed tools either read external state or create an expiring local
   // preview. Actual Workbench/Joycrew mutations are not callable here.
   const toolOptions={readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST};
+  const checkedStatus=async()=>typeof navigator.checkedStatus==='function'
+    ?navigator.checkedStatus()
+    :navigator.status();
 
   async function handleBridge(req,res,pathname){
     if(pathname!=='/api/harness/mcp')return false;
@@ -73,7 +76,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
   async function handleUser(req,res,pathname,{rateLimit}={}){
     if(pathname==='/api/harness/status'){
       if(req.method!=='GET'){methodNotAllowed(res,'GET');return true;}
-      sendJson(res,200,{navigator:navigator.status(),capabilityMode:'read_and_preview'});
+      sendJson(res,200,{navigator:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;
     }
     if(pathname==='/api/harness/navigator'){
@@ -85,7 +88,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
         sessionId:body.sessionId??null,
         route:{view:body.view||'today',id:body.id??null}
       });
-      sendJson(res,200,{ok:true,navigator:result,status:navigator.status(),capabilityMode:'read_and_preview'});
+      sendJson(res,200,{ok:true,navigator:result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;
     }
     return false;
