@@ -8,39 +8,56 @@ function state(){return{
   todos:[],todayPlan:[],todayPlanDate:null,projects:[],confirmations:[],notes:[],activities:[],morningSessions:[]
 };}
 function task(overrides={}){return{
-  externalId:'getnote-new',title:'提交方案',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
+  externalId:'getnote-new',externalIdentityKind:'text_fingerprint',title:'提交方案',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
   updatedAt:'2026-08-15T01:00:00Z',done:false,priority:0,priorityLabel:'',tags:[],sourceNoteId:'note-1',sourceNoteTitle:'产品周会',
   sourceNoteType:'MEETING',sourceNoteCreatedAt:'2026-08-10T01:00:00Z',sourceNoteUpdatedAt:'2026-08-15T01:00:00Z',sourceNoteUrl:'',
-  sourceTodoId:'todo-1',identityKind:'source_id',todoSource:'summary',...overrides
+  todoSource:'summary',...overrides
 };}
 
-test('source todo id migration preserves Workbench entity and user-owned fields',()=>{
+test('one-to-one text fingerprint rename preserves Workbench entity and user-owned fields',()=>{
   const current=state();
   current.todos.push({
     id:'td-existing',title:'提交方案',context:'',dueDate:'2026-08-18',done:false,projectId:'project-1',createdAt:'2026-08-11T00:00:00Z',
     source:'getnote_cli',externalId:'legacy-text-id',sourceNoteId:'note-1',sourceNoteTitle:'产品周会',priority:3,priorityLabel:'重要',tags:['用户标签']
   });
-  const changes=applyGetnoteTaskSnapshot(current,{active:[task()]});
+  const changes=applyGetnoteTaskSnapshot(current,{active:[task({title:'提交最终方案'})]});
   assert.equal(changes.reconciled,1);
   assert.equal(current.todos.length,1);
   const todo=current.todos[0];
   assert.equal(todo.id,'td-existing');
   assert.equal(todo.externalId,'getnote-new');
-  assert.equal(todo.sourceTodoId,'todo-1');
+  assert.equal(todo.externalIdentityKind,'text_fingerprint');
   assert.equal(todo.projectId,'project-1');
   assert.equal(todo.priority,3);
   assert.equal(todo.priorityLabel,'重要');
   assert.deepEqual(todo.tags,['用户标签']);
 });
 
-test('one-to-one fallback text rename preserves Workbench entity id',()=>{
+test('one-to-one Inbox text rename preserves Workbench entity id',()=>{
   const current=state();
   current.inbox.push({id:'in-old',text:'确认预算｜来自得到大脑《预算会》',source:'getnote_cli',externalTaskId:'old-text-id',sourceNoteId:'note-2',sourceNoteTitle:'预算会',createdAt:'2026-08-11T00:00:00Z'});
-  const changes=applyGetnoteTaskSnapshot(current,{active:[task({externalId:'new-text-id',sourceTodoId:null,identityKind:'fallback_text',sourceNoteId:'note-2',sourceNoteTitle:'预算会',title:'确认最终预算',dueDate:null,dueAt:null})]});
+  const changes=applyGetnoteTaskSnapshot(current,{active:[task({externalId:'new-text-id',sourceNoteId:'note-2',sourceNoteTitle:'预算会',title:'确认最终预算',dueDate:null,dueAt:null})]});
   assert.equal(changes.reconciled,1);
   assert.equal(current.inbox.length,1);
   assert.equal(current.inbox[0].id,'in-old');
   assert.equal(current.inbox[0].externalTaskId,'new-text-id');
+});
+
+test('ambiguous same-note text changes are not auto-reconciled',()=>{
+  const current=state();
+  current.todos.push(
+    {id:'td-a',title:'事项 A',context:'',dueDate:'2026-08-20',done:false,projectId:null,createdAt:'x',source:'getnote_cli',externalId:'old-a',sourceNoteId:'same-note'},
+    {id:'td-b',title:'事项 B',context:'',dueDate:'2026-08-20',done:false,projectId:null,createdAt:'x',source:'getnote_cli',externalId:'old-b',sourceNoteId:'same-note'}
+  );
+  const changes=applyGetnoteTaskSnapshot(current,{active:[
+    task({externalId:'new-a',sourceNoteId:'same-note',title:'事项 A 新文案'}),
+    task({externalId:'new-b',sourceNoteId:'same-note',title:'事项 B 新文案'})
+  ]});
+  assert.equal(changes.reconciled,0);
+  assert.equal(current.todos.some(item=>item.externalId==='old-a'),true);
+  assert.equal(current.todos.some(item=>item.externalId==='old-b'),true);
+  assert.equal(current.todos.some(item=>item.externalId==='new-a'),true);
+  assert.equal(current.todos.some(item=>item.externalId==='new-b'),true);
 });
 
 test('source date removal never ejects a user-selected Today task',()=>{
@@ -48,7 +65,7 @@ test('source date removal never ejects a user-selected Today task',()=>{
   current.todayPlanDate='2026-08-15';
   current.todos.push({id:'td-today',title:'联系供应商',context:'',dueDate:'2026-08-16',done:false,projectId:null,createdAt:'2026-08-11T00:00:00Z',source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3'});
   current.todayPlan=['td-today'];
-  const changes=applyGetnoteTaskSnapshot(current,{active:[task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null})]});
+  const changes=applyGetnoteTaskSnapshot(current,{active:[task({externalId:'same-id',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null})]});
   assert.equal(changes.todayPreserved,1);
   assert.deepEqual(current.todayPlan,['td-today']);
   assert.equal(current.todos[0].externalStatus,'active_without_due_date_today_preserved');
@@ -63,7 +80,7 @@ test('dated -> Inbox -> dated keeps one Workbench entity and local project/prior
     source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3',priority:7,priorityLabel:'我定的重要',tags:['客户','本地']
   });
 
-  const undated=task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null});
+  const undated=task({externalId:'same-id',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null});
   applyGetnoteTaskSnapshot(current,{active:[undated]});
   assert.equal(current.todos.length,0);
   assert.equal(current.inbox.length,1);
@@ -75,7 +92,7 @@ test('dated -> Inbox -> dated keeps one Workbench entity and local project/prior
   assert.equal(inbox.localPriorityLabel,'我定的重要');
   assert.deepEqual(inbox.localTags,['客户','本地']);
 
-  const redated=task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:'2026-08-25',dueAt:'2026-08-25'});
+  const redated=task({externalId:'same-id',sourceNoteId:'note-3',title:'联系供应商',dueDate:'2026-08-25',dueAt:'2026-08-25'});
   applyGetnoteTaskSnapshot(current,{active:[redated]});
   assert.equal(current.inbox.length,0);
   assert.equal(current.todos.length,1);
@@ -91,10 +108,10 @@ test('dated -> Inbox -> dated keeps one Workbench entity and local project/prior
 
 test('an initially undated task keeps its Workbench entity id when a source date later appears',()=>{
   const current=state();
-  const undated=task({externalId:'new-undated',sourceTodoId:'todo-u',sourceNoteId:'note-u',dueDate:null,dueAt:null});
+  const undated=task({externalId:'new-undated',sourceNoteId:'note-u',dueDate:null,dueAt:null});
   applyGetnoteTaskSnapshot(current,{active:[undated]});
   const firstId=current.inbox[0].id;
-  applyGetnoteTaskSnapshot(current,{active:[task({externalId:'new-undated',sourceTodoId:'todo-u',sourceNoteId:'note-u',dueDate:'2026-08-30',dueAt:'2026-08-30'})]});
+  applyGetnoteTaskSnapshot(current,{active:[task({externalId:'new-undated',sourceNoteId:'note-u',dueDate:'2026-08-30',dueAt:'2026-08-30'})]});
   assert.equal(current.inbox.length,0);
   assert.equal(current.todos[0].id,firstId);
 });
