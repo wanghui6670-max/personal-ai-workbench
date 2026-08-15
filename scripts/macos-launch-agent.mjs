@@ -25,6 +25,7 @@ const stdoutPath=path.join(logDir,'workbench.log');
 const stderrPath=path.join(logDir,'workbench.error.log');
 
 function arg(name){const index=process.argv.indexOf(name);return index>=0?process.argv[index+1]||null:null;}
+function flag(name){return process.argv.includes(name);}
 function domain(){return `gui/${uid}`;}
 function target(){return `${domain()}/${label}`;}
 function baseUrl(host,port){return `http://${host.includes(':')?`[${host}]`:host}:${port}`;}
@@ -46,13 +47,20 @@ async function bootstrap(){
 }
 function portInUse(host,port){return new Promise(resolve=>{const socket=net.connect({host,port});const finish=value=>{socket.destroy();resolve(value);};socket.setTimeout(500);socket.once('connect',()=>finish(true));socket.once('timeout',()=>finish(false));socket.once('error',()=>finish(false));});}
 async function waitForPortFree(host,port,timeoutMs=5000){const started=Date.now();while(Date.now()-started<timeoutMs){if(!(await portInUse(host,port)))return true;await new Promise(resolve=>setTimeout(resolve,100));}return false;}
-async function waitForHealth(binding,timeoutMs=25_000){
+async function waitForHealth(binding,{expectedCommit=null,timeoutMs=25_000}={}){
   const url=`${baseUrl(binding.host,binding.port)}/api/health`;const started=Date.now();
   while(Date.now()-started<timeoutMs){
-    try{const response=await fetch(url);if(response.status===200){const body=await response.json();if(body.ok===true&&body.version===PRODUCT_VERSION)return body;}}catch{}
+    try{
+      const response=await fetch(url,{cache:'no-store'});
+      if(response.status===200){
+        const body=await response.json();
+        const commitMatches=!expectedCommit||body.buildCommit===expectedCommit;
+        if(body.ok===true&&body.version===PRODUCT_VERSION&&commitMatches)return body;
+      }
+    }catch{}
     await new Promise(resolve=>setTimeout(resolve,250));
   }
-  throw new Error(`LaunchAgent 已启动但 ${url} 未通过健康检查。`);
+  throw new Error(`LaunchAgent 已启动但 ${url} 未通过版本/提交健康检查。`);
 }
 
 async function currentBinding({requireJoycrewDisabled=false}={}){
@@ -86,7 +94,8 @@ async function validateInstallGate(binding){
 async function install(){
   assert.equal(process.platform,'darwin','LaunchAgent 安装仅支持 macOS。');
   assert.ok(Number.isInteger(uid),'无法确定当前 macOS 用户 UID。');
-  const binding=await currentBinding({requireJoycrewDisabled:true});
+  const preserveRuntime=flag('--preserve-runtime');
+  const binding=await currentBinding({requireJoycrewDisabled:!preserveRuntime});
   const gate=await validateInstallGate(binding);
   await Promise.all([
     fsp.mkdir(launchAgentsDir,{recursive:true,mode:0o700}),
@@ -107,7 +116,8 @@ async function install(){
     home,
     pathEnv:process.env.PATH||'/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
     stdoutPath,
-    stderrPath
+    stderrPath,
+    buildCommit:gate.commit
   });
   const temp=`${plistPath}.tmp-${process.pid}`;
   try{
@@ -117,15 +127,16 @@ async function install(){
     await fsp.rename(temp,plistPath);
     await fsp.chmod(plistPath,0o600);
     await bootstrap();
-    const health=await waitForHealth(binding);
+    const health=await waitForHealth(binding,{expectedCommit:gate.commit});
     const manifestPath=path.join(binding.dataDir,'p0','macos-service.json');
     await fsp.mkdir(path.dirname(manifestPath),{recursive:true,mode:0o700});
     await fsp.writeFile(manifestPath,`${JSON.stringify({
-      schemaVersion:1,
+      schemaVersion:2,
       label,
       installedAt:new Date().toISOString(),
       productVersion:PRODUCT_VERSION,
       commit:gate.commit,
+      runtimeSettingsPreserved:preserveRuntime,
       p0Report:path.relative(binding.dataDir,gate.reportPath).split(path.sep).join('/'),
       dataBackup:gate.report.backup,
       appRoot:binding.appRoot,
@@ -141,6 +152,8 @@ async function install(){
     console.log(`服务：${target()}`);
     console.log(`地址：${baseUrl(binding.host,binding.port)}`);
     console.log(`版本：${health.version}`);
+    console.log(`提交：${health.buildCommit?.slice(0,12)||'unknown'}`);
+    console.log(`Runtime 配置：${preserveRuntime?'保留':'首次 P0 安全模式'}`);
     console.log(`P0 报告：${gate.reportPath}`);
     console.log(`日志：${stdoutPath}`);
     console.log(`服务清单：${manifestPath}`);
@@ -159,25 +172,29 @@ async function status(){
   const binding=await currentBinding();
   const launch=await execResult('launchctl',['print',target()]);
   let health=null;
-  try{const response=await fetch(`${baseUrl(binding.host,binding.port)}/api/health`);health={status:response.status,body:await response.json().catch(()=>null)};}catch{}
-  console.log(JSON.stringify({label,loaded:launch.code===0,plistPath,health,stdoutPath,stderrPath},null,2));
-  if(launch.code!==0||health?.status!==200||health?.body?.ok!==true)process.exitCode=1;
+  try{const response=await fetch(`${baseUrl(binding.host,binding.port)}/api/health`,{cache:'no-store'});health={status:response.status,body:await response.json().catch(()=>null)};}catch{}
+  let expectedCommit=null;
+  try{expectedCommit=await git(['rev-parse','HEAD']);}catch{}
+  const commitMatches=!expectedCommit||health?.body?.buildCommit===expectedCommit;
+  console.log(JSON.stringify({label,loaded:launch.code===0,plistPath,expectedCommit,commitMatches,health,stdoutPath,stderrPath},null,2));
+  if(launch.code!==0||health?.status!==200||health?.body?.ok!==true||!commitMatches)process.exitCode=1;
 }
 
 async function start(){
   assert.equal(process.platform,'darwin','LaunchAgent 启动仅支持 macOS。');
   const binding=await currentBinding();
   await fsp.access(plistPath);
+  const expectedCommit=await git(['rev-parse','HEAD']);
   if(await loaded()){
-    const health=await waitForHealth(binding);
-    console.log(`${label} 已在运行 · v${health.version}`);
+    const health=await waitForHealth(binding,{expectedCommit});
+    console.log(`${label} 已在运行 · v${health.version} · ${health.buildCommit.slice(0,12)}`);
     return;
   }
   if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 被其他进程占用。`);
   await bootstrap();
   try{
-    const health=await waitForHealth(binding);
-    console.log(`已启动 ${label} · v${health.version}`);
+    const health=await waitForHealth(binding,{expectedCommit});
+    console.log(`已启动 ${label} · v${health.version} · ${health.buildCommit.slice(0,12)}`);
   }catch(error){
     await bootout();
     throw error;
@@ -194,11 +211,12 @@ async function restart(){
   assert.equal(process.platform,'darwin','LaunchAgent 重启仅支持 macOS。');
   const binding=await currentBinding();
   await fsp.access(plistPath);
+  const expectedCommit=await git(['rev-parse','HEAD']);
   await bootout();
   if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用。`);
   await bootstrap();
-  const health=await waitForHealth(binding);
-  console.log(`已重启 ${label} · v${health.version}`);
+  const health=await waitForHealth(binding,{expectedCommit});
+  console.log(`已重启 ${label} · v${health.version} · ${health.buildCommit.slice(0,12)}`);
 }
 
 async function uninstall(){
@@ -215,5 +233,5 @@ try{
   else if(command==='stop')await stop();
   else if(command==='restart')await restart();
   else if(command==='uninstall')await uninstall();
-  else throw new Error('用法：npm run service:macos -- install|status|start|stop|restart|uninstall [--report <path>]');
+  else throw new Error('用法：npm run service:macos -- install|status|start|stop|restart|uninstall [--report <path>] [--preserve-runtime]');
 }catch(error){console.error(error.message||error);process.exitCode=1;}
