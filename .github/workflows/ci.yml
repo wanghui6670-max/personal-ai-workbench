@@ -38,6 +38,13 @@ jobs:
           node --check src/feishu.mjs
           node --check src/feishu-capture.mjs
           node --check src/feishu-daily-journal.mjs
+          node --check src/getnote-runtime.mjs
+          node --check src/getnote-runtime-server.mjs
+          node --check src/getnote-note-client.mjs
+          node --check src/getnote-insight.mjs
+          node --check src/getnote-insight-parser.mjs
+          node --check src/getnote-insight-service.mjs
+          node --check src/external-task-reconcile.mjs
           node --check src/task-cli.mjs
           node --check src/local-calendar.mjs
           node --check src/task-sync-domain.mjs
