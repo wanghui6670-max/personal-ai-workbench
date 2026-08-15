@@ -83,7 +83,7 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
   const {store}=await fixture(t,'paw-external-state-roundtrip-');
   await store.updateState(state=>{
     state.projects.push({
-      id:'p_local',name:'本地项目',intro:'',businessId:'biz_ai',folder:'本地项目',createdAt:'2026-08-01T00:00:00Z',startDate:'2026-08-01',endDate:'2026-09-01',git:'',feishu:'',sourceDescription:'',completed:false,archived:false,progress:null
+      id:'p_local',name:'本地项目',intro:'',businessId:'biz_ai',folder:'本地项目',createdAt:'2026-08-01T00:00:00Z',startDate:'2026-08-01',endDate:'2026-09-01',git:'',feishu:'',sourceDescription:'',completed:false,archived:false
     });
     state.todos.push({
       id:'td_stable',title:'联系供应商',context:'',dueDate:'2026-08-20',done:false,projectId:'p_local',createdAt:'2026-08-10T00:00:00Z',
