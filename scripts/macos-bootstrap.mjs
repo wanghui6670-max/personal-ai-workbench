@@ -13,6 +13,7 @@ import {
   chooseMacosWorkspace,
   envValuesFromSource,
   macosP0Updates,
+  macosUpgradeUpdates,
   restoreEnvFile,
   upsertEnvSource,
   writeEnvAtomically
@@ -30,6 +31,7 @@ let dataDir=null;
 let bootstrapReportPath=null;
 let succeeded=false;
 let processEnvBefore=null;
+let deploymentMode='first_install';
 
 function arg(name){const index=process.argv.indexOf(name);return index>=0?process.argv[index+1]||null:null;}
 function flag(name){return process.argv.includes(name);}
@@ -48,9 +50,9 @@ async function git(args){
   return String(result.stdout||'').trim();
 }
 
-function runNode(script,args=[]){
+function runNode(script,args=[],{env=process.env}={}){
   return new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,[script,...args],{cwd:appRoot,env:process.env,stdio:'inherit'});
+    const child=spawn(process.execPath,[script,...args],{cwd:appRoot,env,stdio:'inherit'});
     child.once('error',reject);
     child.once('close',(code,signal)=>resolve({code,signal}));
   });
@@ -91,6 +93,16 @@ async function readOptional(file){
   catch(error){if(error?.code==='ENOENT')return '';throw error;}
 }
 
+async function existingInstallPresent(directory){
+  try{
+    const raw=JSON.parse(await fsp.readFile(path.join(directory,'p0','macos-service.json'),'utf8'));
+    return raw?.label===label&&typeof raw?.commit==='string'&&raw.commit.length>=7;
+  }catch(error){
+    if(error?.code==='ENOENT'||error instanceof SyntaxError)return false;
+    throw error;
+  }
+}
+
 async function verifyRepository(){
   const branch=await git(['branch','--show-current']);
   if(branch!=='main')throw new Error(`一键部署只能从 main 运行；当前分支是 ${branch||'detached'}。请先运行 install-macos.command，它会安全切换并更新 main。`);
@@ -120,12 +132,17 @@ try{
   const workspaceRoot=await chooseMacosWorkspace({explicit:arg('--workspace'),existing:existing.WORKSPACE_ROOT,home});
   dataDir=await chooseMacosDataDir({explicit:arg('--data-dir'),existing:existing.DATA_DIR,appRoot,home});
   const port=Number(arg('--port')||existing.PORT||44173);
-  const updates=macosP0Updates({workspaceRoot,dataDir,port});
-  processEnvBefore=new Map(Object.keys(updates).map(key=>[key,{present:Object.hasOwn(process.env,key),value:process.env[key]}]));
   await fsp.mkdir(dataDir,{recursive:true,mode:0o700});
   bootstrapReportPath=path.join(dataDir,'p0','macos-bootstrap.json');
 
   previousServiceLoaded=await serviceLoaded();
+  const installedBefore=await existingInstallPresent(dataDir);
+  const preserveRuntime=!flag('--fresh-p0')&&(flag('--preserve-runtime')||previousServiceLoaded||installedBefore);
+  deploymentMode=preserveRuntime?'upgrade':'first_install';
+  const updates=preserveRuntime
+    ?macosUpgradeUpdates({workspaceRoot,dataDir,port})
+    :macosP0Updates({workspaceRoot,dataDir,port});
+
   if(previousServiceLoaded){
     console.log('检测到现有 Workbench LaunchAgent，先暂停服务；失败时会恢复。');
     await serviceCommand('stop');
@@ -133,29 +150,43 @@ try{
   if(!(await waitForPortFree(port)))throw new Error(`端口 127.0.0.1:${port} 被非 Workbench 进程占用，未执行覆盖。`);
 
   const updatedSource=upsertEnvSource(existingSource,updates);
+  const updatedValues=envValuesFromSource(updatedSource);
+  const processKeys=new Set([...Object.keys(updatedValues),...Object.keys(updates)]);
+  processEnvBefore=new Map([...processKeys].map(key=>[key,{present:Object.hasOwn(process.env,key),value:process.env[key]}]));
   envRecord=await writeEnvAtomically(envPath,updatedSource,{backupDir:path.join(dataDir,'p0','env-backups')});
-  Object.assign(process.env,updates);
+  Object.assign(process.env,updatedValues,updates);
+
+  console.log(`部署模式：${preserveRuntime?'升级（保留现有 Joycrew / Harness / AI Provider 配置）':'首次 P0（安全关闭外部 Runtime）'}`);
   console.log(`已绑定真实项目目录：${workspaceRoot}`);
   console.log(`已绑定持久化数据目录：${dataDir}`);
   console.log(`本机地址：${baseUrl(port)}`);
   if(envRecord.backupPath)console.log(`原 .env 已备份：${envRecord.backupPath}`);
 
-  const preflight=await runNode('scripts/p0-host-preflight.mjs');
+  // Preflight 始终在外部 Runtime 关闭的只读环境中执行，但升级模式不会改写
+  // .env 里已经通过现场验收的 Joycrew/Harness/Provider 开关和凭据。
+  const preflightEnv={
+    ...process.env,
+    JOYCREW_ENABLED:'0',
+    HARNESS_ENABLED:'0',
+    AI_PROVIDER_ENABLED:'0'
+  };
+  const preflight=await runNode('scripts/p0-host-preflight.mjs',[],{env:preflightEnv});
   if(preflight.code!==0)throw new Error('真实主机 P0 未通过，未安装常驻服务。');
 
   if(flag('--prepare-only')){
     if(previousServiceLoaded)await serviceCommand('start');
-    await writeReport({schemaVersion:1,status:'prepared',finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
+    await writeReport({schemaVersion:1,status:'prepared',deploymentMode,runtimeSettingsPreserved:preserveRuntime,finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
     succeeded=true;
     console.log('真实主机 P0 已通过；按 --prepare-only 要求未替换常驻服务。');
   }else{
-    await serviceCommand('install');
+    await serviceCommand('install',preserveRuntime?['--preserve-runtime']:[]);
     await serviceCommand('status');
     const url=baseUrl(port);
     if(!flag('--no-open'))await execResult('open',[url],{timeout:10_000});
-    await writeReport({schemaVersion:1,status:'installed',finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
+    await writeReport({schemaVersion:1,status:'installed',deploymentMode,runtimeSettingsPreserved:preserveRuntime,finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
     succeeded=true;
     console.log(`\n${PRODUCT_DISPLAY_NAME} v${PRODUCT_VERSION} 已在真实 Mac 上启动。`);
+    console.log(`Git 提交：${repository.commit.slice(0,12)}`);
     console.log(`打开：${url}`);
     console.log('状态：npm run service:macos -- status');
     console.log('日志：~/Library/Logs/PersonalAIWorkbench/');
@@ -174,7 +205,7 @@ try{
   if(previousServiceLoaded){
     await serviceCommand('start').catch(startError=>console.error(`恢复旧服务失败：${startError.message}`));
   }
-  await writeReport({schemaVersion:1,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord),previousServiceRestored:previousServiceLoaded}).catch(()=>undefined);
+  await writeReport({schemaVersion:1,status:'failed',deploymentMode,finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord),previousServiceRestored:previousServiceLoaded}).catch(()=>undefined);
   process.exitCode=1;
 }finally{
   if(!succeeded&&envRecord?.backupPath)console.error(`原配置备份仍保留：${envRecord.backupPath}`);
