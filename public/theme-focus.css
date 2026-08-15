@@ -95,10 +95,10 @@ html,body{background:var(--bg);color:var(--ink)}
 .harness-nav-head-actions button:hover{background:var(--dsh-surface-2)!important;color:var(--dsh-ink)!important;border-color:var(--dsh-line)!important}
 .harness-nav-messages{scrollbar-color:var(--dsh-line) transparent}
 .harness-nav-empty,.harness-nav-unavailable{color:var(--dsh-muted)!important}
-.harness-nav-empty{margin:72px auto auto!important;padding:18px 22px!important;max-width:360px!important}
+.harness-nav-empty{margin:44px auto auto!important;padding:16px 22px!important;max-width:360px!important}
 .harness-nav-empty-mark{background:var(--dsh-surface-2)!important;border-color:var(--dsh-line)!important;color:var(--dsh-ink)!important;box-shadow:none!important}
 .harness-nav-empty strong,.harness-nav-unavailable strong{color:var(--dsh-ink)!important}
-.harness-nav-empty-actions{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:16px}
+.harness-nav-empty-actions{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:14px}
 .harness-nav-empty-actions button{appearance:none;border:1px solid var(--dsh-line);background:var(--dsh-surface);color:var(--dsh-ink);border-radius:7px;padding:6px 9px;font:inherit;font-size:10px;cursor:pointer}
 .harness-nav-empty-actions button:hover{background:var(--dsh-surface-2);border-color:color-mix(in srgb,var(--accent) 35%,var(--dsh-line))}
 .harness-nav-message{color:var(--dsh-ink)!important}
@@ -121,7 +121,9 @@ html.today-focus .capture{margin-bottom:14px}
 html.today-focus .capture input{min-height:42px}
 html.today-focus .grid{grid-template-columns:1fr;gap:0;align-items:start}
 html.today-focus .grid>.card{box-shadow:none}
-html.today-focus .grid>section.card.pad{padding:22px;min-height:340px}
+html.today-focus .grid>section.card.pad{padding:22px;min-height:280px}
+html.today-focus .grid>section.card.pad.today-primary-empty{min-height:180px;padding-bottom:18px}
+html.today-focus .grid>section.card.pad.today-primary-empty>.empty{min-height:74px;display:grid;place-items:center;align-content:center}
 html.today-focus .human-decision-card{padding:14px 16px;box-shadow:none}
 html.today-focus .today-decision-row{margin-top:14px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:16px}
 html.today-focus .today-decision-row .card-head{margin:0;align-items:center}
