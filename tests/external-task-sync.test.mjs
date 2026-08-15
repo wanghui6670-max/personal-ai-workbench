@@ -24,7 +24,7 @@ class FakeStore{
 
 function taskSource(active){
   return{
-    provider:'getnote_cli',noteCount:3,recentNoteCount:2,trackedNoteCount:1,todoCount:3,fetchedAt:'2026-08-14T00:00:00Z',completedAvailable:true,completedWarning:null,
+    provider:'getnote_cli',noteCount:3,recentNoteCount:2,trackedNoteCount:1,todoCount:active.length+1,fetchedAt:'2026-08-14T00:00:00Z',completedAvailable:true,completedWarning:null,
     active,
     completed:[{externalId:'done-1',externalIdentityKind:'text_fingerprint',title:'旧的得到大脑任务',done:true,completedAt:'2026-08-14T08:00:00Z',sourceNoteId:'old-note',sourceNoteTitle:'复盘会'}]
   };
@@ -56,6 +56,38 @@ test('GetNote core commits to Workbench before Feishu/ICS sinks and never auto-a
   assert.equal(store.state.todos.find(todo=>todo.externalId==='done-1').done,true);
   assert.deepEqual(store.state.todayPlan,[],'only explicit source completion removes the old Today task');
   assert.equal(store.state.todayPlan.includes(store.state.todos.find(todo=>todo.externalId==='active-1').id),false);
+});
+
+test('Feishu snapshot and ICS derive from committed Workbench state after a local due-date override',async()=>{
+  const store=new FakeStore('/tmp/fake-committed-sinks');
+  await updateExternalTaskIntegration({store,patch:{enabled:true,noteLimit:100,timeZone:'Asia/Shanghai',journalDocumentUrl:'https://example.feishu.cn/wiki/journal',calendarEnabled:true}});
+  store.state.todos.push({
+    id:'td-local-owned',title:'本地覆盖事项',context:'',dueDate:'2026-08-22',dueAt:'2026-08-22',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
+    done:false,projectId:null,createdAt:'2026-08-10T00:00:00Z',priority:0,priorityLabel:'',tags:[],
+    source:'getnote_cli',externalId:'owned-1',externalIdentityKind:'text_fingerprint',externalStatus:'active_local_due_date_override',
+    sourceDueDate:'2026-08-20',sourceNoteId:'owned-note',sourceNoteTitle:'所有权会议'
+  });
+  const incoming={
+    externalId:'owned-1',externalIdentityKind:'text_fingerprint',title:'本地覆盖事项',content:'',dueDate:'2026-08-25',dueAt:'2026-08-25',startAt:null,
+    allDay:true,timeZone:'Asia/Shanghai',updatedAt:'2026-08-14T00:00:00Z',done:false,tags:[],sourceNoteId:'owned-note',sourceNoteTitle:'所有权会议',todoSource:'summary'
+  };
+  let journalText='';let mirrored=[];
+  const result=await syncExternalTasks({
+    store,
+    taskClient:{fetch:async()=>taskSource([...activeTasks,incoming])},
+    journalClient:{appendTasks:async(url,text)=>{journalText=text;return{item:{blockId:'journal-owned'},replayed:false};}},
+    calendarWriter:async({tasks})=>{mirrored=structuredClone(tasks);return{enabled:true,path:'/tmp/owned.ics',eventCount:2,writtenAt:'2026-08-14T01:00:00Z'};}
+  });
+  const persisted=store.state.todos.find(todo=>todo.externalId==='owned-1');
+  assert.equal(result.changes.localDuePreserved,1);
+  assert.equal(persisted.dueDate,'2026-08-22');
+  assert.equal(persisted.sourceDueDate,'2026-08-25');
+  assert.match(journalText,/本地覆盖事项｜2026-08-22/);
+  assert.doesNotMatch(journalText,/本地覆盖事项｜2026-08-25/);
+  const calendarTask=mirrored.find(task=>task.externalId==='owned-1');
+  assert.ok(calendarTask);
+  assert.equal(calendarTask.dueDate,'2026-08-22');
+  assert.equal(calendarTask.sourceDueDate,'2026-08-25');
 });
 
 test('Feishu and calendar failures are reported as sink errors after Workbench commit',async()=>{
