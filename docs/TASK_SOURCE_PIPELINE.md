@@ -33,6 +33,10 @@ getnote doctor -o json
 
 不会从设置中接收任意 shell、argv 模板或外部命令。VPS/Docker 也可以通过受控私网 Runtime sidecar 使用同一 Reader 合同。
 
+当前官方 GetNote CLI 推荐使用 `data.cursor` 翻页；`next_cursor` / `nextCursor` 只作为兼容 fallback。所有 note ID 和 cursor 都按字符串处理，不经 JavaScript Number。
+
+`getnote` 子进程不会继承整个 Workbench 环境，只得到运行/网络必需项和 GetNote 自身认证覆盖。AI Provider、Joycrew、Workbench Session、private Runtime service token 等无关秘密不会下放给第三方 CLI。
+
 如果笔记没有明确待办章节，得到大脑返回空列表；Workbench 接受空列表，**不使用模型猜测**、不从整篇正文自行生成正式任务。正文 AI 解析属于独立的 GetNote Insight 链路。
 
 ## 3. 扫描窗口与旧任务追踪
@@ -117,7 +121,14 @@ note.createdAt
 Asia/Shanghai
 ```
 
-定时 ICS 事件使用该 `TZID`，不能依赖 VPS 的系统时区解释无 offset 的本地时间。
+该时区不仅用于 ICS `TZID`，也用于：
+
+- 把带 offset 的 `note.createdAt / updatedAt` 解释成来源当地日期；
+- “当前日期 fallback”；
+- 每次同步的当日快照日期和逾期边界；
+- 每日总结默认日期。
+
+因此 VPS 运行在 UTC 或其他系统时区时，上海午夜附近也不会把“今天”或工作日日界线算错一天。
 
 以下模糊表达仍然不自动转成正式日期：
 
@@ -214,6 +225,8 @@ Workbench committed
        └─→ ICS 原子重建
 ```
 
+**两个 sink 都从已经提交的 Workbench 状态派生**，不直接使用原始 `source.active`。因此用户本地覆盖的 `dueDate`、保留在 Today 的无来源日期 Todo，以及其他 Workbench 所有权决定不会被派生输出重新换回旧来源值。
+
 飞书或 ICS 失败时：
 
 - 不回滚 Workbench；
@@ -221,6 +234,8 @@ Workbench committed
 - `lastSyncStatus=ok_with_sink_errors`；
 - 本地留下不含任务正文的 `external_task_sink_failed` 审计事件；
 - 允许之后重试派生输出。
+
+如果核心与 sink 已完成、但最后的同步状态元数据写入失败，返回 `metadata.status=error`；前端必须明确展示“核心已提交，状态元数据异常”，不能把它说成核心失败，也不能伪装全绿。
 
 因此不会再出现“飞书临时不可用 → 得到大脑任务也无法进入 Workbench”。
 
@@ -241,6 +256,10 @@ journal.status = not_configured
 ```
 
 同一 operationId 若已经对应不同正文，返回 `FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT`。
+
+`lark-cli` 可能把单一段落内部换行在读回时折叠。幂等比较只把这种**换行边界**视为等价，不忽略普通空格或其他正文差异；真实不同正文仍 fail closed。
+
+`lark-cli` 子进程只得到基础运行/网络环境和 `LARK_* / FEISHU_*` 配置，不继承 Workbench、AI、Joycrew 或 GetNote 的无关环境变量。
 
 每日总结是显式用户动作，仍然要求已经配置飞书每日工作日记 URL；未配置时返回 `FEISHU_DAILY_JOURNAL_NOT_CONFIGURED`。不会后台自动发布。
 
@@ -308,4 +327,4 @@ getnote notes --limit 20 -o json
 getnote note todos <note_id> -o json
 ```
 
-仓库合同测试继续使用 fake reader、fake 飞书和临时目录，不接触真实凭证。
+仓库合同测试继续使用 fake reader、fake 飞书和临时目录，不接触真实凭证。外部 CLI 环境隔离、canonical cursor、时区跨日、Workbench-owned sink 快照和飞书换行折叠都必须有自动化合同覆盖。
