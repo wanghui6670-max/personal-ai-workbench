@@ -149,3 +149,21 @@ test('daily summary writes narrative to Feishu, keeps only an audit event locall
   assert.equal(store.state.activities.filter(activity=>activity.type==='daily_summary_published').length,2);
   assert.equal(store.state.activities.some(activity=>/供应商/.test(activity.text)),false);
 });
+
+test('daily summary buckets completion and activity timestamps in the configured IANA timezone',async()=>{
+  const store=new FakeStore('/tmp/fake-summary-timezone');
+  await updateExternalTaskIntegration({store,patch:{enabled:true,noteLimit:100,timeZone:'Asia/Shanghai',journalDocumentUrl:'https://example.feishu.cn/wiki/journal'}});
+  store.state.todos.push({
+    id:'td-shanghai-midnight',title:'上海跨日完成',context:'',dueDate:'2026-08-16',done:true,projectId:null,createdAt:'2026-08-10T00:00:00Z',
+    source:'getnote_cli',externalId:'cross-day',completedAt:'2026-08-15T16:30:00.000Z'
+  });
+  store.state.activities.push({id:'a-cross-day',type:'manual_action',text:'上海跨日动作',at:'2026-08-15T16:45:00.000Z'});
+  let captured='';
+  await publishDailySummary({
+    store,date:'2026-08-16',
+    journalClient:{appendSummary:async(url,text)=>{captured=text;return{item:{blockId:'summary-tz'},replayed:false};}}
+  });
+  assert.match(captured,/今日完成：1/);
+  assert.match(captured,/上海跨日完成/);
+  assert.match(captured,/上海跨日动作/);
+});
