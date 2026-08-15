@@ -14,7 +14,7 @@ import {
 
 async function temp(t){const root=await fsp.mkdtemp(path.join(os.tmpdir(),'host-p0-test-'));t.after(()=>fsp.rm(root,{recursive:true,force:true}));return root;}
 
-test('real-host binding requires explicit separate paths, localhost, and Joycrew disabled',()=>{
+test('real-host binding requires explicit separate paths, localhost, and Joycrew disabled only when requested',()=>{
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'data',workspaceRoot:'/work'}),/绝对 DATA_DIR/);
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/same',workspaceRoot:'/same'}),/彼此独立/);
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/data/work'}),/彼此独立/);
@@ -47,17 +47,24 @@ test('content snapshot ignores safe rewrite timestamps but detects real data cha
   assert.equal(before.counts.contentHashedFiles,1);
 });
 
-test('macOS LaunchAgent plist uses direct Node arguments and contains no service secrets',()=>{
+test('macOS LaunchAgent plist uses direct Node arguments, pins the Git commit, and contains no service secrets',()=>{
+  const commit='a'.repeat(40);
   const plist=buildMacosLaunchAgentPlist({
     label:'com.example.workbench',appRoot:'/Users/test/AI & Workbench',nodePath:'/opt/homebrew/bin/node',
     home:'/Users/test',pathEnv:'/opt/homebrew/bin:/usr/bin:/bin',
-    stdoutPath:'/Users/test/Library/Logs/Workbench/out.log',stderrPath:'/Users/test/Library/Logs/Workbench/error.log'
+    stdoutPath:'/Users/test/Library/Logs/Workbench/out.log',stderrPath:'/Users/test/Library/Logs/Workbench/error.log',
+    buildCommit:commit
   });
   assert.match(plist,/ProgramArguments/);
   assert.match(plist,/\/opt\/homebrew\/bin\/node/);
   assert.match(plist,/AI &amp; Workbench/);
+  assert.match(plist,/WORKBENCH_BUILD_COMMIT/);
+  assert.match(plist,new RegExp(commit));
   assert.doesNotMatch(plist,/WORKBENCH_PASSWORD|SESSION_SECRET|CAPTURE_TOKEN|OPENAI_API_KEY|JOYCREW_TRUSTED_PROXY_TOKEN/);
   assert.doesNotMatch(plist,/\/bin\/(?:ba|z)?sh|source |eval /);
+  assert.throws(()=>buildMacosLaunchAgentPlist({
+    label:'com.example.workbench',appRoot:'/app',nodePath:'/node',home:'/home',pathEnv:'/bin',stdoutPath:'/out',stderrPath:'/err',buildCommit:'short'
+  }),/40 位 Git SHA/);
 });
 
 test('LaunchAgent install gate binds a recent report to version, commit, and paths',()=>{
@@ -88,9 +95,11 @@ test('host scripts never use shell evaluation for service control',async()=>{
   }
   assert.match(preflight,/JOYCREW_ENABLED:'0'/);
   assert.match(service,/validateHostReadinessReport/);
+  assert.match(service,/WORKBENCH_BUILD_COMMIT/);
+  assert.match(service,/--preserve-runtime/);
 });
 
-test('macOS host P0 documentation and package scripts expose the guarded sequence',async()=>{
+test('macOS host P0 documentation and package scripts expose the guarded first-install sequence',async()=>{
   const [document,packageJson]=await Promise.all([
     fsp.readFile(new URL('../docs/MACOS_HOST_P0.md',import.meta.url),'utf8'),
     fsp.readFile(new URL('../package.json',import.meta.url),'utf8').then(JSON.parse)
