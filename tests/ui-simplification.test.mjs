@@ -6,7 +6,7 @@ async function read(file){return fsp.readFile(file,'utf8');}
 
 test('Harness Copilot 未启用时不渲染卡片',async()=>{
   const script=await read('public/harness-navigator.js');
-  assert.match(script,/const visible=available\|\|Boolean\(status\?\.enabled\)/);
+  assert.match(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
   assert.match(script,/if\(!visible\)\{root\?\.remove\(\);lastMountedHtml='';return;\}/);
 });
 
