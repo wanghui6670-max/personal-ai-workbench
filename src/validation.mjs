@@ -7,7 +7,7 @@ const STATE_ENTITY_FIELDS = STATE_ARRAY_FIELDS.filter(field=>field!=='todayPlan'
 const STATE_ID_ENTITY_FIELDS = STATE_ENTITY_FIELDS.filter(field=>field!=='activities');
 const SAFE_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const SHA256_PATTERN=/^[a-f0-9]{64}$/;
-const GETNOTE_SOURCE_DECISIONS=new Set(['dismissed','memo','project_note']);
+const GETNOTE_SOURCE_DECISIONS=new Set(['dismissed','memo','project_note','project_created']);
 const GETNOTE_DUE_DATE_OWNERS=new Set(['source','user']);
 const GETNOTE_DECISION_FIELDS=new Set(['id','source','externalId','sourceNoteId','disposition','decidedAt']);
 const MAX_EXTERNAL_TASK_DECISIONS=2000;
