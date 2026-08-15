@@ -32,12 +32,16 @@ function validDate(year,month,day){
   if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
   return `${year}-${pad(month)}-${pad(day)}`;
 }
-function referenceDateOnly(value){
+function referenceDateOnly(value,fallbackDateOnly=null){
   const text=String(value||'').trim();
   const direct=text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if(direct&&validDate(Number(direct[1]),Number(direct[2]),Number(direct[3])))return `${direct[1]}-${direct[2]}-${direct[3]}`;
-  const date=new Date(value||Date.now());
-  return Number.isFinite(date.getTime())?date.toISOString().slice(0,10):new Date().toISOString().slice(0,10);
+  if(text){
+    const date=new Date(text);
+    if(Number.isFinite(date.getTime()))return date.toISOString().slice(0,10);
+  }
+  if(fallbackDateOnly&&/^\d{4}-\d{2}-\d{2}$/.test(fallbackDateOnly))return fallbackDateOnly;
+  return new Date().toISOString().slice(0,10);
 }
 function addDays(dateOnly,days){
   const date=new Date(`${dateOnly}T00:00:00.000Z`);
@@ -82,9 +86,22 @@ export function normalizeGetnoteTimeZone(value=DEFAULT_TIME_ZONE){
   return timeZone;
 }
 
-export function parseTodoSchedule(text,{referenceDate=new Date().toISOString().slice(0,10),timeZone=DEFAULT_TIME_ZONE}={}){
+export function getnoteDateOnlyInTimeZone(value=new Date(),timeZone=DEFAULT_TIME_ZONE){
   const zone=normalizeGetnoteTimeZone(timeZone);
-  const base=referenceDateOnly(referenceDate);
+  const date=value instanceof Date?value:new Date(value);
+  if(!Number.isFinite(date.getTime()))throw new ExternalTaskSourceError('得到大脑任务日期基准无效。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
+  const parts=new Intl.DateTimeFormat('en-US',{
+    timeZone:zone,calendar:'gregory',numberingSystem:'latn',year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(date);
+  const fields=Object.fromEntries(parts.filter(part=>['year','month','day'].includes(part.type)).map(part=>[part.type,part.value]));
+  if(!fields.year||!fields.month||!fields.day)throw new ExternalTaskSourceError('得到大脑任务日期基准无法按时区解析。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:500});
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+export function parseTodoSchedule(text,{referenceDate=null,timeZone=DEFAULT_TIME_ZONE}={}){
+  const zone=normalizeGetnoteTimeZone(timeZone);
+  const fallback=getnoteDateOnlyInTimeZone(new Date(),zone);
+  const base=referenceDateOnly(referenceDate,fallback);
   const dueDate=parseDate(String(text||''),base);
   if(!dueDate)return{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:zone};
   const time=parseTime(String(text||''));
@@ -150,8 +167,9 @@ export function parseMeetingTodos(payload,note={},options={}){
   const noteUrl=firstText(data?.note_url,data?.noteUrl,note.noteUrl)||'';
   const source=firstText(container.source)||'meeting_summary';
   const items=Array.isArray(container.items)?container.items:[];
-  const referenceDate=referenceDateOnly(note.createdAt||note.updatedAt||new Date().toISOString());
   const timeZone=normalizeGetnoteTimeZone(options.timeZone||DEFAULT_TIME_ZONE);
+  const fallbackReferenceDate=getnoteDateOnlyInTimeZone(new Date(),timeZone);
+  const referenceDate=referenceDateOnly(note.createdAt||note.updatedAt||'',fallbackReferenceDate);
   const occurrences=new Map();
   const tasks=[];
   for(const item of items){
