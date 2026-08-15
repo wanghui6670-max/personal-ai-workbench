@@ -43,6 +43,13 @@ test('旧 Workbench AI 入口在接管态直接路由成 DSH 对话',async()=>{
   assert.match(script,/data-ux-action="ai-close"/);
 });
 
+test('旧 rail 偏好在 DSH 接管态不会留下空白窄栏',async()=>{
+  const styles=await read('public/harness-navigator.css');
+  assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.ai-panel\.harness-primary>\[data-harness-navigator-mount\]\{display:flex!important\}/);
+  assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.layout:has\(\.ai-panel\.harness-primary\)/);
+  assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.ai-panel\.harness-primary\{height:620px/);
+});
+
 test('通过 attestation 的原生 DSH Web 也无外层 Workbench chrome 地铺满右栏',async()=>{
   const [script,styles]=await Promise.all([read('public/harness-navigator.js'),read('public/harness-navigator.css')]);
   assert.match(script,/status\?\.uiMode==='embedded_experimental'/);
