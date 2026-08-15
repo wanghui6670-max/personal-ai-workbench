@@ -40,3 +40,12 @@ test('顶栏不再有同步类按钮，三个迁移按钮在对应页面',async(
   assert.match(script,/data-action="sync-feishu">同步得到大脑待办/);
   assert.match(script,/data-getnote-action="publish-summary">沉淀今日总结/);
 });
+
+test('设置入口在侧边栏底部，顶栏只剩新建项目',async()=>{
+  const script=await read('public/app.js');
+  const topbar=(script.match(/function topbar\([^)]*\)\{return `([^`]*)`;\}/)||[])[1]||'';
+  assert.match(topbar,/data-action="new-project"/);
+  assert.doesNotMatch(topbar,/data-action="settings"/);
+  assert.match(script,/class="sidebar-foot"/);
+  assert.match(script,/class="settings-link" data-action="settings"/);
+});

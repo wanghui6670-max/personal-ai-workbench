@@ -63,9 +63,9 @@ function sidebar(){
       ${navLink('overdue',`${icon('!')} 逾期项目`,state.stats.overdue,'overdue')}
       ${navLink('archived',`${icon('▣')} 已归档`,'','archived')}
     </div>
-  </nav></aside>`;
+  </nav><div class="sidebar-foot"><button class="settings-link" data-action="settings">${icon('⚙')} 设置</button></div></aside>`;
 }
-function topbar(title,desc='',actions=''){return `<header class="topbar"><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost mobile-toggle" data-action="toggle-side">☰</button><div class="top-left"><h1>${esc(title)}</h1><p>${esc(desc)}</p></div></div><div class="actions"><button class="btn primary" data-action="new-project">新建项目</button><button class="btn" data-action="settings">设置</button>${actions}</div></header>`;}
+function topbar(title,desc='',actions=''){return `<header class="topbar"><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost mobile-toggle" data-action="toggle-side">☰</button><div class="top-left"><h1>${esc(title)}</h1><p>${esc(desc)}</p></div></div><div class="actions"><button class="btn primary" data-action="new-project">新建项目</button>${actions}</div></header>`;}
 function shell(content,title,desc='',actions=''){return `<div class="layout"><div class="human-side">${sidebar()}<section class="content">${topbar(title,desc,actions)}<main class="main"><form class="capture" id="capture-form"><input id="capture-input" autocomplete="off" placeholder="随时记下来：所有新事项先进入收件箱，不立即处理…"><button class="btn primary">记到收件箱</button></form>${content}</main></section></div>${aiConsole()}</div>${modal}`;}
 
 function duePill(due){if(!due)return'';const delta=Math.ceil((new Date(`${due}T23:59:59`)-new Date())/86400000);if(delta<0)return`<span class="pill red">已过期 ${Math.abs(delta)} 天</span>`;if(delta===0)return`<span class="pill amber">今天截止</span>`;if(delta<=2)return`<span class="pill amber">${delta} 天后截止</span>`;return`<span class="pill">截止 ${fmtDate(due)}</span>`;}
