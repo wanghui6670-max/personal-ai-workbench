@@ -107,16 +107,22 @@ function localStateFromInbox(item,task,now){return{
 function localDueReference(todo,incomingSourceDueDate=null){
   if(typeof todo?.sourceDueDate==='string'&&todo.sourceDueDate)return todo.sourceDueDate;
   if(typeof todo?.sourcePreviousDueDate==='string'&&todo.sourcePreviousDueDate)return todo.sourcePreviousDueDate;
-  // Legacy GetNote todos predate sourceDueDate. On the first v2 sync, a
-  // mismatch is treated conservatively as a user-owned local date rather than
-  // silently overwriting it with a newly observed source date.
+  // Legacy GetNote todos predate sourceDueDate. On the first v2 sync with an
+  // explicit incoming source date, compare the existing dueDate against that
+  // newly observed source date. A mismatch is conservatively user-owned.
   if(incomingSourceDueDate&&typeof todo?.dueDate==='string'&&todo.dueDate)return incomingSourceDueDate;
   return null;
 }
 function hasLocalDueOverride(todo,incomingSourceDueDate=null){
   if(!todo||typeof todo.dueDate!=='string'||!todo.dueDate)return false;
   const reference=localDueReference(todo,incomingSourceDueDate);
-  return Boolean(reference&&todo.dueDate!==reference);
+  if(reference)return todo.dueDate!==reference;
+  // No sourceDueDate/sourcePreviousDueDate means this is a legacy v1 entity and
+  // there is no safe evidence that its current local date still equals the old
+  // source plan. On the first v2 sync, preserve it rather than silently remove
+  // or overwrite a possibly user-edited date.
+  const hasSourceHistory=Object.hasOwn(todo,'sourceDueDate')||Object.hasOwn(todo,'sourcePreviousDueDate');
+  return !hasSourceHistory;
 }
 function localSchedule(todo){
   const dueDate=todo.dueDate;
