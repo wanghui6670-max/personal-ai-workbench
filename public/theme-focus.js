@@ -14,7 +14,7 @@ function applyTheme(theme,{persist=false}={}){
   const next=THEME_VALUES.has(theme)?theme:'light';
   document.documentElement.dataset.theme=next;
   const meta=document.querySelector('meta[name="theme-color"]');
-  if(meta)meta.setAttribute('content',next==='dark'?'#0f1115':'#f8fafc');
+  if(meta)meta.setAttribute('content',next==='dark'?'#0b1020':'#fafbfc');
   if(persist){
     try{localStorage.setItem(THEME_KEY,next);}catch{}
   }
@@ -113,6 +113,27 @@ function simplifyDecisionCard(card){
   setTextIfChanged(attention,'需要处理');
 }
 
+function normalizeTodayDashboard(main,grid){
+  let statRow=main.querySelector(':scope > .stat-row');
+  const legacyWrapper=main.querySelector(':scope > .today-stats-details');
+  if(!statRow&&legacyWrapper){
+    statRow=legacyWrapper.querySelector('.stat-row');
+    if(statRow)legacyWrapper.replaceWith(statRow);
+  }
+  if(!statRow)return null;
+  statRow.classList.add('today-dashboard');
+  statRow.dataset.todayDashboard='';
+  const labels=['今日','收件箱','项目','需处理'];
+  const tones=['primary','neutral','neutral','attention'];
+  [...statRow.querySelectorAll(':scope > .stat')].forEach((stat,index)=>{
+    stat.classList.add('today-dashboard-item');
+    stat.dataset.tone=tones[index]||'neutral';
+    setTextIfChanged(stat.querySelector('.l'),labels[index]||stat.querySelector('.l')?.textContent||'');
+  });
+  if(statRow.nextElementSibling!==grid)grid.insertAdjacentElement('beforebegin',statRow);
+  return statRow;
+}
+
 function simplifyToday(){
   const isToday=(location.hash||'#today').slice(1).split('/')[0]==='today';
   document.documentElement.classList.toggle('today-focus',isToday);
@@ -122,13 +143,15 @@ function simplifyToday(){
   const grid=main.querySelector('.grid');
   if(!grid)return;
 
+  normalizeTodayDashboard(main,grid);
+
   const primary=grid.querySelector('section.card.pad');
   setTextIfChanged(primary?.querySelector('.card-desc'),'只显示你明确加入今天的任务。');
   const empty=primary?.querySelector('.empty');
   const primaryEmpty=Boolean(empty&&empty.textContent.includes('今天还没有正式安排任务'));
   if(primary)primary.classList.toggle('today-primary-empty',primaryEmpty);
   if(primaryEmpty){
-    const emptyHtml='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';
+    const emptyHtml='<div class="today-empty-copy"><strong>今天还没有明确安排</strong><span>从待办中选真正要推进的事项。</span></div><a class="today-empty-action" href="#tasks">查看待办</a>';
     if(empty.innerHTML!==emptyHtml)empty.innerHTML=emptyHtml;
   }
 
@@ -137,12 +160,6 @@ function simplifyToday(){
   simplifyDecisionCard(decision);
   if(decision?.parentElement===grid)grid.insertAdjacentElement('afterend',decision);
   if(recent?.parentElement===primary)(decision||grid).insertAdjacentElement('afterend',recent);
-
-  const statRow=main.querySelector(':scope > .stat-row');
-  if(statRow){
-    const wrapped=wrapSecondary(statRow,{className:'today-stats-details',label:'工作概览'});
-    if(wrapped)(recent||decision||grid).insertAdjacentElement('afterend',wrapped);
-  }
 
   const projectSection=[...main.querySelectorAll(':scope > section.card.pad')].find(section=>section.querySelector('.card-title')?.textContent.trim()==='所有项目进度');
   if(projectSection)wrapSecondary(projectSection,{className:'today-project-details',label:'项目进度'});
