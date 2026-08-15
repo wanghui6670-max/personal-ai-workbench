@@ -18,7 +18,7 @@ import { loadWorkbenchEnv } from './env.mjs';
 import { inspectReadiness } from './health.mjs';
 import { requestSchemas,validateRequestBody } from './request-validation.mjs';
 import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/registry.mjs';
-import { createHarnessNavigator } from './harness-navigator.mjs';
+import { createHarnessNavigator, resolveHarnessWebUrl } from './harness-navigator.mjs';
 import { createHarnessHttp } from './harness-http.mjs';
 import { harnessBridgeBaseUrl } from './harness-auth.mjs';
 import { createJoycrewClient, JoycrewClientError } from './joycrew-client.mjs';
@@ -89,7 +89,12 @@ function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,pla
 const rateLimitConfig=endpointRateLimitConfig();
 const endpointLimiter=createEndpointRateLimiter(rateLimitConfig);
 
-function withSecurity(res){const raw=res.writeHead.bind(res);res.writeHead=(status,headers={})=>raw(status,{...securityHeaders(),...headers});return res;}
+function withSecurity(res,pathname=''){
+  const allowAnyFrame=pathname==='/preview.html';
+  const raw=res.writeHead.bind(res);
+  res.writeHead=(status,headers={})=>raw(status,{...securityHeaders({allowAnyFrame,frameSrc:harnessFrameSrc}),...headers});
+  return res;
+}
 function notFound(res){return sendJson(res,404,{error:'Not found'});}
 function unauthorized(res){return sendJson(res,401,{error:'未登录'});}
 function methodNotAllowed(res,allowed){return sendJson(res,405,{error:'Method not allowed'},{Allow:allowed});}
@@ -103,12 +108,18 @@ function rateLimited(req,res,scope){
 async function apiState(){return deriveState(APP_ROOT,await store.readState(),await store.readConfig(),aiEnabled());}
 async function requestBody(req,schema){return validateRequestBody(await readJsonBody(req),schema);}
 
+const harnessWebUrl=resolveHarnessWebUrl(process.env);
+const harnessFrameSrc=harnessWebUrl?new URL(harnessWebUrl).origin:'';
+
 const server=http.createServer(async(req,rawRes)=>{
-  const res=withSecurity(rawRes);
+  let res=rawRes;
   try{
+    const earlyUrl=new URL(req.url,`http://${req.headers.host||'localhost'}`);
+    const earlyPath=decodeURIComponent(earlyUrl.pathname);
+    res=withSecurity(rawRes,earlyPath);
     const guardFailure=guardRequest(req);
     if(guardFailure)return sendJson(res,guardFailure.status,{error:guardFailure.error});
-    const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);const pathname=decodeURIComponent(url.pathname);
+    const url=earlyUrl;const pathname=earlyPath;
 
     if(pathname==='/api/health'&&req.method==='GET'){
       try{

@@ -97,6 +97,18 @@ export function resolveHarnessProviderConfig(env=process.env){
   };
 }
 
+export function resolveHarnessWebUrl(env=process.env){
+  const value=firstNonEmpty(env.HARNESS_WEB_URL,'http://127.0.0.1:3080/');
+  let url;
+  try{url=new URL(value);}catch{return null;}
+  if(!['http:','https:'].includes(url.protocol))return null;
+  if(url.username||url.password)return null;
+  const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,'');
+  if(host!=='127.0.0.1'&&host!=='localhost'&&host!=='::1')return null;
+  url.hash='';
+  return url.toString();
+}
+
 export function buildHarnessChildEnv({env=process.env,provider,bridgeUrl,bridgeToken}){
   const child=Object.create(null);
   for(const key of PASSTHROUGH_ENV_KEYS){
@@ -298,6 +310,7 @@ export class HarnessNavigatorRuntime{
       mode:'read_only',
       persistence:'memory_only',
       toolCount:HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,
+      webUrl:this.env.HARNESS_ENABLED==='1'?resolveHarnessWebUrl(this.env):null,
       lastErrorCode:this.lastErrorCode
     };
   }
