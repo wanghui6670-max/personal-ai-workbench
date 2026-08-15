@@ -5,7 +5,8 @@
 .ai-panel.harness-primary>.ai-chat,
 .ai-panel.harness-primary>.ai-plan,
 .ai-panel.harness-primary>.ai-input,
-.ai-panel.harness-primary>.ai-foot{display:none!important}
+.ai-panel.harness-primary>.ai-foot,
+.ai-panel.harness-primary>.ux-morning-panel{display:none!important}
 .ai-panel.harness-primary>[data-harness-navigator-mount]{flex:1;min-width:0;min-height:0;width:100%;display:flex;overflow:hidden}
 .harness-nav-card{flex:1;min-width:0;min-height:0;margin:0;border:0;border-radius:0;padding:0;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 30%,#102650 0,#091a3a 34%,#071633 74%);color:#eef4ff;box-shadow:none;overflow:hidden}
 .harness-nav-head{height:62px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 15px;border-bottom:1px solid rgba(147,174,220,.13);background:rgba(6,19,44,.72);backdrop-filter:blur(14px)}
