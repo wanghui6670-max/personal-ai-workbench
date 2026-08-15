@@ -4,30 +4,54 @@ Personal AI Workbench 必须运行在能访问以下资源的长期主机上：
 
 - 持久化数据目录；
 - 真实项目工作区；
-- 已安装、具备可用会员权限并完成登录的得到大脑 `getnote` CLI；
-- 已登录的 `lark-cli`；
-- 本机 ICS 输出目录。
+- 可用的只读 GetNote 运行时；
+- 可选：飞书项目记录或每日工作日记需要的 `lark-cli`；
+- 私有 ICS 输出目录。
 
-普通无状态云函数不能直接读取笔记本项目，也不能天然访问本机 CLI 登录态。
+普通无状态云函数不能直接读取真实项目工作区，也不能天然持有得到大脑或飞书 CLI 登录态。
 
-## 1. 推荐：原生运行
+## 1. 两种 GetNote 运行形态
 
-```bash
-cp .env.example .env
-npm run doctor
-npm start
-```
-
-默认：
+业务层统一使用 `GetNoteReader`：
 
 ```text
-HOST=127.0.0.1
-PORT=4173
+listNotes
+fetchTodos
+fetchNote
+status
 ```
 
-设置页配置真实项目工作区、得到大脑最近笔记扫描数量、飞书《每日工作日记》URL、本机日历开关和日历名称。
+### 本地/原生：`local_cli`
 
-## 2. 得到大脑 CLI
+```dotenv
+GETNOTE_RUNTIME_MODE=local_cli
+```
+
+工作台进程所在用户必须安装并授权 `getnote`。
+
+### VPS/Docker 推荐：`private_http`
+
+```text
+VPS 宿主机 getnote CLI
+        ↓
+只读 GetNote Runtime sidecar
+        ↓ private_http + service token
+Workbench Docker
+```
+
+Workbench 镜像不安装 getnote CLI、不烘焙得到大脑凭证。CLI 登录态留在 VPS 宿主机。
+
+Workbench `.env`：
+
+```dotenv
+GETNOTE_RUNTIME_MODE=private_http
+GETNOTE_RUNTIME_BASE_URL=http://host.docker.internal:4310
+GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
+```
+
+Runtime 只允许 loopback/私网/Docker 内部地址，不允许公网 origin 或 redirect。
+
+## 2. VPS 宿主机 GetNote CLI
 
 安装或更新：
 
@@ -35,38 +59,111 @@ PORT=4173
 npx -y @getnote/cli@latest setup
 ```
 
-程序只执行固定二进制：
-
-```text
-getnote
-```
-
-受控只读命令：
+本地 CLI transport 的固定只读命令：
 
 ```text
 getnote notes --limit <20-500> [--cursor <cursor>] -o json
 getnote note todos <note_id> -o json
+getnote note <note_id> -o json
 getnote doctor -o json
 ```
 
-CLI 必须安装并登录在运行工作台的同一操作系统用户下。工作台不读取、请求或保存 CLI token、cookie 或登录文件。
+Workbench 不读取、请求或保存 CLI token、cookie 或登录文件。
 
-`getnote notes` 分页读取最近笔记；`getnote note todos` 读取每篇笔记的 `meeting_todos.source` 和 `meeting_todos.items`。没有明确待办章节时，上游返回空列表，工作台不使用模型猜测。
-
-部署前可直接检查：
+宿主机可做只读验证：
 
 ```bash
 getnote doctor -o json
 getnote notes --limit 20 -o json
 ```
 
-不要把这些命令的认证输出、配置目录或登录文件提交到 Git。
+不要把认证输出、配置目录或登录文件提交到 Git。
 
-## 3. 飞书每日工作日记
+## 3. GetNote Runtime sidecar
 
-飞书是沉淀目标，不再是个人待办来源。
+仓库提供：
 
-设置官方 Feishu/Lark HTTPS 文档，例如：
+```bash
+npm run getnote:runtime
+```
+
+sidecar 只提供：
+
+```text
+GET /health
+GET /v1/notes
+GET /v1/notes/:id/todos
+GET /v1/notes/:id
+```
+
+数据路由需要 bearer service token；没有任意 shell、任意 argv 或写 GetNote 接口。
+
+推荐默认绑定：
+
+```dotenv
+GETNOTE_RUNTIME_HOST=127.0.0.1
+GETNOTE_RUNTIME_PORT=4310
+GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
+```
+
+如果 Workbench Docker 必须从 bridge 网络访问宿主机 sidecar，应只在确认 VPS 防火墙和容器网络边界后使用私网 bind，并显式：
+
+```dotenv
+GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1
+```
+
+不要把 sidecar 直接暴露到公网。
+
+## 4. GetNote Task Sync v2
+
+每次用户主动同步读取：
+
+```text
+最近 N 篇笔记
++
+Workbench 中仍未完成事项对应的旧 sourceNoteId
+```
+
+去重后读取明确 `meeting_todos`。没有明确待办章节时接受空列表，不使用模型猜测。
+
+核心事务：
+
+```text
+GetNote read
+→ Normalize / Reconcile
+→ Workbench state 原子提交
+```
+
+然后才执行：
+
+```text
+Workbench committed
+       ├─→ 飞书每日任务快照（可选）
+       └─→ ICS 原子重建（可选）
+```
+
+飞书或 ICS 失败不回滚 Workbench。
+
+任务配置显式保存 IANA 时区，默认：
+
+```text
+Asia/Shanghai
+```
+
+因此“下午 3 点”等无 offset 时间不依赖 VPS 系统时区。
+
+## 5. 飞书每日工作日记
+
+飞书是可选沉淀 sink，不再是个人待办来源，也不是启用 GetNote Task Sync 的前置条件。
+
+未配置飞书 URL 时：
+
+- GetNote → Workbench 核心同步正常；
+- `journal.status=not_configured`；
+- 不要求 `lark-cli`；
+- “发布每日总结”不可用，直到用户配置飞书日记目标。
+
+若要启用飞书 sink，设置官方 Feishu/Lark HTTPS 文档，例如：
 
 ```text
 https://<tenant>.feishu.cn/wiki/<document-token>
@@ -74,7 +171,7 @@ https://<tenant>.feishu.cn/wiki/<document-token>
 
 前置条件：
 
-1. 同一机器、同一用户安装 `lark-cli`；
+1. 执行飞书 sink 的宿主环境安装 `lark-cli`；
 2. 以飞书用户身份完成授权；
 3. 目标文档可读可写；
 4. 不把授权文件或凭证打包进仓库或镜像。
@@ -98,7 +195,7 @@ https://<tenant>.feishu.cn/wiki/<document-token>
 
 详见 [`TASK_SOURCE_PIPELINE.md`](TASK_SOURCE_PIPELINE.md)。
 
-## 4. 本机 ICS 日历
+## 6. 私有 ICS 日历
 
 路径：
 
@@ -110,36 +207,35 @@ https://<tenant>.feishu.cn/wiki/<document-token>
 
 - 目录权限 `0700`；
 - 文件权限 `0600`；
-- 临时文件加原子替换；
+- 临时文件 + 原子替换；
 - 写失败清理临时文件；
-- 稳定 UID 来自得到大脑外部待办 ID 哈希；
+- 稳定 UID 来自 GetNote 外部待办 ID 哈希；
 - 只包含未完成且已确定日期的事项；
-- 有完整开始/结束时段时生成定时事件；
+- 全天事项使用 `VALUE=DATE`；
+- 无 offset 的明确本地时刻使用任务 `TZID`；
 - 只有明确截止时刻时生成瞬时事件，不猜持续时间；
-- 只有明确日期时生成全天事件；
-- 模糊日期事项不会进入日历，而是进入工作台收件箱。
+- 模糊日期事项不进入日历，而是进入 Workbench Inbox。
 
-工作台只生成 ICS，不调用系统日历 API。部署后由用户在 macOS Calendar、Windows 日历或其他 iCalendar 客户端中导入或订阅。
+工作台只生成 ICS，不调用系统日历 API。ICS 失败不回滚 Workbench 核心同步。
 
-## 5. doctor
+## 7. doctor
 
 ```bash
 npm run doctor
 ```
 
-启用外部任务管线后会检查：
+启用外部任务管线后：
 
-- Node.js、Git；
-- 数据目录与工作区；
-- 得到大脑集成配置；
-- `getnote doctor -o json` 的安装、会员、登录和 API 连通性；
-- `lark-cli`；
-- 飞书工作日记配置；
-- ICS 路径。
+- 检查 Node.js、Git、数据目录与工作区；
+- 检查得到大脑管线配置和 IANA 时区；
+- `local_cli`：运行 `getnote doctor -o json`；
+- `private_http`：通过 Reader 对 sidecar 做只读连通性和鉴权检查，不要求 Workbench 容器内存在 getnote CLI；
+- 只有配置飞书每日工作日记 sink 时才要求 `lark-cli`；
+- ICS 开启时检查输出路径。
 
-doctor 不执行得到大脑写入、飞书写入或系统日历导入，因此通过不等于 live 验证。
+doctor 不执行得到大脑写入、飞书写入或系统日历导入，因此通过不等于 live 数据验证。
 
-## 6. 错误来源配置迁移
+## 8. 错误来源配置迁移
 
 如果现有配置包含此前误接入产生的：
 
@@ -151,13 +247,13 @@ cliFlavor = ...
 新版本会把外部待办管线停用并显示“需要重新配置”。部署者应：
 
 1. 先执行 `npm run backup`；
-2. 在设置中确认 `getnote`、最近笔记扫描数量、飞书日记和本机日历；
+2. 在设置中确认 GetNote Runtime、最近笔记扫描数量、任务时区、可选飞书日记和 ICS；
 3. 保存设置；
-4. 执行一次得到大脑同步。
+4. 用户明确执行一次得到大脑同步。
 
-保存新的得到大脑设置时，只清理 `source=dida_cli` 的机器导入待办和收件箱项。手工事项、Capture、项目、项目飞书记录和其他来源数据不删除。
+保存新的得到大脑设置时，只清理 `source=dida_cli` 的机器导入 Todo 和 Inbox。手工事项、Capture、项目、项目飞书记录和其他来源数据不删除。
 
-## 7. 局域网 / Tailscale / 内网
+## 9. 局域网 / Tailscale / 内网
 
 ```text
 HOST=0.0.0.0
@@ -174,7 +270,7 @@ COOKIE_SECURE=1
 
 应用校验实际 Host 和 Origin，不采信 `X-Forwarded-*` 自动放宽。
 
-## 8. iPhone Shortcut
+## 10. iPhone Shortcut
 
 `POST /api/capture` 是独立快速采集入口，不是得到大脑主来源。
 
@@ -182,11 +278,11 @@ COOKIE_SECURE=1
 CAPTURE_TOKEN=<独立长随机 token>
 ```
 
-每条新事项生成 `captureId`；同一次不确定重试复用原 ID。采集只进入 Workbench 收件箱，不自动成为正式待办或加入今日。
+每条新事项生成 `captureId`；同一次不确定重试复用原 ID。采集只进入 Workbench Inbox，不自动成为正式 Todo 或加入 Today。
 
 详见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
 
-## 9. Docker
+## 11. Docker
 
 ```bash
 docker compose config
@@ -200,30 +296,33 @@ docker compose up -d --build
 /workspace  真实项目目录
 ```
 
-默认镜像不会包含个人 `getnote`、`lark-cli` 或登录状态。启用新管线时优先使用原生运行。
+默认 Workbench 镜像不包含个人 `getnote`、`lark-cli` 或登录状态。
 
-需要容器化时，部署者必须自行安装受控版本 CLI、以非 root 用户提供登录状态、持久化 `/data`、挂载真实 `/workspace`，且不得把个人凭证烘焙进公开镜像。
+**推荐不要为了 GetNote 把 CLI 和凭证塞进 Workbench 镜像。** VPS 上使用宿主机 CLI + 只读 sidecar；Workbench 通过 `private_http` 访问。
 
-容器内还必须能够运行：
+Docker Compose 已提供：
 
 ```text
-getnote doctor -o json
-getnote notes --limit 20 -o json
-getnote note todos <note_id> -o json
+host.docker.internal:host-gateway
 ```
 
-## 10. Readiness
+因此宿主机 sidecar 可通过 `host.docker.internal:<port>` 被容器访问；sidecar 是否需要非 loopback bind，必须根据实际 Docker/VPS 网络测试后决定，不能直接公网暴露。
+
+## 12. Readiness
 
 `GET /api/health` 只证明本地 state/config、数据目录和工作区可用，不证明：
 
 - 得到大脑会员或登录仍有效；
+- GetNote Runtime 当前可达；
 - 得到大脑 API 当前可达；
 - 飞书当前可达或有编辑权限；
 - ICS 已被日历客户端成功导入；
 - OpenAI 当前可达；
 - 真实浏览器和 iPhone 已验收。
 
-## 11. AI Provider
+GetNote/飞书的部署 readiness 由 `npm run doctor` 补充检查。
+
+## 13. AI Provider
 
 默认 Profile：
 
@@ -232,14 +331,14 @@ OPENAI_API_KEY=<你的 Key>
 OPENAI_MODEL=gpt-5.6-luna
 ```
 
-推理档位固定 `xhigh`。Provider 失败时回退本地规则，不自动改变截止日期、收件箱或今日。
+推理档位固定 `xhigh`。Provider 失败时回退本地规则，不自动改变截止日期、Inbox 或 Today。
 
 详见 [`AI_PROVIDER.md`](AI_PROVIDER.md)。
 
-## 12. 数据目录
+## 14. 数据目录
 
 ```text
-state.json   项目、任务、收件箱、今日、确认项和机器指针
+state.json   项目、任务、Inbox、Today、确认项和机器指针
 config.json  工作区、业务板块和外部任务管线设置
 calendar/    可重建 ICS 镜像
 backups/     自动与手工 backup v2
@@ -250,7 +349,7 @@ recovery/    飞书跨资源事务恢复凭据
 
 ICS 是可重建镜像，不是待办真源。
 
-## 13. backup v2
+## 15. backup v2
 
 ```bash
 npm run backup
@@ -275,7 +374,7 @@ npm run backup
 
 **旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段时**，恢复时保留当前凭据目录，而不是静默清空。这保证向后兼容，但旧备份不是这些凭据的历史快照。
 
-## 14. 恢复
+## 16. 恢复
 
 先停止工作台：
 
@@ -287,23 +386,24 @@ npm start
 
 恢复脚本会先创建恢复前安全备份。backup v2 成组替换 state、可选 config、`captureReceipts` 和 `projectRecordReceipts`；恢复任一阶段失败会尝试回滚全部已修改部分。
 
-恢复后由用户明确执行一次得到大脑同步，重新生成 ICS。
+恢复后由用户明确执行一次得到大脑同步，重新生成派生 ICS；没有自动后台同步。
 
-## 15. 灾备边界
+## 17. 灾备边界
 
 完整灾备至少保护：
 
 1. `/data`；
 2. `/workspace`；
 3. 远端 Git；
-4. 飞书项目文档和每日工作日记；
-5. 得到大脑账户和 CLI 恢复方式；
-6. 飞书 CLI 登录恢复方式。
+4. 飞书项目文档和已启用的每日工作日记；
+5. 得到大脑账户和宿主机 CLI 恢复方式；
+6. 若使用飞书 sink，飞书 CLI 登录恢复方式；
+7. GetNote Runtime service token 的安全恢复方式。
 
 部署者自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
 
-## 16. 云部署限制
+## 18. 云部署限制
 
-无状态 Serverless 环境不能直接读取本地项目目录，也不能天然访问本机 CLI 登录态或生成本机日历文件。
+无状态 Serverless 环境不能直接读取真实项目目录，也不适合持有个人 CLI 登录态或长期私有数据目录。
 
-若必须远程部署，需要把项目工作区、数据目录和 CLI 登录环境安全地迁移到长期主机。这不是默认部署模型。
+远程部署应使用长期主机：持久化 `/data` 和 `/workspace`，让宿主机承担 CLI 登录环境，再通过受控私网 sidecar 给 Workbench 容器提供最小只读能力。
