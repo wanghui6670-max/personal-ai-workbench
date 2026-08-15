@@ -4,7 +4,7 @@
 
 ## 1. 最简单的使用方式
 
-在本地仓库中双击：
+在本地仓库中直接双击 install-macos.command：
 
 ```text
 install-macos.command
