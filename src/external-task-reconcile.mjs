@@ -116,33 +116,69 @@ function localStateFromInbox(item,task,now){return{
   priorityLabel:item?.localPriorityLabel||task.priorityLabel||'',
   tags:Array.isArray(item?.localTags)?item.localTags:(Array.isArray(task.tags)?task.tags:[])
 };}
+function localDueReference(todo,incomingSourceDueDate=null){
+  if(typeof todo?.sourceDueDate==='string'&&todo.sourceDueDate)return todo.sourceDueDate;
+  if(typeof todo?.sourcePreviousDueDate==='string'&&todo.sourcePreviousDueDate)return todo.sourcePreviousDueDate;
+  // Legacy GetNote todos predate sourceDueDate. On the first v2 sync, a
+  // mismatch is treated conservatively as a user-owned local date rather than
+  // silently overwriting it with a newly observed source date.
+  if(incomingSourceDueDate&&typeof todo?.dueDate==='string'&&todo.dueDate)return incomingSourceDueDate;
+  return null;
+}
+function hasLocalDueOverride(todo,incomingSourceDueDate=null){
+  if(!todo||typeof todo.dueDate!=='string'||!todo.dueDate)return false;
+  const reference=localDueReference(todo,incomingSourceDueDate);
+  return Boolean(reference&&todo.dueDate!==reference);
+}
+function localSchedule(todo){
+  const dueDate=todo.dueDate;
+  const dueAt=typeof todo.dueAt==='string'&&todo.dueAt.startsWith(`${dueDate}T`)?todo.dueAt:dueDate;
+  const keepTimed=dueAt!==dueDate;
+  const startAt=keepTimed&&typeof todo.startAt==='string'&&todo.startAt.startsWith(`${dueDate}T`)?todo.startAt:null;
+  return{
+    dueDate,
+    dueAt,
+    startAt,
+    allDay:keepTimed?todo.allDay===true:false,
+    timeZone:todo.timeZone||null
+  };
+}
+function priorSourceDue(todo){
+  return todo?.sourceDueDate||todo?.sourcePreviousDueDate||todo?.dueDate||null;
+}
 
 export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
   const now=nowIso();
   const all=[...active,...completed];
   const reconciled=reconcileLegacyIdentity(state,all);
-  let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0,movedToInbox=0,movedToTodo=0;
+  let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0,movedToInbox=0,movedToTodo=0,localDuePreserved=0;
 
   for(const task of active){
     const existingTodo=todoByExternalId(state,task.externalId);
     const existingInbox=inboxByExternalId(state,task.externalId);
     if(!task.dueDate){
       undated+=1;
-      if(existingTodo&&state.todayPlan.includes(existingTodo.id)){
+      const localOverride=existingTodo&&hasLocalDueOverride(existingTodo);
+      const todayOwned=existingTodo&&state.todayPlan.includes(existingTodo.id);
+      if(existingTodo&&(todayOwned||localOverride)){
         const before=JSON.stringify(existingTodo);
-        Object.assign(existingTodo,sourcePatch(task,now),{
+        Object.assign(existingTodo,sourcePatch(task,now),localSchedule(existingTodo),{
           title:compactText(task.title,200),context:todoContext(task),done:false,
-          externalStatus:'active_without_due_date_today_preserved',sourceDueDate:null
+          externalStatus:localOverride?'active_without_due_date_local_override':'active_without_due_date_today_preserved',
+          sourcePreviousDueDate:priorSourceDue(existingTodo),
+          sourceDueDate:null
         });
         if(JSON.stringify(existingTodo)!==before)updated+=1;
         if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
-        todayPreserved+=1;
+        if(todayOwned)todayPreserved+=1;
+        if(localOverride)localDuePreserved+=1;
         continue;
       }
 
       const local=existingTodo?localStateFromTodo(existingTodo,now):null;
       const patch={
         text:inboxText(task),externalTaskId:task.externalId,externalStatus:'active_without_due_date',sourceDueDate:null,
+        sourcePreviousDueDate:existingTodo?priorSourceDue(existingTodo):(existingInbox?.sourcePreviousDueDate||null),
         ...sourcePatch(task,now),
         ...(local||{})
       };
@@ -167,15 +203,11 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
     }
 
     scheduled+=1;
-    const common={
-      title:compactText(task.title,200),context:todoContext(task),dueDate:task.dueDate,done:false,
-      externalId:task.externalId,externalStatus:'active',sourceDueDate:task.dueDate,
-      startAt:task.startAt,dueAt:task.dueAt,allDay:task.allDay,timeZone:task.timeZone,
-      ...sourcePatch(task,now)
-    };
+    const sourceSchedule={dueDate:task.dueDate,startAt:task.startAt,dueAt:task.dueAt,allDay:task.allDay,timeZone:task.timeZone};
     if(existingTodo){
       if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
       const before=JSON.stringify(existingTodo);
+      const localOverride=hasLocalDueOverride(existingTodo,task.dueDate);
       const local={
         projectId:existingTodo.projectId??null,
         priority:existingTodo.priority??0,
@@ -183,12 +215,28 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
         tags:Array.isArray(existingTodo.tags)?existingTodo.tags:[],
         createdAt:existingTodo.createdAt||now
       };
-      Object.assign(existingTodo,common,local);
+      Object.assign(existingTodo,
+        sourcePatch(task,now),
+        {
+          title:compactText(task.title,200),context:todoContext(task),done:false,
+          externalId:task.externalId,
+          externalStatus:localOverride?'active_local_due_date_override':'active',
+          sourceDueDate:task.dueDate,
+          sourcePreviousDueDate:null
+        },
+        localOverride?localSchedule(existingTodo):sourceSchedule,
+        local
+      );
+      if(localOverride)localDuePreserved+=1;
       if(JSON.stringify(existingTodo)!==before)updated+=1;
     }else{
       const local=localStateFromInbox(existingInbox,task,now);
       if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
-      state.todos.unshift({id:local.id,...common,projectId:local.projectId,priority:local.priority,priorityLabel:local.priorityLabel,tags:local.tags,createdAt:local.createdAt});
+      state.todos.unshift({
+        id:local.id,...sourcePatch(task,now),title:compactText(task.title,200),context:todoContext(task),done:false,
+        externalId:task.externalId,externalStatus:'active',sourceDueDate:task.dueDate,sourcePreviousDueDate:null,
+        ...sourceSchedule,projectId:local.projectId,priority:local.priority,priorityLabel:local.priorityLabel,tags:local.tags,createdAt:local.createdAt
+      });
       if(existingInbox)movedToTodo+=1;else created+=1;
     }
   }
@@ -207,5 +255,5 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
     });
     state.todayPlan=state.todayPlan.filter(id=>id!==todo.id);
   }
-  return{created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved,movedToInbox,movedToTodo};
+  return{created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved,movedToInbox,movedToTodo,localDuePreserved};
 }
