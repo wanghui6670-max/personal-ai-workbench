@@ -4,10 +4,10 @@ import fsp from 'node:fs/promises';
 
 async function read(file){return fsp.readFile(file,'utf8');}
 
-test('Harness 可用时右侧面板加 harness-primary 接管标记',async()=>{
+test('Harness 启用后右侧只保留一个 AI 控制面',async()=>{
   const script=await read('public/harness-navigator.js');
-  assert.match(script,/const available=Boolean\(status\?\.available\)/);
-  assert.match(script,/panel\.classList\.toggle\('harness-primary',available\)/);
+  assert.match(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
+  assert.match(script,/panel\.classList\.toggle\('harness-primary',visible\)/);
 });
 
 test('接管态下应用自带 AI 对话被 CSS 隐藏',async()=>{
