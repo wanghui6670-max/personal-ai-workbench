@@ -139,7 +139,7 @@ function localSchedule(todo){
     dueDate,
     dueAt,
     startAt,
-    allDay:keepTimed?todo.allDay===true:false,
+    allDay:keepTimed?todo.allDay===true:true,
     timeZone:todo.timeZone||null
   };
 }
