@@ -17,6 +17,7 @@
     "bootstrap:macos": "node scripts/macos-bootstrap.mjs",
     "service:macos": "node scripts/macos-launch-agent.mjs",
     "migrate:project-records": "node scripts/migrate-project-records.mjs",
+    "getnote:runtime": "node src/getnote-runtime-server.mjs",
     "harness:install": "npm ci --prefix harness --ignore-scripts --no-audit --no-fund",
     "harness:check": "node scripts/harness-check.mjs",
     "harness:e2e": "node scripts/harness-e2e.mjs",

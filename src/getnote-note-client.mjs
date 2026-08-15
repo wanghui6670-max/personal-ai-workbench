@@ -1,10 +1,5 @@
-import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import {createGetnoteReader,GetnoteRuntimeError,normalizeGetnoteNoteId} from './getnote-runtime.mjs';
 
-const execFileAsync=promisify(execFile);
-const CLI='getnote';
-const DEFAULT_TIMEOUT_MS=45_000;
-const MAX_BUFFER=16*1024*1024;
 export const MAX_GETNOTE_AI_CONTENT_CHARS=120_000;
 
 export class GetnoteNoteError extends Error{
@@ -14,14 +9,6 @@ export class GetnoteNoteError extends Error{
 }
 function fail(message,code='GETNOTE_NOTE_UNAVAILABLE',statusCode=502,cause){throw new GetnoteNoteError(message,{code,statusCode,cause});}
 function firstText(...values){for(const value of values){if(value===undefined||value===null)continue;const text=String(value).trim();if(text)return text;}return null;}
-function extractJson(stdout){
-  const raw=String(stdout??'').replace(/^\uFEFF/,'').trim();
-  if(!raw)fail('得到大脑 CLI 没有返回笔记 JSON。','GETNOTE_NOTE_EMPTY');
-  try{return JSON.parse(raw);}catch{}
-  const starts=[raw.indexOf('{'),raw.indexOf('[')].filter(index=>index>=0).sort((a,b)=>a-b);
-  for(const start of starts){const close=raw[start]==='['?raw.lastIndexOf(']'):raw.lastIndexOf('}');if(close<=start)continue;try{return JSON.parse(raw.slice(start,close+1));}catch{}}
-  fail('得到大脑 CLI 返回的笔记详情无法解析为 JSON。','GETNOTE_NOTE_INVALID_JSON');
-}
 function assertSuccessful(payload){
   if(payload&&typeof payload==='object'&&!Array.isArray(payload)&&payload.success===false){
     fail(firstText(payload.message,payload.reason,payload.error?.message,payload.error)||'得到大脑返回笔记读取失败。','GETNOTE_NOTE_REJECTED');
@@ -80,22 +67,20 @@ export function parseGetnoteNoteDetail(payload){
   };
 }
 
-function cliError(error){
+function runtimeError(error){
   if(error instanceof GetnoteNoteError)return error;
-  if(error?.code==='ENOENT')return new GetnoteNoteError('未找到 getnote CLI。请先安装并完成得到大脑授权。',{code:'GETNOTE_CLI_MISSING',cause:error});
-  if(error?.killed||error?.signal)return new GetnoteNoteError('得到大脑笔记读取超时。',{code:'GETNOTE_NOTE_TIMEOUT',statusCode:504,cause:error});
-  return new GetnoteNoteError('得到大脑笔记读取失败。请运行 getnote doctor -o json 检查登录和网络。',{cause:error});
+  if(error instanceof GetnoteRuntimeError)return new GetnoteNoteError(error.message,{code:error.code,statusCode:error.statusCode,cause:error});
+  return new GetnoteNoteError('得到大脑笔记读取失败。',{cause:error});
 }
 
-export function createGetnoteNoteClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
+export function createGetnoteNoteClient({reader=null,exec,timeoutMs,env=process.env,fetchImpl}={}){
+  const runtime=reader||createGetnoteReader({env,exec,timeoutMs,fetchImpl});
   return{
+    status(){return runtime.status?.()||{mode:'unknown',readOnly:true};},
     async fetch(noteId){
-      const id=String(noteId??'').trim();
-      if(!id||id.length>256||/[\s\0]/.test(id))fail('得到大脑 note_id 格式无效。','INVALID_GETNOTE_NOTE_ID',400);
-      try{
-        const result=await exec(CLI,['note',id,'-o','json'],{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true,env:{...process.env}});
-        return parseGetnoteNoteDetail(extractJson(result.stdout));
-      }catch(error){throw cliError(error);}
+      const id=normalizeGetnoteNoteId(noteId);
+      try{return parseGetnoteNoteDetail(await runtime.fetchNote(id));}
+      catch(error){throw runtimeError(error);}
     }
   };
 }

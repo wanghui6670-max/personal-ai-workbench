@@ -1,11 +1,6 @@
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import {createGetnoteReader,GetnoteRuntimeError} from './getnote-runtime.mjs';
 
-const execFileAsync=promisify(execFile);
-const DEFAULT_TIMEOUT_MS=45_000;
-const MAX_BUFFER=16*1024*1024;
-const CLI_COMMAND='getnote';
 const PAGE_SIZE=20;
 const DEFAULT_NOTE_LIMIT=100;
 const MAX_NOTE_LIMIT=500;
@@ -91,19 +86,6 @@ export function parseTodoSchedule(text,{referenceDate=new Date().toISOString().s
     allDay:!time,
     timeZone:null
   };
-}
-
-function extractJson(stdout){
-  const raw=String(stdout??'').replace(/^\uFEFF/,'').trim();
-  if(!raw)throw new ExternalTaskSourceError('得到大脑 CLI 没有返回 JSON。',{code:'EXTERNAL_TASK_SOURCE_EMPTY'});
-  try{return JSON.parse(raw);}catch{}
-  const starts=[raw.indexOf('{'),raw.indexOf('[')].filter(index=>index>=0).sort((a,b)=>a-b);
-  for(const start of starts){
-    const close=raw[start]==='['?raw.lastIndexOf(']'):raw.lastIndexOf('}');
-    if(close<=start)continue;
-    try{return JSON.parse(raw.slice(start,close+1));}catch{}
-  }
-  throw new ExternalTaskSourceError('得到大脑 CLI 返回内容无法解析为 JSON。',{code:'EXTERNAL_TASK_SOURCE_INVALID_JSON'});
 }
 
 function assertSuccessful(payload){
@@ -196,31 +178,25 @@ export function normalizeNoteLimit(value){
   return number;
 }
 
-function cliError(error,action){
+function sourceError(error,action){
   if(error instanceof ExternalTaskSourceError)return error;
-  if(error?.code==='ENOENT'){
-    return new ExternalTaskSourceError('未找到 getnote CLI。请先执行 npx -y @getnote/cli@latest setup，或安装 @getnote/cli 并完成登录。',{cause:error,code:'EXTERNAL_TASK_CLI_MISSING'});
+  if(error instanceof GetnoteRuntimeError){
+    return new ExternalTaskSourceError(`得到大脑 ${action}失败：${error.message}`,{cause:error,code:error.code,statusCode:error.statusCode});
   }
-  return new ExternalTaskSourceError(`得到大脑 CLI ${action}失败。请运行 getnote doctor -o json 检查安装、会员、登录状态和网络。`,{cause:error});
+  return new ExternalTaskSourceError(`得到大脑 ${action}失败。`,{cause:error});
+}
+async function runtimeCall(action,fn){
+  try{return await fn();}catch(error){throw sourceError(error,action);}
 }
 
-async function runJson(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
-  try{
-    const result=await exec(CLI_COMMAND,args,{timeout:timeoutMs,maxBuffer:MAX_BUFFER,windowsHide:true,env:{...process.env}});
-    return extractJson(result.stdout);
-  }catch(error){throw cliError(error,action);}
-}
-
-async function listRecentNotes(noteLimit,options){
+async function listRecentNotes(noteLimit,reader){
   const notes=[];
   const seenCursors=new Set();
   let cursor=null;
   while(notes.length<noteLimit){
     const pageLimit=Math.min(PAGE_SIZE,noteLimit-notes.length);
-    const args=['notes','--limit',String(pageLimit)];
-    if(cursor)args.push('--cursor',cursor);
-    args.push('-o','json');
-    const page=parseNotesPage(await runJson(args,'读取最近笔记',options));
+    const payload=await runtimeCall('读取最近笔记',()=>reader.listNotes({limit:pageLimit,cursor}));
+    const page=parseNotesPage(payload);
     notes.push(...page.notes);
     if(!page.hasMore||!page.cursor||seenCursors.has(page.cursor)||page.notes.length===0)break;
     seenCursors.add(page.cursor);
@@ -229,15 +205,15 @@ async function listRecentNotes(noteLimit,options){
   return notes.slice(0,noteLimit);
 }
 
-export function createTaskCliClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
-  const options={exec,timeoutMs};
+export function createTaskCliClient({reader=null,exec,timeoutMs,env=process.env,fetchImpl}={}){
+  const runtime=reader||createGetnoteReader({env,exec,timeoutMs,fetchImpl});
   return{
     async fetch(config={}){
       const noteLimit=normalizeNoteLimit(config.noteLimit);
-      const notes=await listRecentNotes(noteLimit,options);
+      const notes=await listRecentNotes(noteLimit,runtime);
       const parsed=[];
       for(const note of notes){
-        const payload=await runJson(['note','todos',note.noteId,'-o','json'],`读取笔记“${note.title}”的待办`,options);
+        const payload=await runtimeCall(`读取笔记“${note.title}”的待办`,()=>runtime.fetchTodos(note.noteId));
         parsed.push(...parseMeetingTodos(payload,note));
       }
       const unique=new Map();
@@ -245,6 +221,7 @@ export function createTaskCliClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOU
       const tasks=[...unique.values()];
       return{
         provider:'getnote_cli',
+        runtimeMode:runtime.status?.().mode||'unknown',
         noteCount:notes.length,
         todoCount:tasks.length,
         active:tasks.filter(task=>!task.done),
