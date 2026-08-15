@@ -52,8 +52,6 @@ function reconcileLegacyIdentity(state,tasks){
   const used=new Set();
   let reconciled=0;
 
-  // If the source starts exposing a stable todo id, safely migrate an old
-  // text-fingerprint entity only when note + normalized title still match.
   for(const task of unmatchedIncoming.filter(item=>item.sourceTodoId)){
     const candidates=unmatchedExisting.filter(({entity})=>
       !used.has(entity)&&entityNoteId(entity)===task.sourceNoteId&&!entitySourceTodoId(entity)&&normalizeText(entityTitle(entity))===normalizeText(task.title)
@@ -67,9 +65,6 @@ function reconcileLegacyIdentity(state,tasks){
     used.add(entity);reconciled+=1;
   }
 
-  // Fallback rename reconciliation is deliberately conservative: after all
-  // exact ids are removed, only a one-to-one unmatched pair in the same note
-  // can inherit the previous Workbench entity id.
   const noteIds=new Set(unmatchedIncoming.map(task=>task.sourceNoteId).filter(Boolean));
   for(const noteId of noteIds){
     const incoming=unmatchedIncoming.filter(task=>task.sourceNoteId===noteId&&!task.sourceTodoId&&!existingIds.has(task.externalId));
@@ -105,6 +100,22 @@ function sourcePatch(task,now){return{
   externalIdentityKind:task.identityKind||'fallback_text',
   todoSource:task.todoSource||''
 };}
+function localStateFromTodo(todo,now){return{
+  workbenchEntityId:todo.id,
+  workbenchCreatedAt:todo.createdAt||now,
+  localProjectId:todo.projectId??null,
+  localPriority:todo.priority??0,
+  localPriorityLabel:todo.priorityLabel||'',
+  localTags:Array.isArray(todo.tags)?todo.tags:[]
+};}
+function localStateFromInbox(item,task,now){return{
+  id:item?.workbenchEntityId||item?.id||newId('td'),
+  createdAt:item?.workbenchCreatedAt||item?.createdAt||now,
+  projectId:item?.localProjectId??null,
+  priority:Number.isFinite(item?.localPriority)?item.localPriority:(task.priority||0),
+  priorityLabel:item?.localPriorityLabel||task.priorityLabel||'',
+  tags:Array.isArray(item?.localTags)?item.localTags:(Array.isArray(task.tags)?task.tags:[])
+};}
 
 export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
   const now=nowIso();
@@ -128,19 +139,34 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
         todayPreserved+=1;
         continue;
       }
-      if(existingTodo)state.todos=state.todos.filter(todo=>todo.id!==existingTodo.id);
+
+      const local=existingTodo?localStateFromTodo(existingTodo,now):null;
       const patch={
         text:inboxText(task),externalTaskId:task.externalId,externalStatus:'active_without_due_date',sourceDueDate:null,
-        ...sourcePatch(task,now)
+        ...sourcePatch(task,now),
+        ...(local||{})
       };
       if(existingInbox){
-        const before=JSON.stringify(existingInbox);Object.assign(existingInbox,patch);if(JSON.stringify(existingInbox)!==before)updated+=1;
-      }else{state.inbox.unshift({id:newId('in'),...patch,createdAt:now});created+=1;}
+        const before=JSON.stringify(existingInbox);
+        Object.assign(existingInbox,patch);
+        if(local){
+          existingInbox.workbenchEntityId=local.workbenchEntityId;
+          existingInbox.workbenchCreatedAt=local.workbenchCreatedAt;
+          existingInbox.localProjectId=local.localProjectId;
+          existingInbox.localPriority=local.localPriority;
+          existingInbox.localPriorityLabel=local.localPriorityLabel;
+          existingInbox.localTags=local.localTags;
+        }
+        if(JSON.stringify(existingInbox)!==before)updated+=1;
+      }else{
+        state.inbox.unshift({id:local?.workbenchEntityId||newId('in'),...patch,createdAt:local?.workbenchCreatedAt||now});
+        created+=1;
+      }
+      if(existingTodo)state.todos=state.todos.filter(todo=>todo.id!==existingTodo.id);
       continue;
     }
 
     scheduled+=1;
-    if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
     const common={
       title:compactText(task.title,200),context:todoContext(task),dueDate:task.dueDate,done:false,
       externalId:task.externalId,externalStatus:'active',sourceDueDate:task.dueDate,
@@ -148,6 +174,7 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
       ...sourcePatch(task,now)
     };
     if(existingTodo){
+      if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
       const before=JSON.stringify(existingTodo);
       const local={
         projectId:existingTodo.projectId??null,
@@ -159,10 +186,9 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
       Object.assign(existingTodo,common,local);
       if(JSON.stringify(existingTodo)!==before)updated+=1;
     }else{
-      state.todos.unshift({
-        id:newId('td'),...common,projectId:null,priority:task.priority||0,
-        priorityLabel:task.priorityLabel||'',tags:Array.isArray(task.tags)?task.tags:[],createdAt:now
-      });
+      const local=localStateFromInbox(existingInbox,task,now);
+      if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
+      state.todos.unshift({id:local.id,...common,projectId:local.projectId,priority:local.priority,priorityLabel:local.priorityLabel,tags:local.tags,createdAt:local.createdAt});
       created+=1;
     }
   }
