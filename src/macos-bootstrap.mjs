@@ -23,7 +23,7 @@ export function encodeEnvValue(value){
     .replace(/\t/g,'\\t')}"`;
 }
 
-export function upsertEnvSource(source,updates,{header='# Personal AI Workbench macOS P0 binding'}={}){
+export function upsertEnvSource(source,updates,{header='# Personal AI Workbench macOS deployment binding'}={}){
   const requested=new Map(Object.entries(updates).map(([key,value])=>[key,String(value??'')]));
   const seen=new Set();
   const output=[];
@@ -99,7 +99,7 @@ export async function chooseMacosDataDir({explicit=null,existing=null,appRoot,ho
   return path.join(home,'Library','Application Support','PersonalAIWorkbench','data');
 }
 
-export function macosP0Updates({workspaceRoot,dataDir,port=44173}={}){
+function macosBindingUpdates({workspaceRoot,dataDir,port=44173}={}){
   const numericPort=Number(port);
   if(!Number.isInteger(numericPort)||numericPort<1||numericPort>65535)throw new Error('端口必须是 1 到 65535 之间的整数。');
   if(!path.isAbsolute(workspaceRoot)||!path.isAbsolute(dataDir))throw new Error('WORKSPACE_ROOT 与 DATA_DIR 必须是绝对路径。');
@@ -115,11 +115,21 @@ export function macosP0Updates({workspaceRoot,dataDir,port=44173}={}){
     WORKSPACE_ROOT:path.resolve(workspaceRoot),
     TRUSTED_ORIGINS:'',
     COOKIE_SECURE:'0',
-    JOYCREW_ENABLED:'0',
-    HARNESS_ENABLED:'0',
-    AI_PROVIDER_ENABLED:'0',
     ALLOW_INSECURE_PUBLIC:'0'
   });
+}
+
+export function macosP0Updates(options={}){
+  return Object.freeze({
+    ...macosBindingUpdates(options),
+    JOYCREW_ENABLED:'0',
+    HARNESS_ENABLED:'0',
+    AI_PROVIDER_ENABLED:'0'
+  });
+}
+
+export function macosUpgradeUpdates(options={}){
+  return macosBindingUpdates(options);
 }
 
 export async function writeEnvAtomically(file,source,{backupDir=null}={}){
