@@ -4,7 +4,7 @@ let getnoteState=null;
 let getnoteBusy=false;
 let scheduled=false;
 
-function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
+function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));}
 function pipeline(){
   const raw=getnoteState?.config?.settings?.[PIPELINE_KEY]||{};
   const mistaken=raw?.provider==='dida_cli'||Object.hasOwn(raw,'cliFlavor');
@@ -156,6 +156,7 @@ function resultSinkText(result){
   if(result.calendar?.status==='ok')parts.push(`ICS 已更新：${result.calendar.path}`);
   else if(result.calendar?.status==='error')parts.push(`ICS 失败：${result.calendar.error}`);
   else if(result.calendar?.status==='disabled')parts.push('ICS 已关闭');
+  if(result.metadata?.status==='error')parts.push(`状态元数据失败：${result.metadata.error||'配置状态未更新'}`);
   return parts.join('；');
 }
 async function syncTasks(event,target){
@@ -164,8 +165,10 @@ async function syncTasks(event,target){
   getnoteBusy=true;target.disabled=true;target.textContent='同步中…';
   try{
     const result=await rpc('external_tasks_sync',{},true);
-    receipt('得到大脑核心同步已提交',`最近 ${result.recentNoteCount||0} 篇 + 旧未完成 ${result.trackedNoteCount||0} 篇，解析 ${result.todoCount||0} 条；新增 ${result.changes?.created||0}，更新 ${result.changes?.updated||0}，完成 ${result.changes?.completed||0}，Today 保留 ${result.changes?.todayPreserved||0}。${resultSinkText(result)}`);
-    setTimeout(()=>location.reload(),900);
+    const metadataError=result.metadata?.status==='error';
+    const detail=`最近 ${result.recentNoteCount||0} 篇 + 旧未完成 ${result.trackedNoteCount||0} 篇，解析 ${result.todoCount||0} 条；新增 ${result.changes?.created||0}，更新 ${result.changes?.updated||0}，完成 ${result.changes?.completed||0}，Today 保留 ${result.changes?.todayPreserved||0}。${resultSinkText(result)}`;
+    receipt(metadataError?'核心已提交，状态元数据异常':'得到大脑核心同步已提交',detail,metadataError);
+    setTimeout(()=>location.reload(),metadataError?5000:900);
   }catch(error){receipt('得到大脑待办核心同步失败',error.message,true);target.disabled=false;target.textContent='同步得到大脑待办';getnoteBusy=false;}
   return true;
 }
