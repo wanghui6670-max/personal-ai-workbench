@@ -17,12 +17,12 @@ async function fixture(t,prefix='paw-external-persistence-'){
 
 function sourceTask(overrides={}){
   return{
-    externalId:'real-store-1',title:'2026-08-20 10:00 提交真实存储待办',content:'',description:'',
+    externalId:'real-store-1',externalIdentityKind:'text_fingerprint',title:'2026-08-20 10:00 提交真实存储待办',content:'',description:'',
     done:false,priority:0,priorityLabel:'',startAt:null,dueAt:'2026-08-20T10:00:00',dueDate:'2026-08-20',
     allDay:false,timeZone:'Asia/Shanghai',completedAt:null,updatedAt:'2026-08-14T00:00:00Z',tags:[],
     sourceNoteId:'note-1',sourceNoteTitle:'真实会议笔记',sourceNoteType:'MEETING',
     sourceNoteCreatedAt:'2026-08-10T00:00:00Z',sourceNoteUpdatedAt:'2026-08-14T00:00:00Z',
-    sourceNoteUrl:'https://www.biji.com/note/note-1',sourceTodoId:'source-todo-1',identityKind:'source_id',todoSource:'summary_section',
+    sourceNoteUrl:'https://www.biji.com/note/note-1',todoSource:'summary_section',
     ...overrides
   };
 }
@@ -68,13 +68,13 @@ test('real JsonStore persists GetNote integration and imported note metadata',as
   const todo=state.todos.find(item=>item.externalId==='real-store-1');
   assert.ok(todo);
   assert.equal(todo.source,'getnote_cli');
+  assert.equal(todo.externalIdentityKind,'text_fingerprint');
   assert.equal(todo.dueDate,'2026-08-20');
   assert.equal(todo.dueAt,'2026-08-20T10:00:00');
   assert.equal(todo.timeZone,'Asia/Shanghai');
   assert.equal(todo.sourceNoteId,'note-1');
   assert.equal(todo.sourceNoteTitle,'真实会议笔记');
   assert.equal(todo.sourceNoteCreatedAt,'2026-08-10T00:00:00Z');
-  assert.equal(todo.sourceTodoId,'source-todo-1');
   assert.match(todo.context,/https:\/\/www\.biji\.com\/note\/note-1/);
   assert.equal(state.todayPlan.includes(todo.id),false);
 });
@@ -92,7 +92,7 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
   });
 
   await store.updateState(state=>applyGetnoteTaskSnapshot(state,{active:[sourceTask({
-    externalId:'stable-external',sourceTodoId:'source-stable',sourceNoteId:'note-stable',title:'联系供应商',dueDate:null,dueAt:null,startAt:null,allDay:true
+    externalId:'stable-external',sourceNoteId:'note-stable',title:'联系供应商',dueDate:null,dueAt:null,startAt:null,allDay:true
   })]}));
   let persisted=await store.readState();
   assert.equal(persisted.todos.length,0);
@@ -106,7 +106,7 @@ test('dated -> Inbox -> dated local identity and user fields survive real JsonSt
   assert.deepEqual(inbox.localTags,['客户','本地']);
 
   await store.updateState(state=>applyGetnoteTaskSnapshot(state,{active:[sourceTask({
-    externalId:'stable-external',sourceTodoId:'source-stable',sourceNoteId:'note-stable',title:'联系供应商',dueDate:'2026-08-28',dueAt:'2026-08-28'
+    externalId:'stable-external',sourceNoteId:'note-stable',title:'联系供应商',dueDate:'2026-08-28',dueAt:'2026-08-28'
   })]}));
   persisted=await store.readState();
   assert.equal(persisted.inbox.length,0);
