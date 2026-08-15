@@ -9,7 +9,15 @@ test('Workbench env allowlist loads Harness and Joycrew server-only configuratio
   assert.equal(parsed.values.JOYCREW_BASE_URL,'http://127.0.0.1:4000');
   assert.equal(parsed.values.JOYCREW_ROLE,'admin');
   assert.deepEqual(parsed.ignored,[]);
-  for(const key of ['HARNESS_ENABLED','JOYCREW_ENABLED','JOYCREW_BASE_URL','JOYCREW_TRUSTED_PROXY_TOKEN','WORKBENCH_JOYCREW_RATE_LIMIT'])assert.ok(WORKBENCH_ENV_KEYS.includes(key));
+  for(const key of ['HARNESS_ENABLED','HARNESS_UI_MODE','HARNESS_WEB_URL','HARNESS_WEB_ATTESTATION_URL','JOYCREW_ENABLED','JOYCREW_BASE_URL','JOYCREW_TRUSTED_PROXY_TOKEN','WORKBENCH_JOYCREW_RATE_LIMIT'])assert.ok(WORKBENCH_ENV_KEYS.includes(key));
+});
+
+test('Workbench env allowlist loads experimental DSH embed configuration',()=>{
+  const parsed=parseWorkbenchEnv('HARNESS_ENABLED=1\nHARNESS_UI_MODE=embedded_experimental\nHARNESS_WEB_URL=http://127.0.0.1:3080/\nHARNESS_WEB_ATTESTATION_URL=http://127.0.0.1:3080/.well-known/workbench-harness.json\n');
+  assert.equal(parsed.values.HARNESS_UI_MODE,'embedded_experimental');
+  assert.equal(parsed.values.HARNESS_WEB_URL,'http://127.0.0.1:3080/');
+  assert.equal(parsed.values.HARNESS_WEB_ATTESTATION_URL,'http://127.0.0.1:3080/.well-known/workbench-harness.json');
+  assert.deepEqual(parsed.ignored,[]);
 });
 
 test('env parser still rejects undeclared and command-substitution values',()=>{
