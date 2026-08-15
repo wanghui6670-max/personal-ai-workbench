@@ -47,7 +47,7 @@ test('旧 rail 偏好在 DSH 接管态不会留下空白窄栏',async()=>{
   const styles=await read('public/harness-navigator.css');
   assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.ai-panel\.harness-primary>\[data-harness-navigator-mount\]\{display:flex!important\}/);
   assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.layout:has\(\.ai-panel\.harness-primary\)/);
-  assert.match(styles,/html\[data-ai-panel-mode="rail"\] \.ai-panel\.harness-primary\{height:620px/);
+  assert.match(styles,/@media\(max-width:900px\)\{\.ai-panel\.harness-primary,html\[data-ai-panel-mode="rail"\] \.ai-panel\.harness-primary\{[^}]*height:620px/);
 });
 
 test('通过 attestation 的原生 DSH Web 也无外层 Workbench chrome 地铺满右栏',async()=>{
