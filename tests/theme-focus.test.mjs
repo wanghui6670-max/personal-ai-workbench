@@ -50,6 +50,13 @@ test('MutationObserver 增强层是幂等的，不会通过重复文本写入自
   assert.doesNotMatch(script,/if\(primaryDesc\)primaryDesc\.textContent='只显示你明确加入今天的任务。'/);
 });
 
+test('今日任务为空时不会重复写 innerHTML 并再次触发 Observer',async()=>{
+  const script=await read('public/theme-focus.js');
+  assert.match(script,/const emptyHtml='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
+  assert.match(script,/if\(empty\.innerHTML!==emptyHtml\)empty\.innerHTML=emptyHtml/);
+  assert.doesNotMatch(script,/empty\.innerHTML='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
+});
+
 test('聚焦层不引入自动排期、自动同步或写入 DSH 权限边界',async()=>{
   const script=await read('public/theme-focus.js');
   assert.doesNotMatch(script,/\/api\/projects\/sync|\/api\/inbox\/sync|\/api\/joycrew\/actions|\/api\/mcp/);
