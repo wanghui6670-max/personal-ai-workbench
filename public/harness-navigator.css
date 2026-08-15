@@ -23,6 +23,8 @@
 .harness-nav-card button:focus-visible,.harness-nav-card textarea:focus-visible,.harness-nav-card summary:focus-visible{outline:2px solid #91b8ff;outline-offset:2px}
 .harness-embed{flex:1;width:100%;height:100%;min-height:0;border:0;background:#071633;display:block}
 .ai-panel.harness-native>[data-harness-navigator-mount]{background:#071633}
-html[data-ai-panel-mode="rail"] .harness-nav-card,html[data-ai-panel-mode="closed"] .harness-nav-card{display:none}
-@media(min-width:901px){.layout:has(.ai-panel.harness-primary){grid-template-columns:minmax(0,1fr) minmax(390px,430px)}}
-@media(max-width:900px){.ai-panel.harness-primary{height:620px}.harness-nav-head{height:56px}.harness-nav-messages{padding-bottom:22px}.harness-nav-message{width:min(94%,360px)}.harness-nav-form{margin:0 10px 10px}}
+html[data-ai-panel-mode="closed"] .harness-nav-card,html[data-ai-panel-mode="closed"] .harness-embed{display:none}
+html[data-ai-panel-mode="rail"] .ai-panel.harness-primary>[data-harness-navigator-mount]{display:flex!important}
+html[data-ai-panel-mode="rail"] .harness-nav-card,html[data-ai-panel-mode="rail"] .harness-embed{display:flex!important}
+@media(min-width:901px){.layout:has(.ai-panel.harness-primary),html[data-ai-panel-mode="rail"] .layout:has(.ai-panel.harness-primary){grid-template-columns:minmax(0,1fr) minmax(390px,430px)}}
+@media(max-width:900px){.ai-panel.harness-primary,html[data-ai-panel-mode="rail"] .ai-panel.harness-primary{height:620px;padding:0;align-items:stretch}.harness-nav-head{height:56px}.harness-nav-messages{padding-bottom:22px}.harness-nav-message{width:min(94%,360px)}.harness-nav-form{margin:0 10px 10px}}
