@@ -47,20 +47,30 @@ async function bootstrap(){
 }
 function portInUse(host,port){return new Promise(resolve=>{const socket=net.connect({host,port});const finish=value=>{socket.destroy();resolve(value);};socket.setTimeout(500);socket.once('connect',()=>finish(true));socket.once('timeout',()=>finish(false));socket.once('error',()=>finish(false));});}
 async function waitForPortFree(host,port,timeoutMs=5000){const started=Date.now();while(Date.now()-started<timeoutMs){if(!(await portInUse(host,port)))return true;await new Promise(resolve=>setTimeout(resolve,100));}return false;}
-async function waitForHealth(binding,{expectedCommit=null,timeoutMs=25_000}={}){
+async function waitForHealth(binding,timeoutMs=25_000){
   const url=`${baseUrl(binding.host,binding.port)}/api/health`;const started=Date.now();
   while(Date.now()-started<timeoutMs){
-    try{
-      const response=await fetch(url,{cache:'no-store'});
-      if(response.status===200){
-        const body=await response.json();
-        const commitMatches=!expectedCommit||body.buildCommit===expectedCommit;
-        if(body.ok===true&&body.version===PRODUCT_VERSION&&commitMatches)return body;
-      }
-    }catch{}
+    try{const response=await fetch(url,{cache:'no-store'});if(response.status===200){const body=await response.json();if(body.ok===true&&body.version===PRODUCT_VERSION)return body;}}catch{}
     await new Promise(resolve=>setTimeout(resolve,250));
   }
-  throw new Error(`LaunchAgent 已启动但 ${url} 未通过版本/提交健康检查。`);
+  throw new Error(`LaunchAgent 已启动但 ${url} 未通过健康检查。`);
+}
+
+async function plistCommit(){
+  try{
+    const source=await fsp.readFile(plistPath,'utf8');
+    const match=source.match(/<key>WORKBENCH_BUILD_COMMIT<\/key>\s*<string>([a-f0-9]{40})<\/string>/i);
+    return match?.[1]?.toLowerCase()||null;
+  }catch(error){
+    if(error?.code==='ENOENT')return null;
+    throw error;
+  }
+}
+
+async function requirePlistCommit(expected){
+  const actual=await plistCommit();
+  if(actual!==expected)throw new Error(`LaunchAgent 提交不匹配：期望 ${expected.slice(0,12)}，实际 ${actual?.slice(0,12)||'missing'}。`);
+  return actual;
 }
 
 async function currentBinding({requireJoycrewDisabled=false}={}){
@@ -126,8 +136,10 @@ async function install(){
     if(lint.code!==0)throw new Error(`LaunchAgent plist 校验失败：${String(lint.stderr||lint.stdout).trim()}`);
     await fsp.rename(temp,plistPath);
     await fsp.chmod(plistPath,0o600);
+    await requirePlistCommit(gate.commit);
     await bootstrap();
-    const health=await waitForHealth(binding,{expectedCommit:gate.commit});
+    const health=await waitForHealth(binding);
+    await requirePlistCommit(gate.commit);
     const manifestPath=path.join(binding.dataDir,'p0','macos-service.json');
     await fsp.mkdir(path.dirname(manifestPath),{recursive:true,mode:0o700});
     await fsp.writeFile(manifestPath,`${JSON.stringify({
@@ -152,7 +164,7 @@ async function install(){
     console.log(`服务：${target()}`);
     console.log(`地址：${baseUrl(binding.host,binding.port)}`);
     console.log(`版本：${health.version}`);
-    console.log(`提交：${health.buildCommit?.slice(0,12)||'unknown'}`);
+    console.log(`提交：${gate.commit.slice(0,12)}`);
     console.log(`Runtime 配置：${preserveRuntime?'保留':'首次 P0 安全模式'}`);
     console.log(`P0 报告：${gate.reportPath}`);
     console.log(`日志：${stdoutPath}`);
@@ -175,9 +187,10 @@ async function status(){
   try{const response=await fetch(`${baseUrl(binding.host,binding.port)}/api/health`,{cache:'no-store'});health={status:response.status,body:await response.json().catch(()=>null)};}catch{}
   let expectedCommit=null;
   try{expectedCommit=await git(['rev-parse','HEAD']);}catch{}
-  const commitMatches=!expectedCommit||health?.body?.buildCommit===expectedCommit;
-  console.log(JSON.stringify({label,loaded:launch.code===0,plistPath,expectedCommit,commitMatches,health,stdoutPath,stderrPath},null,2));
-  if(launch.code!==0||health?.status!==200||health?.body?.ok!==true||!commitMatches)process.exitCode=1;
+  const installedCommit=await plistCommit();
+  const commitMatches=!expectedCommit||installedCommit===expectedCommit;
+  console.log(JSON.stringify({label,loaded:launch.code===0,plistPath,expectedCommit,installedCommit,commitMatches,health,stdoutPath,stderrPath},null,2));
+  if(launch.code!==0||health?.status!==200||health?.body?.ok!==true||health?.body?.version!==PRODUCT_VERSION||!commitMatches)process.exitCode=1;
 }
 
 async function start(){
@@ -185,16 +198,18 @@ async function start(){
   const binding=await currentBinding();
   await fsp.access(plistPath);
   const expectedCommit=await git(['rev-parse','HEAD']);
+  await requirePlistCommit(expectedCommit);
   if(await loaded()){
-    const health=await waitForHealth(binding,{expectedCommit});
-    console.log(`${label} 已在运行 · v${health.version} · ${health.buildCommit.slice(0,12)}`);
+    const health=await waitForHealth(binding);
+    console.log(`${label} 已在运行 · v${health.version} · ${expectedCommit.slice(0,12)}`);
     return;
   }
   if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 被其他进程占用。`);
   await bootstrap();
   try{
-    const health=await waitForHealth(binding,{expectedCommit});
-    console.log(`已启动 ${label} · v${health.version} · ${health.buildCommit.slice(0,12)}`);
+    const health=await waitForHealth(binding);
+    await requirePlistCommit(expectedCommit);
+    console.log(`已启动 ${label} · v${health.version} · ${expectedCommit.slice(0,12)}`);
   }catch(error){
     await bootout();
     throw error;
@@ -212,11 +227,13 @@ async function restart(){
   const binding=await currentBinding();
   await fsp.access(plistPath);
   const expectedCommit=await git(['rev-parse','HEAD']);
+  await requirePlistCommit(expectedCommit);
   await bootout();
   if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用。`);
   await bootstrap();
-  const health=await waitForHealth(binding,{expectedCommit});
-  console.log(`已重启 ${label} · v${health.version} · ${health.buildCommit.slice(0,12)}`);
+  const health=await waitForHealth(binding);
+  await requirePlistCommit(expectedCommit);
+  console.log(`已重启 ${label} · v${health.version} · ${expectedCommit.slice(0,12)}`);
 }
 
 async function uninstall(){
