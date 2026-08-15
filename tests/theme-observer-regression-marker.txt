@@ -1,0 +1,1 @@
+MutationObserver-driven theme enhancements must be idempotent.
