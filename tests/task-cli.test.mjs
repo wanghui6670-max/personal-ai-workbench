@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTaskCliClient, parseNotesPage, parseMeetingTodos, parseTodoSchedule } from '../src/task-cli.mjs';
+import { createTaskCliClient, parseNotesPage, parseMeetingTodos, parseTodoSchedule, getnoteDateOnlyInTimeZone } from '../src/task-cli.mjs';
 
 test('GetNote notes parser preserves string note IDs and pagination metadata',()=>{
   const page=parseNotesPage({success:true,data:{notes:[{
@@ -36,6 +36,12 @@ test('meeting todos use text fingerprints, anchor relative dates to note creatio
   assert.equal(first[2].done,true);
   assert.equal(parseTodoSchedule('1月2日复盘',{referenceDate:'2026-08-14',timeZone:'Asia/Shanghai'}).dueDate,'2026-01-02');
   assert.deepEqual(parseTodoSchedule('下周找他确认',{referenceDate:'2026-08-14',timeZone:'Asia/Shanghai'}),{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:'Asia/Shanghai'});
+});
+
+test('GetNote day boundary follows configured IANA timezone instead of host timezone',()=>{
+  const instant=new Date('2026-08-15T16:30:00.000Z');
+  assert.equal(getnoteDateOnlyInTimeZone(instant,'Asia/Shanghai'),'2026-08-16');
+  assert.equal(getnoteDateOnlyInTimeZone(instant,'America/Los_Angeles'),'2026-08-15');
 });
 
 test('unknown future item metadata does not silently replace the documented text fingerprint contract',()=>{
