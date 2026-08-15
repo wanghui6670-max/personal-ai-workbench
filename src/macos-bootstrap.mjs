@@ -2,9 +2,15 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { parseWorkbenchEnv } from './env.mjs';
 
+const RUNTIME_FLAG_KEYS=Object.freeze(['JOYCREW_ENABLED','HARNESS_ENABLED','AI_PROVIDER_ENABLED']);
+const RUNTIME_PREFIXES=Object.freeze(['JOYCREW_','HARNESS_','AI_PROVIDER_']);
+const RUNTIME_EXACT_KEYS=new Set(['OPENAI_API_KEY','OPENAI_MODEL','OPENAI_SEND_FILE_CONTENT','AI_SEND_FILE_CONTENT']);
+
 function nonEmpty(value){
   return typeof value==='string'&&value.trim()?value.trim():null;
 }
+function enabled(value){return ['1','true','yes','on'].includes(String(value??'').trim().toLowerCase());}
+function runtimeKey(key){return RUNTIME_PREFIXES.some(prefix=>key.startsWith(prefix))||RUNTIME_EXACT_KEYS.has(key);}
 
 async function isDirectory(value){
   try{return (await fsp.stat(value)).isDirectory();}
@@ -47,6 +53,28 @@ export function upsertEnvSource(source,updates,{header='# Personal AI Workbench 
 
 export function envValuesFromSource(source){
   return parseWorkbenchEnv(source).values;
+}
+
+export function recoverLegacyRuntimeEnvSource(currentSource,backupSource){
+  const current=envValuesFromSource(currentSource);
+  const backup=envValuesFromSource(backupSource);
+  const currentDisabled=RUNTIME_FLAG_KEYS.every(key=>!enabled(current[key]));
+  const backupHadRuntime=RUNTIME_FLAG_KEYS.some(key=>enabled(backup[key]));
+  if(!currentDisabled||!backupHadRuntime){
+    return Object.freeze({source:String(currentSource??''),recovered:false,keys:[]});
+  }
+  const updates={};
+  for(const [key,value] of Object.entries(backup)){
+    if(runtimeKey(key))updates[key]=value;
+  }
+  if(!Object.keys(updates).length){
+    return Object.freeze({source:String(currentSource??''),recovered:false,keys:[]});
+  }
+  return Object.freeze({
+    source:upsertEnvSource(currentSource,updates,{header:'# Recovered from pre-regression macOS deployment backup'}),
+    recovered:true,
+    keys:Object.keys(updates).sort()
+  });
 }
 
 export async function legacyDataPresent(dataDir){
