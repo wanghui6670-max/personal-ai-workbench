@@ -14,7 +14,7 @@ test('主题层由独立静态资源接入，并保持浏览器脚本语法有�
   execFileSync(process.execPath,['--check','public/theme-focus.js'],{stdio:'pipe'});
 });
 
-test('日间和夜间是全局主题，不只给 DSH 换皮',async()=>{
+test('UI vNext 使用统一日夜 token、系统字体与低对比细边线',async()=>{
   const [script,styles]=await Promise.all([read('public/theme-focus.js'),read('public/theme-focus.css')]);
   assert.match(script,/personal-ai-workbench\.theme/);
   assert.match(script,/prefers-color-scheme: dark/);
@@ -22,29 +22,31 @@ test('日间和夜间是全局主题，不只给 DSH 换皮',async()=>{
   assert.match(script,/data-theme-toggle/);
   assert.match(styles,/html\[data-theme="light"\]/);
   assert.match(styles,/html\[data-theme="dark"\]/);
-  assert.match(styles,/--canvas:#fbfcfd/);
-  assert.match(styles,/--side:#edf1f5/);
-  assert.match(styles,/--dsh-bg:#f4f7fa/);
+  assert.match(styles,/--canvas:#fafbfc/);
+  assert.match(styles,/--side:#f1f4f7/);
+  assert.match(styles,/--dsh-bg:#f5f7fa/);
+  assert.match(styles,/--line:rgba\(30,41,59,\.10\)/);
+  assert.match(styles,/--canvas:#11151b/);
+  assert.match(styles,/--line:rgba\(255,255,255,\.08\)/);
+  assert.match(styles,/font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","PingFang SC"/);
+  assert.match(styles,/\.top-left h1\{font-size:22px;font-weight:650/);
   for(const selector of ['.sidebar','.topbar','.card','.ai-panel.harness-primary','.harness-nav-card','.harness-nav-form'])assert.match(styles,new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
 });
 
-test('今日工作台首屏只保留做事与拍板，统计、现场和项目进度降为默认折叠次要信息',async()=>{
+test('今日工作台使用常驻轻仪表盘，最近现场和项目进度保持 IDE 折叠区',async()=>{
   const [script,styles]=await Promise.all([read('public/theme-focus.js'),read('public/theme-focus.css')]);
-  assert.match(script,/today-focus/);
-  assert.match(script,/today-stats-details/);
-  assert.match(script,/label:'工作概览'/);
+  assert.match(script,/function normalizeTodayDashboard\(main,grid\)/);
+  assert.match(script,/statRow\.classList\.add\('today-dashboard'\)/);
+  assert.match(script,/const labels=\['今日','收件箱','项目','需处理'\]/);
+  assert.match(script,/grid\.insertAdjacentElement\('beforebegin',statRow\)/);
+  assert.doesNotMatch(script,/label:'工作概览'/);
   assert.match(script,/today-recent-details/);
   assert.match(script,/最近工作现场/);
   assert.match(script,/today-project-details/);
   assert.match(script,/label:'项目进度'/);
-  assert.match(script,/decision-rule/);
   assert.match(script,/today-decision-row/);
-  assert.match(script,/if\(decision\?\.parentElement===grid\)grid\.insertAdjacentElement\('afterend',decision\)/);
-  assert.match(script,/if\(recent\?\.parentElement===primary\)\(decision\|\|grid\)\.insertAdjacentElement\('afterend',recent\)/);
-  assert.match(script,/只显示你明确加入今天的任务/);
-  assert.match(script,/只处理需要你拍板的事项/);
-  assert.match(styles,/html\.today-focus \.grid\{grid-template-columns:1fr/);
-  assert.match(styles,/html\.today-focus \.today-decision-row\{margin-top:14px;display:grid/);
+  assert.match(styles,/html\.today-focus \.today-dashboard\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(styles,/html\.today-focus \.today-dashboard \.stat \.n\{font-size:24px/);
   assert.match(styles,/html\.today-focus \.today-secondary-details\{margin-top:0;border:0;border-top:1px solid var\(--line\)/);
 });
 
@@ -59,13 +61,14 @@ test('MutationObserver 增强层是幂等的，不会通过重复文本写入自
   assert.doesNotMatch(script,/if\(primaryDesc\)primaryDesc\.textContent='只显示你明确加入今天的任务。'/);
 });
 
-test('今日任务为空时不会重复写 innerHTML，并使用紧凑主工作区',async()=>{
+test('今日任务为空时使用无虚线框轻空态，并保持幂等写入',async()=>{
   const [script,styles]=await Promise.all([read('public/theme-focus.js'),read('public/theme-focus.css')]);
-  assert.match(script,/const emptyHtml='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
+  assert.match(script,/const emptyHtml='<div class="today-empty-copy"><strong>今天还没有明确安排<\/strong><span>从待办中选真正要推进的事项。<\/span><\/div><a class="today-empty-action" href="#tasks">查看待办<\/a>';/);
   assert.match(script,/if\(empty\.innerHTML!==emptyHtml\)empty\.innerHTML=emptyHtml/);
   assert.match(script,/primary\.classList\.toggle\('today-primary-empty',primaryEmpty\)/);
-  assert.match(styles,/html\.today-focus \.grid>section\.card\.pad\.today-primary-empty\{min-height:180px/);
-  assert.doesNotMatch(script,/empty\.innerHTML='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
+  assert.match(styles,/today-primary-empty>\.empty\{min-height:92px;display:flex/);
+  assert.match(styles,/padding:24px 4px 14px;text-align:left;border:0;background:transparent;border-radius:0/);
+  assert.match(styles,/\.today-empty-action\{flex:none;display:inline-flex/);
 });
 
 test('DSH 顶部始终规范为聊天，避免旧 Copilot 标题回流',async()=>{
