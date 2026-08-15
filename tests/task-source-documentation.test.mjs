@@ -27,13 +27,14 @@ test('normative docs keep GetNote CLI as source, Feishu as journal sink, and ICS
   assert.match(pipeline,/没有明确待办章节.*空列表|空列表.*不使用模型猜测/);
 });
 
-test('external task API documents exact MCP tools, confirmation boundary, and fixed GetNote commands',async()=>{
-  const [api,pipeline,registry,toolModule,taskCli]=await Promise.all([
+test('external task API documents exact MCP tools, confirmation boundary, and fixed GetNote runtime commands',async()=>{
+  const [api,pipeline,registry,toolModule,taskCli,runtime]=await Promise.all([
     read('docs/API.md'),
     read('docs/TASK_SOURCE_PIPELINE.md'),
     read('src/mcp/registry.mjs'),
     read('src/mcp/external-task-tools.mjs'),
-    read('src/task-cli.mjs')
+    read('src/task-cli.mjs'),
+    read('src/getnote-runtime.mjs')
   ]);
   for(const name of [
     'external_task_integration_read',
@@ -49,12 +50,19 @@ test('external task API documents exact MCP tools, confirmation boundary, and fi
   assert.match(api,/EXTERNAL_TASK_PIPELINE_BUSY/);
   assert.match(api,/FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT/);
   assert.match(pipeline,/旧的 `feishu_inbox_sync` 已从 AI\/MCP 白名单移除/);
-  assert.match(taskCli,/const CLI_COMMAND='getnote'/);
-  assert.match(taskCli,/\['notes','--limit'/);
-  assert.match(taskCli,/\['note','todos',note\.noteId,'-o','json'\]/);
+
+  assert.match(taskCli,/createGetnoteReader/);
+  assert.match(taskCli,/runtime\.listNotes/);
+  assert.match(taskCli,/runtime\.fetchTodos/);
   assert.match(taskCli,/meeting_todos/);
-  assert.doesNotMatch(taskCli,/TICKTICK_HOST|CLI_PROFILES|ticktick/);
-  assert.doesNotMatch(taskCli,/exec\([^)]*config|execFile\([^)]*config/);
+  assert.doesNotMatch(taskCli,/node:child_process|execFile\(/);
+
+  assert.match(runtime,/const CLI='getnote'/);
+  assert.match(runtime,/\['notes','--limit'/);
+  assert.match(runtime,/\['note','todos',normalizeGetnoteNoteId\(noteId\),'-o','json'\]/);
+  assert.match(runtime,/\['note',normalizeGetnoteNoteId\(noteId\),'-o','json'\]/);
+  assert.doesNotMatch(runtime,/TICKTICK_HOST|CLI_PROFILES|ticktick/);
+  assert.doesNotMatch(runtime,/save|delete|update[^A-Za-z]/i);
 });
 
 test('backup and recovery documentation remains exact after the source correction',async()=>{
