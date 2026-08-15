@@ -6,9 +6,9 @@ function state(todo){return{
   schemaVersion:1,inbox:[],inboxAcks:[],todos:[todo],todayPlan:[],todayPlanDate:'2026-08-15',projects:[],confirmations:[],notes:[],activities:[],morningSessions:[]
 };}
 function source(overrides={}){return{
-  externalId:'ext-1',title:'提交方案',dueDate:'2026-08-25',dueAt:'2026-08-25',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
+  externalId:'ext-1',externalIdentityKind:'text_fingerprint',title:'提交方案',dueDate:'2026-08-25',dueAt:'2026-08-25',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
   updatedAt:'2026-08-15T00:00:00Z',done:false,priority:0,priorityLabel:'',tags:[],sourceNoteId:'note-1',sourceNoteTitle:'方案会',
-  sourceTodoId:'todo-1',identityKind:'source_id',todoSource:'summary',...overrides
+  todoSource:'summary',...overrides
 };}
 function todo(overrides={}){return{
   id:'td-1',title:'提交方案',context:'',dueDate:'2026-08-20',dueAt:'2026-08-20',startAt:null,allDay:true,timeZone:'Asia/Shanghai',
