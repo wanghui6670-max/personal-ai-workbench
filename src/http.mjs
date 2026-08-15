@@ -93,15 +93,14 @@ export async function serveStatic(publicDir,pathname,res){
   if(file!==root&&!file.startsWith(root+path.sep))return false;
   try{const st=await fsp.stat(file);if(st.isDirectory())file=path.join(file,'index.html');const buf=await fsp.readFile(file);res.writeHead(200,{'Content-Type':mime(file),'Cache-Control':file.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.end(buf);return true;}catch{return false;}
 }
-export function securityHeaders({allowFrame=false,allowAnyFrame=false,frameSrc=''}={}){
-  const frameAncestors=allowAnyFrame?'*':(allowFrame?"'self'":"'none'");
-  const headers={
+export function securityHeaders({allowFrame=false,frameSrc=''}={}){
+  const frameAncestors=allowFrame?"'self'":"'none'";
+  return{
     'X-Content-Type-Options':'nosniff',
     'Referrer-Policy':'no-referrer',
     'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
     'Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self'${frameSrc?` ${frameSrc}`:''}; frame-ancestors ${frameAncestors}; base-uri 'self'; form-action 'self'`,
+    'X-Frame-Options':allowFrame?'SAMEORIGIN':'DENY',
     'Vary':'Origin'
   };
-  if(!allowAnyFrame)headers['X-Frame-Options']=allowFrame?'SAMEORIGIN':'DENY';
-  return headers;
 }
