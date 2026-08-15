@@ -63,20 +63,25 @@ test('ambiguous same-note text changes are not auto-reconciled',()=>{
 test('source date removal never ejects a user-selected Today task',()=>{
   const current=state();
   current.todayPlanDate='2026-08-15';
-  current.todos.push({id:'td-today',title:'联系供应商',context:'',dueDate:'2026-08-16',done:false,projectId:null,createdAt:'2026-08-11T00:00:00Z',source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3'});
+  current.todos.push({
+    id:'td-today',title:'联系供应商',context:'',dueDate:'2026-08-16',sourceDueDate:'2026-08-16',done:false,projectId:null,
+    createdAt:'2026-08-11T00:00:00Z',source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3'
+  });
   current.todayPlan=['td-today'];
   const changes=applyGetnoteTaskSnapshot(current,{active:[task({externalId:'same-id',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null})]});
   assert.equal(changes.todayPreserved,1);
+  assert.equal(changes.localDuePreserved,0);
   assert.deepEqual(current.todayPlan,['td-today']);
   assert.equal(current.todos[0].externalStatus,'active_without_due_date_today_preserved');
   assert.equal(current.todos[0].sourceDueDate,null);
+  assert.equal(current.todos[0].sourcePreviousDueDate,'2026-08-16');
   assert.equal(current.inbox.length,0);
 });
 
 test('dated -> Inbox -> dated keeps one Workbench entity and local project/priority/tags',()=>{
   const current=state();
   current.todos.push({
-    id:'td-stable',title:'联系供应商',context:'',dueDate:'2026-08-16',done:false,projectId:'project-local',createdAt:'2026-08-11T00:00:00Z',
+    id:'td-stable',title:'联系供应商',context:'',dueDate:'2026-08-16',sourceDueDate:'2026-08-16',done:false,projectId:'project-local',createdAt:'2026-08-11T00:00:00Z',
     source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3',priority:7,priorityLabel:'我定的重要',tags:['客户','本地']
   });
 
@@ -91,6 +96,7 @@ test('dated -> Inbox -> dated keeps one Workbench entity and local project/prior
   assert.equal(inbox.localPriority,7);
   assert.equal(inbox.localPriorityLabel,'我定的重要');
   assert.deepEqual(inbox.localTags,['客户','本地']);
+  assert.equal(inbox.sourcePreviousDueDate,'2026-08-16');
 
   const redated=task({externalId:'same-id',sourceNoteId:'note-3',title:'联系供应商',dueDate:'2026-08-25',dueAt:'2026-08-25'});
   applyGetnoteTaskSnapshot(current,{active:[redated]});
@@ -99,6 +105,7 @@ test('dated -> Inbox -> dated keeps one Workbench entity and local project/prior
   const restored=current.todos[0];
   assert.equal(restored.id,'td-stable');
   assert.equal(restored.dueDate,'2026-08-25');
+  assert.equal(restored.sourceDueDate,'2026-08-25');
   assert.equal(restored.projectId,'project-local');
   assert.equal(restored.priority,7);
   assert.equal(restored.priorityLabel,'我定的重要');
