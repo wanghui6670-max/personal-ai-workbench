@@ -121,7 +121,7 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
   const now=nowIso();
   const all=[...active,...completed];
   const reconciled=reconcileLegacyIdentity(state,all);
-  let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0;
+  let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0,movedToInbox=0,movedToTodo=0;
 
   for(const task of active){
     const existingTodo=todoByExternalId(state,task.externalId);
@@ -160,7 +160,7 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
         if(JSON.stringify(existingInbox)!==before)updated+=1;
       }else{
         state.inbox.unshift({id:local?.workbenchEntityId||newId('in'),...patch,createdAt:local?.workbenchCreatedAt||now});
-        created+=1;
+        if(existingTodo)movedToInbox+=1;else created+=1;
       }
       if(existingTodo)state.todos=state.todos.filter(todo=>todo.id!==existingTodo.id);
       continue;
@@ -189,14 +189,17 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
       const local=localStateFromInbox(existingInbox,task,now);
       if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
       state.todos.unshift({id:local.id,...common,projectId:local.projectId,priority:local.priority,priorityLabel:local.priorityLabel,tags:local.tags,createdAt:local.createdAt});
-      created+=1;
+      if(existingInbox)movedToTodo+=1;else created+=1;
     }
   }
 
   for(const task of completed){
     const todo=todoByExternalId(state,task.externalId);
     const inbox=inboxByExternalId(state,task.externalId);
-    if(inbox)state.inbox=state.inbox.filter(item=>item.id!==inbox.id);
+    if(inbox){
+      state.inbox=state.inbox.filter(item=>item.id!==inbox.id);
+      if(!todo)completedCount+=1;
+    }
     if(!todo)continue;
     if(!todo.done)completedCount+=1;
     Object.assign(todo,sourcePatch(task,now),{
@@ -204,5 +207,5 @@ export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
     });
     state.todayPlan=state.todayPlan.filter(id=>id!==todo.id);
   }
-  return{created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved};
+  return{created,updated,completed:completedCount,undated,scheduled,reconciled,todayPreserved,movedToInbox,movedToTodo};
 }
