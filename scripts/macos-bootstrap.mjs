@@ -14,6 +14,7 @@ import {
   envValuesFromSource,
   macosP0Updates,
   macosUpgradeUpdates,
+  recoverLegacyRuntimeEnvSource,
   restoreEnvFile,
   upsertEnvSource,
   writeEnvAtomically
@@ -32,6 +33,7 @@ let bootstrapReportPath=null;
 let succeeded=false;
 let processEnvBefore=null;
 let deploymentMode='first_install';
+let runtimeRecovery=null;
 
 function arg(name){const index=process.argv.indexOf(name);return index>=0?process.argv[index+1]||null:null;}
 function flag(name){return process.argv.includes(name);}
@@ -93,12 +95,27 @@ async function readOptional(file){
   catch(error){if(error?.code==='ENOENT')return '';throw error;}
 }
 
-async function existingInstallPresent(directory){
+async function existingInstall(directory){
   try{
     const raw=JSON.parse(await fsp.readFile(path.join(directory,'p0','macos-service.json'),'utf8'));
-    return raw?.label===label&&typeof raw?.commit==='string'&&raw.commit.length>=7;
+    return raw?.label===label&&typeof raw?.commit==='string'&&raw.commit.length>=7?raw:null;
   }catch(error){
-    if(error?.code==='ENOENT'||error instanceof SyntaxError)return false;
+    if(error?.code==='ENOENT'||error instanceof SyntaxError)return null;
+    throw error;
+  }
+}
+
+async function legacyBootstrapBackup(directory){
+  try{
+    const report=JSON.parse(await fsp.readFile(path.join(directory,'p0','macos-bootstrap.json'),'utf8'));
+    if(report?.schemaVersion!==1||report?.status!=='installed'||typeof report?.envBackup!=='string')return null;
+    const backupPath=path.resolve(report.envBackup);
+    const relative=path.relative(path.resolve(directory),backupPath);
+    if(relative.startsWith('..')||path.isAbsolute(relative))return null;
+    const source=await fsp.readFile(backupPath,'utf8');
+    return{source,backupPath};
+  }catch(error){
+    if(error?.code==='ENOENT'||error instanceof SyntaxError)return null;
     throw error;
   }
 }
@@ -127,8 +144,8 @@ try{
   assert.ok(Number.isInteger(uid),'无法确定当前 macOS 用户。');
 
   const repository=await verifyRepository();
-  const existingSource=await readOptional(envPath);
-  const existing=envValuesFromSource(existingSource);
+  let existingSource=await readOptional(envPath);
+  let existing=envValuesFromSource(existingSource);
   const workspaceRoot=await chooseMacosWorkspace({explicit:arg('--workspace'),existing:existing.WORKSPACE_ROOT,home});
   dataDir=await chooseMacosDataDir({explicit:arg('--data-dir'),existing:existing.DATA_DIR,appRoot,home});
   const port=Number(arg('--port')||existing.PORT||44173);
@@ -136,9 +153,23 @@ try{
   bootstrapReportPath=path.join(dataDir,'p0','macos-bootstrap.json');
 
   previousServiceLoaded=await serviceLoaded();
-  const installedBefore=await existingInstallPresent(dataDir);
-  const preserveRuntime=!flag('--fresh-p0')&&(flag('--preserve-runtime')||previousServiceLoaded||installedBefore);
+  const installedBefore=await existingInstall(dataDir);
+  const preserveRuntime=!flag('--fresh-p0')&&(flag('--preserve-runtime')||previousServiceLoaded||Boolean(installedBefore));
   deploymentMode=preserveRuntime?'upgrade':'first_install';
+
+  if(preserveRuntime&&!flag('--fresh-p0')){
+    const legacy=await legacyBootstrapBackup(dataDir);
+    if(legacy){
+      const recovered=recoverLegacyRuntimeEnvSource(existingSource,legacy.source);
+      if(recovered.recovered){
+        existingSource=recovered.source;
+        existing=envValuesFromSource(existingSource);
+        runtimeRecovery={backupPath:legacy.backupPath,keys:recovered.keys};
+        console.log(`检测到旧部署曾清空 Runtime 配置，已从部署前备份恢复 ${recovered.keys.length} 个运行时字段。`);
+      }
+    }
+  }
+
   const updates=preserveRuntime
     ?macosUpgradeUpdates({workspaceRoot,dataDir,port})
     :macosP0Updates({workspaceRoot,dataDir,port});
@@ -175,7 +206,7 @@ try{
 
   if(flag('--prepare-only')){
     if(previousServiceLoaded)await serviceCommand('start');
-    await writeReport({schemaVersion:1,status:'prepared',deploymentMode,runtimeSettingsPreserved:preserveRuntime,finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
+    await writeReport({schemaVersion:2,status:'prepared',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,finishedAt:new Date().toISOString(),productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,envBackup:envRecord.backupPath});
     succeeded=true;
     console.log('真实主机 P0 已通过；按 --prepare-only 要求未替换常驻服务。');
   }else{
@@ -183,7 +214,7 @@ try{
     await serviceCommand('status');
     const url=baseUrl(port);
     if(!flag('--no-open'))await execResult('open',[url],{timeout:10_000});
-    await writeReport({schemaVersion:1,status:'installed',deploymentMode,runtimeSettingsPreserved:preserveRuntime,finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
+    await writeReport({schemaVersion:2,status:'installed',deploymentMode,runtimeSettingsPreserved:preserveRuntime,runtimeRecovery,finishedAt:new Date().toISOString(),product:PRODUCT_DISPLAY_NAME,productVersion:PRODUCT_VERSION,commit:repository.commit,workspaceRoot,dataDir,port,url,envBackup:envRecord.backupPath,service:label});
     succeeded=true;
     console.log(`\n${PRODUCT_DISPLAY_NAME} v${PRODUCT_VERSION} 已在真实 Mac 上启动。`);
     console.log(`Git 提交：${repository.commit.slice(0,12)}`);
@@ -205,7 +236,7 @@ try{
   if(previousServiceLoaded){
     await serviceCommand('start').catch(startError=>console.error(`恢复旧服务失败：${startError.message}`));
   }
-  await writeReport({schemaVersion:1,status:'failed',deploymentMode,finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord),previousServiceRestored:previousServiceLoaded}).catch(()=>undefined);
+  await writeReport({schemaVersion:2,status:'failed',deploymentMode,runtimeRecovery,finishedAt:new Date().toISOString(),error:String(error.message||error),envRestored:Boolean(envRecord),previousServiceRestored:previousServiceLoaded}).catch(()=>undefined);
   process.exitCode=1;
 }finally{
   if(!succeeded&&envRecord?.backupPath)console.error(`原配置备份仍保留：${envRecord.backupPath}`);
