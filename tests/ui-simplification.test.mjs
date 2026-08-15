@@ -58,3 +58,8 @@ test('AI 面板只有一个收起开关，浮层重开按钮保留',async()=>{
   assert.doesNotMatch(controls,/ai-rail/);
   assert.match(script,/'ai-open'/);
 });
+
+test('侧边栏品牌为动觉 AI 工作台',async()=>{
+  const script=await read('public/app.js');
+  assert.match(script,/class="brand">动觉 AI 工作台/);
+});

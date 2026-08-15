@@ -113,7 +113,7 @@ function enhanceInboxCopy(){
     if(title.textContent.includes('当前还没有配置飞书日记来源')||title.textContent.includes('滴答 CLI')){
       title.textContent=value.enabled?'得到大脑 CLI 待办来源已启用':'尚未配置得到大脑 CLI 待办来源';
       const text=title.nextElementSibling;
-      if(text)text.textContent=value.enabled?'点击顶部“同步得到大脑待办”开始读取最近笔记':'打开设置，配置得到大脑 CLI、飞书每日工作日记和本机日历。';
+      if(text)text.textContent=value.enabled?'到“全部待办”页点击“同步得到大脑待办”开始读取最近笔记':'打开设置，配置得到大脑 CLI、飞书每日工作日记和本机日历。';
     }else if(title.textContent.startsWith('数据来源：飞书云文档')||title.textContent.includes('滴答清单 CLI')){
       title.textContent='待办来源：得到大脑 CLI；沉淀目标：飞书工作日记';
       const text=title.nextElementSibling;

@@ -8,3 +8,4 @@
 
 .nav-title.nav-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}.nav-title.nav-toggle:hover{color:#e8ebf0}.nav-title.nav-toggle .count{margin-left:auto;text-transform:none}.cleanup-group{display:none}.cleanup-group.open{display:block}
 .sidebar-foot{margin-top:8px;border-top:1px solid #2a303a;padding:10px}.sidebar-foot .settings-link{display:flex;align-items:center;gap:9px;width:100%;background:none;border:none;color:#aeb6c2;padding:9px 10px;border-radius:9px;font-size:13px;cursor:pointer;text-align:left;font-family:inherit}.sidebar-foot .settings-link:hover{background:var(--side2);color:#fff}
+.login-error{color:var(--danger);font-size:12px;margin-top:8px;line-height:1.5}

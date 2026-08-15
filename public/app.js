@@ -3,7 +3,7 @@ let state=null,auth={authEnabled:false,authenticated:true},modal='',route={view:
 function inEmbeddedPreview(){try{return window.self!==window.top;}catch{return true;}}
 function embeddedNoticeHtml(){
   if(!inEmbeddedPreview())return'';
-  return `<div class="embedded-notice" role="status"><strong>当前是内嵌预览，工作台不会在这里渲染。</strong><span>请用系统浏览器打开 ${esc(location.origin)}，或点下面按钮。</span><a class="btn primary" href="${attr(location.origin+'/')}" target="_blank" rel="noopener">在浏览器打开工作台</a></div>`;
+  return `<div class="embedded-notice" role="status"><strong>当前是内嵌预览，部分功能受限。</strong><span>建议用系统浏览器打开 ${esc(location.origin)}，或点下面按钮。</span><a class="btn primary" href="${attr(location.origin+'/')}" target="_blank" rel="noopener">在浏览器打开工作台</a></div>`;
 }
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -49,14 +49,14 @@ function sidebar(){
   const cleanupCount=state.stats.confirmations+state.stats.unclassified+state.stats.overdue+archivedCount;
   const onCleanupRoute=['confirm','unclassified','overdue','archived'].includes(route.view);
   const cleanupOpenNow=cleanupOpen||onCleanupRoute;
-  return `<aside class="sidebar ${sidebarOpen?'open':''}"><div class="brand">个人 AI 工作台<small>项目是上下文，AI 只辅助，不替你安排</small></div><nav class="nav">
+  return `<aside class="sidebar ${sidebarOpen?'open':''}"><div class="brand">动觉 AI 工作台<small>项目是上下文，AI 只辅助，不替你安排</small></div><nav class="nav">
     ${navLink('today',`${icon('⌂')} 今日工作台`,state.stats.today,'today')}
     ${navLink('inbox',`${icon('⌁')} 收件箱`,state.stats.inbox,'inbox')}
     ${navLink('tasks',`${icon('✓')} 全部待办`,'','tasks')}
     ${navLink('journal',`${icon('≡')} 工作日志`,'','journal')}
     <div class="nav-title">业务板块</div>
     ${state.businesses.map(b=>`<div><a class="biz-row ${route.view==='business'&&route.id===b.id?'active':''}" href="#business/${routePart(b.id)}"><span>▾</span><span>${esc(b.name)}</span><span class="count">${projectsByBiz.get(b.id).length}</span></a>${projectsByBiz.get(b.id).map(p=>`<a class="project-link ${route.view==='project'&&route.id===p.id?'active':''}" href="#project/${routePart(p.id)}">${esc(p.name)}</a>`).join('')}</div>`).join('')}
-    <div class="nav-title nav-toggle" data-action="toggle-cleanup">${cleanupOpenNow?'▾':'▸'} 收尾区${cleanupCount?`<span class="count">${cleanupCount}</span>`:''}</div>
+    <div class="nav-title nav-toggle" role="button" tabindex="0" data-action="toggle-cleanup">${cleanupOpenNow?'▾':'▸'} 收尾区${cleanupCount?`<span class="count">${cleanupCount}</span>`:''}</div>
     <div class="cleanup-group${cleanupOpenNow?' open':''}">
       ${navLink('confirm',`${icon('?')} 待确认`,state.stats.confirmations,'confirm')}
       ${navLink('unclassified',`${icon('◇')} 待归类`,state.stats.unclassified,'unclassified')}
@@ -197,11 +197,10 @@ document.addEventListener('submit',async e=>{try{
  if(e.target.id==='morning-form'){e.preventDefault();const input=document.querySelector('#morning-input'),text=input.value.trim();if(!text)return;morning.messages.push({role:'user',text});render();const r=await api('/api/morning/chat',{method:'POST',body:JSON.stringify({message:text,sessionId:morning.sessionId})});morning.sessionId=r.sessionId;morning.messages.push({role:'assistant',text:r.reply});morning.candidates=r.candidates||morning.candidates;render();return;}
  if(e.target.id==='ai-form'){e.preventDefault();const input=document.querySelector('#ai-input'),text=input.value.trim();if(!text)return;input.value='';await aiSubmitMessage(text);return;}
  }catch(err){toast(err.message,true);}});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.classList.contains('command-input')){e.preventDefault();const id=e.target.id.replace('cmd-input-','');const btn=document.querySelector(`[data-action="run-command"][data-id="${CSS.escape(id)}"]`);if(btn)runAction(btn);}});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.classList.contains('command-input')){e.preventDefault();const id=e.target.id.replace('cmd-input-','');const btn=document.querySelector(`[data-action="run-command"][data-id="${CSS.escape(id)}"]`);if(btn)runAction(btn);}if((e.key==='Enter'||e.key===' ')&&e.target.classList&&e.target.classList.contains('nav-toggle')){e.preventDefault();cleanupOpen=!cleanupOpen;render();}});
 
 parseRoute();
 if(inEmbeddedPreview()){
-  document.documentElement.dataset.embeddedPreview='1';
   app.innerHTML=embeddedNoticeHtml();
 }
 boot();
