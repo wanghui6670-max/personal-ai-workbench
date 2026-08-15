@@ -16,7 +16,8 @@ require.resolve('@deepseek-ai/dsh/package.json');
 require.resolve('@deepseek-ai/dsh-sdk-jsonrpc-server/package.json');
 require.resolve('@deepseek-ai/dsh-mcp-client/package.json');
 const runtimeBin=path.join(harnessDir,'runtime-bin.mjs');
-const configPath=path.join(harnessDir,'navigator.cordis.yml');
+const navigatorConfigPath=path.join(harnessDir,'navigator.cordis.yml');
+const employeeConfigPath=path.join(harnessDir,'employee.cordis.yml');
 const {DeepSeekHarness}=await import(pathToFileURL(sdkEntry).href);
 if(typeof DeepSeekHarness!=='function')throw new Error('DeepSeekHarness export is unavailable');
 
@@ -48,18 +49,29 @@ const bridge=http.createServer(async(req,res)=>{
 bridge.listen(0,'127.0.0.1');
 await once(bridge,'listening');
 const address=bridge.address();
-const childEnv={
+const commonEnv={
   PATH:process.env.PATH,HOME:process.env.HOME,TMPDIR:process.env.TMPDIR||'/tmp',
   HARNESS_PROVIDER_API_KEY:'compile-smoke-not-a-real-secret',HARNESS_PROVIDER_MODEL:'compile-smoke-model',
   HARNESS_PROVIDER_API:'openai-responses',HARNESS_PROVIDER_BASE_URL:'https://example.invalid/v1',
   HARNESS_PROVIDER_CONTEXT_WINDOW:'32768',HARNESS_PROVIDER_MAX_TOKENS:'512',
-  JOYCREW_BRIDGE_URL:`http://127.0.0.1:${address.port}/api/harness/mcp`,JOYCREW_BRIDGE_TOKEN:token,
   DSH_TELEMETRY_DISABLED:'1',NO_COLOR:'1'
 };
 
-const harness=new DeepSeekHarness({
-  launch:{command:process.execPath,args:[runtimeBin,configPath],cwd:harnessDir,env:childEnv,requestTimeoutMs:30_000,shutdownTimeoutMs:1500,disposeEofGraceMs:6000,disposeGraceMs:3000},
+const navigator=new DeepSeekHarness({
+  launch:{command:process.execPath,args:[runtimeBin,navigatorConfigPath],cwd:harnessDir,env:{...commonEnv,JOYCREW_BRIDGE_URL:`http://127.0.0.1:${address.port}/api/harness/mcp`,JOYCREW_BRIDGE_TOKEN:token},requestTimeoutMs:30_000,shutdownTimeoutMs:1500,disposeEofGraceMs:6000,disposeGraceMs:3000},
   cwd:root,provider:'joycrew',model:'compile-smoke-model',maxTokens:512
 });
-try{await harness.start();console.log(`Unified Harness composition initialized with ${SMOKE_TOOL_NAMES.length} fixed tools.`);}
-finally{await harness.close().catch(()=>undefined);await new Promise(resolve=>bridge.close(resolve));}
+const employee=new DeepSeekHarness({
+  launch:{command:process.execPath,args:[runtimeBin,employeeConfigPath],cwd:harnessDir,env:{...commonEnv,EMPLOYEE_SYSTEM_PROMPT:'Employee compile smoke. Return RuntimeOutput JSON only.',EMPLOYEE_MAX_PARALLEL_TOOL_CALLS:'1'},requestTimeoutMs:30_000,shutdownTimeoutMs:1500,disposeEofGraceMs:6000,disposeGraceMs:3000},
+  cwd:root,provider:'employee',model:'compile-smoke-model',maxTokens:512
+});
+try{
+  await navigator.start();
+  console.log(`Unified Harness composition initialized with ${SMOKE_TOOL_NAMES.length} fixed tools.`);
+  await employee.start();
+  console.log('Employee Harness composition initialized in evidence-only mode.');
+}finally{
+  await employee.close().catch(()=>undefined);
+  await navigator.close().catch(()=>undefined);
+  await new Promise(resolve=>bridge.close(resolve));
+}
