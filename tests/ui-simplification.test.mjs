@@ -7,7 +7,7 @@ async function read(file){return fsp.readFile(file,'utf8');}
 test('Harness Copilot 未启用时不渲染卡片',async()=>{
   const script=await read('public/harness-navigator.js');
   assert.match(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
-  assert.match(script,/if\(!visible\)\{root\?\.remove\(\);lastMountedHtml='';return;\}/);
+  assert.match(script,/if\(!visible\)\{root\?\.remove\(\);panel\.classList\.remove\('harness-native'\);lastMountedHtml='';return;\}/);
 });
 
 test('AI 面板文案是大白话，工程术语已移除',async()=>{
