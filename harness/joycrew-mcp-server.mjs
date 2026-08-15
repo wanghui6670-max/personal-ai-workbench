@@ -1,17 +1,10 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
 import { normalizeInputSchema } from './joycrew-schema.mjs';
+import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from '../src/harness-policy.mjs';
 
 const MAX_RESPONSE_BYTES=2_000_000;
-const ALLOWED_RAW_NAMES=new Set([
-  'panel_navigate','inbox_search','project_list','todo_list',
-  'journal_read','confirmation_list','business_list','project_records_read',
-  'joycrew_workspace_open','joycrew_status_read','joycrew_dashboard_read',
-  'joycrew_project_list','joycrew_project_read','joycrew_customer_list',
-  'joycrew_task_list','joycrew_approval_list','joycrew_deliverable_list',
-  'joycrew_pending_action_list','joycrew_run_prepare',
-  'joycrew_deliverable_prepare','joycrew_approval_prepare'
-]);
+const ALLOWED_RAW_NAMES=new Set(HARNESS_NAVIGATOR_TOOL_ALLOWLIST);
 
 function runtimeConfig(){
   const rawUrl=String(process.env.JOYCREW_BRIDGE_URL||'').trim();

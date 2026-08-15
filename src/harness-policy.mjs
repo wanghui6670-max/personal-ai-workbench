@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * Fixed capability surface for the unified Harness workspace.
  *
@@ -6,6 +8,8 @@
  * preview. The external Joycrew state changes only through the authenticated
  * user confirmation endpoint.
  */
+export const HARNESS_COMPOSITION_ID='workbench-unified-copilot-v1';
+
 export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'panel_navigate',
   'inbox_search',
@@ -29,6 +33,11 @@ export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'joycrew_deliverable_prepare',
   'joycrew_approval_prepare'
 ]);
+
+export const HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256=crypto
+  .createHash('sha256')
+  .update(JSON.stringify(HARNESS_NAVIGATOR_TOOL_ALLOWLIST))
+  .digest('hex');
 
 const allowedNames=new Set(HARNESS_NAVIGATOR_TOOL_ALLOWLIST);
 

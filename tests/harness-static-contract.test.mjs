@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import { normalizeInputSchema } from '../harness/joycrew-schema.mjs';
+import {
+  HARNESS_NAVIGATOR_TOOL_ALLOWLIST,
+  HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
+} from '../src/harness-policy.mjs';
 
 const BANNED_PLUGINS=['@deepseek-ai/dsh-tool-bash','@deepseek-ai/dsh-tool-fs','@deepseek-ai/dsh-terminal','@deepseek-ai/dsh-jobs','@deepseek-ai/dsh-subagent','@deepseek-ai/dsh-workflow','@deepseek-ai/dsh-session-persistence'];
 
@@ -34,10 +38,13 @@ test('proxy removes unsupported presentation constraints and preserves structura
   assert.deepEqual(normalized,{type:'object',additionalProperties:false,properties:{query:{type:'string'},limit:{type:'integer'},nested:{type:'array',items:{type:'string'}}},required:['query'],description:'search input',default:{query:'keep arbitrary annotation keys',limit:10}});
 });
 
-test('stdio proxy repeats the exact reviewed allow-list and blocks unknown calls',async()=>{
+test('stdio proxy imports the exact reviewed allow-list and blocks unknown calls',async()=>{
   const source=await fsp.readFile('harness/joycrew-mcp-server.mjs','utf8');
-  for(const name of ['panel_navigate','inbox_search','project_list','todo_list','journal_read','confirmation_list','business_list','project_records_read'])assert.match(source,new RegExp(`['"]${name}['"]`),name);
+  assert.match(source,/import \{ HARNESS_NAVIGATOR_TOOL_ALLOWLIST \} from '\.\.\/src\/harness-policy\.mjs'/);
+  assert.match(source,/new Set\(HARNESS_NAVIGATOR_TOOL_ALLOWLIST\)/);
   assert.match(source,/ALLOWED_RAW_NAMES\.has\(String\(message\.params\?\.name/);
+  assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,21);
+  assert.match(HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256,/^[a-f0-9]{64}$/);
 });
 
 test('Harness dependencies are pinned to one reviewed developer-preview release',async()=>{
