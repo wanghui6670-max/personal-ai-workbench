@@ -1,0 +1,1 @@
+Fixes an observer self-trigger loop that could starve the browser before the workbench paints.
