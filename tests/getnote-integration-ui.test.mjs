@@ -24,6 +24,10 @@ test('browser exposes Workbench-first GetNote sync with optional Feishu sink and
   assert.match(script,/raw\?\.provider==='dida_cli'/);
   assert.match(script,/lastSyncStatus:'needs_reconfiguration'/);
   assert.match(script,/ok_with_sink_errors/);
+  assert.match(script,/result\.metadata\?\.status==='error'/);
+  assert.match(script,/核心已提交，状态元数据异常/);
+  assert.match(script,/状态元数据失败/);
+  assert.match(script,/['"]&quot;['"]/,'double quotes remain strictly escaped for injected settings HTML');
   assert.doesNotMatch(script,/启用同步时必须填写飞书每日工作日记 URL/);
   assert.doesNotMatch(script,/TICKTICK_HOST|ticktick\.com|dida365\.com/);
   assert.doesNotMatch(script,/localStorage|sessionStorage|indexedDB/);
