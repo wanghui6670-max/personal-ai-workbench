@@ -24,6 +24,7 @@ function flag(name){return process.argv.includes(name);}
 function limited(value,max=6000){const text=String(value||'');return text.length<=max?text:`${text.slice(0,max-1)}…`;}
 function relativeInside(parent,target){const relative=path.relative(parent,target);return relative===''||(!relative.startsWith('..')&&!path.isAbsolute(relative));}
 
+const allowConfiguredPortInUse=flag('--allow-configured-port-in-use');
 const configuredDataDir=String(process.env.DATA_DIR||'').trim();
 const configuredWorkspaceRoot=String(process.env.WORKSPACE_ROOT||'').trim();
 const dataDir=configuredDataDir&&path.isAbsolute(configuredDataDir)?path.resolve(configuredDataDir):null;
@@ -40,7 +41,7 @@ const report={
   commit:null,
   branch:null,
   binding:null,
-  scope:{joycrewEnabled:false,externalWrites:false,realCliReadChecks:false,productionCutover:false},
+  scope:{joycrewEnabled:false,externalWrites:false,realCliReadChecks:false,productionCutover:false,configuredPortMayBeInUse:allowConfiguredPortInUse},
   checks:[],
   backup:null,
   snapshots:null,
@@ -137,8 +138,9 @@ try{
   catch(error){if(/不一致/.test(error.message))throw error;}
   pass('代码基线',{branch:report.branch||'detached',commit:report.commit.slice(0,12),trackedTreeClean:true,matchesOriginMain});
 
-  if(await portInUse(binding.host,binding.port))throw new Error(`配置端口 ${binding.host}:${binding.port} 正在使用。请先停止旧工作台，再执行真实主机 P0。`);
-  pass('旧进程已停止',{configuredPortFree:true});
+  const configuredPortBusy=await portInUse(binding.host,binding.port);
+  if(configuredPortBusy&&!allowConfiguredPortInUse)throw new Error(`配置端口 ${binding.host}:${binding.port} 正在使用。请先停止旧工作台，再执行真实主机 P0。`);
+  pass(configuredPortBusy?'现有服务保留运行':'旧进程已停止',{configuredPortFree:!configuredPortBusy,existingServiceAllowed:configuredPortBusy&&allowConfiguredPortInUse});
 
   const doctorEnv={...process.env,JOYCREW_ENABLED:'0'};
   const doctor=await runNode('scripts/doctor.mjs',[],doctorEnv,{timeoutMs:180_000});
@@ -163,11 +165,12 @@ try{
   pass('真实数据 backup v2',{relativePath:report.backup.relativePath,bytes:report.backup.bytes,sha256:report.backup.sha256});
 
   const ignorePrefixes=[path.relative(binding.dataDir,path.dirname(reportPath)).split(path.sep).join('/')].filter(value=>value&&value!=='.');
+  const workspaceSnapshotOptions={hashFiles:false,maxDepth:2,ignoreNames:['.git','node_modules','.next','dist','build','coverage','.venv','venv']};
   const before={
     data:await snapshotTree(binding.dataDir,{hashFiles:true,ignorePrefixes}),
-    workspace:await snapshotTree(binding.workspaceRoot,{hashFiles:false,ignoreNames:['.git','node_modules','.next','dist','build','coverage','.venv','venv']})
+    workspace:await snapshotTree(binding.workspaceRoot,workspaceSnapshotOptions)
   };
-  pass('启动前目录快照',{dataEntries:before.data.entryCount,workspaceEntries:before.workspace.entryCount});
+  pass('启动前目录快照',{dataEntries:before.data.entryCount,workspaceEntries:before.workspace.entryCount,workspaceMaxDepth:workspaceSnapshotOptions.maxDepth});
 
   const smokePort=arg('--smoke-port')?Number(arg('--smoke-port')):await freePort();
   if(!Number.isInteger(smokePort)||smokePort<1||smokePort>65535)throw new Error('--smoke-port 无效。');
@@ -194,14 +197,14 @@ try{
 
   const after={
     data:await snapshotTree(binding.dataDir,{hashFiles:true,ignorePrefixes}),
-    workspace:await snapshotTree(binding.workspaceRoot,{hashFiles:false,ignoreNames:['.git','node_modules','.next','dist','build','coverage','.venv','venv']})
+    workspace:await snapshotTree(binding.workspaceRoot,workspaceSnapshotOptions)
   };
   const dataComparison=compareSnapshots(before.data,after.data);
   const workspaceComparison=compareSnapshots(before.workspace,after.workspace);
   assert.equal(dataComparison.equal,true,'测试启动改变了 DATA_DIR。');
-  assert.equal(workspaceComparison.equal,true,'测试启动改变了 WORKSPACE_ROOT。');
-  report.snapshots={before,after,dataComparison,workspaceComparison};
-  pass('只读启动无目录漂移',{dataUnchanged:true,workspaceUnchanged:true});
+  assert.equal(workspaceComparison.equal,true,'测试启动改变了 WORKSPACE_ROOT 的浅层哨兵快照。');
+  report.snapshots={policy:{workspaceMaxDepth:workspaceSnapshotOptions.maxDepth},before,after,dataComparison,workspaceComparison};
+  pass('只读启动无目录漂移',{dataUnchanged:true,workspaceSentinelUnchanged:true,workspaceMaxDepth:workspaceSnapshotOptions.maxDepth});
 
   report.status='passed';
 }catch(error){failReport(error);}
