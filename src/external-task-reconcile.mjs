@@ -7,7 +7,6 @@ function todoByExternalId(state,externalId){return state.todos.find(todo=>todo.s
 function inboxByExternalId(state,externalId){return state.inbox.find(item=>item.source==='getnote_cli'&&item.externalTaskId===externalId)||null;}
 function entityExternalId(entity){return entity.externalId||entity.externalTaskId||null;}
 function entityNoteId(entity){return entity.sourceNoteId||null;}
-function entitySourceTodoId(entity){return entity.sourceTodoId||null;}
 function entityTitle(entity){return entity.title||String(entity.text||'').split('｜来自得到大脑《')[0]||'';}
 
 function trackedNoteFrom(entity){
@@ -43,7 +42,7 @@ function existingEntities(state){
   ];
 }
 
-function reconcileLegacyIdentity(state,tasks){
+function reconcileFingerprintRename(state,tasks){
   const incomingIds=new Set(tasks.map(task=>task.externalId));
   const existing=existingEntities(state);
   const existingIds=new Set(existing.map(({entity})=>entityExternalId(entity)).filter(Boolean));
@@ -52,28 +51,19 @@ function reconcileLegacyIdentity(state,tasks){
   const used=new Set();
   let reconciled=0;
 
-  for(const task of unmatchedIncoming.filter(item=>item.sourceTodoId)){
-    const candidates=unmatchedExisting.filter(({entity})=>
-      !used.has(entity)&&entityNoteId(entity)===task.sourceNoteId&&!entitySourceTodoId(entity)&&normalizeText(entityTitle(entity))===normalizeText(task.title)
-    );
-    if(candidates.length!==1)continue;
-    const {entity}=candidates[0];
-    if(Object.hasOwn(entity,'externalId'))entity.externalId=task.externalId;
-    if(Object.hasOwn(entity,'externalTaskId'))entity.externalTaskId=task.externalId;
-    entity.sourceTodoId=task.sourceTodoId;
-    entity.externalIdentityKind='source_id';
-    used.add(entity);reconciled+=1;
-  }
-
+  // Current official GetNote meeting_todos items expose text + completed only,
+  // so identity is a text fingerprint. A changed title is inherited only when
+  // one old entity and one new item remain in the same note after exact IDs are
+  // removed. Any ambiguity stays separate instead of being guessed by similarity.
   const noteIds=new Set(unmatchedIncoming.map(task=>task.sourceNoteId).filter(Boolean));
   for(const noteId of noteIds){
-    const incoming=unmatchedIncoming.filter(task=>task.sourceNoteId===noteId&&!task.sourceTodoId&&!existingIds.has(task.externalId));
-    const old=unmatchedExisting.filter(({entity})=>!used.has(entity)&&entityNoteId(entity)===noteId&&!entitySourceTodoId(entity));
+    const incoming=unmatchedIncoming.filter(task=>task.sourceNoteId===noteId&&!existingIds.has(task.externalId));
+    const old=unmatchedExisting.filter(({entity})=>!used.has(entity)&&entityNoteId(entity)===noteId);
     if(incoming.length!==1||old.length!==1)continue;
     const task=incoming[0];const {entity}=old[0];
     if(Object.hasOwn(entity,'externalId'))entity.externalId=task.externalId;
     if(Object.hasOwn(entity,'externalTaskId'))entity.externalTaskId=task.externalId;
-    entity.externalIdentityKind='fallback_text';
+    entity.externalIdentityKind='text_fingerprint';
     used.add(entity);reconciled+=1;
   }
   return reconciled;
@@ -81,7 +71,6 @@ function reconcileLegacyIdentity(state,tasks){
 
 function todoContext(task){
   const parts=[`来源：得到大脑《${task.sourceNoteTitle||'未命名笔记'}》`,`笔记 ID：${task.sourceNoteId||'unknown'}`];
-  if(task.sourceTodoId)parts.push(`得到待办 ID：${task.sourceTodoId}`);
   if(task.sourceNoteUrl)parts.push(`笔记链接：${task.sourceNoteUrl}`);
   if(task.todoSource)parts.push(`待办解析来源：${task.todoSource}`);
   return compactText(parts.join('\n'),2000);
@@ -96,8 +85,7 @@ function sourcePatch(task,now){return{
   sourceNoteCreatedAt:task.sourceNoteCreatedAt||null,
   sourceNoteUpdatedAt:task.sourceNoteUpdatedAt||task.updatedAt||null,
   sourceNoteUrl:task.sourceNoteUrl||'',
-  sourceTodoId:task.sourceTodoId||null,
-  externalIdentityKind:task.identityKind||'fallback_text',
+  externalIdentityKind:task.externalIdentityKind||'text_fingerprint',
   todoSource:task.todoSource||''
 };}
 function localStateFromTodo(todo,now){return{
@@ -143,14 +131,12 @@ function localSchedule(todo){
     timeZone:todo.timeZone||null
   };
 }
-function priorSourceDue(todo){
-  return todo?.sourceDueDate||todo?.sourcePreviousDueDate||todo?.dueDate||null;
-}
+function priorSourceDue(todo){return todo?.sourceDueDate||todo?.sourcePreviousDueDate||todo?.dueDate||null;}
 
 export function applyGetnoteTaskSnapshot(state,{active=[],completed=[]}={}){
   const now=nowIso();
   const all=[...active,...completed];
-  const reconciled=reconcileLegacyIdentity(state,all);
+  const reconciled=reconcileFingerprintRename(state,all);
   let created=0,updated=0,completedCount=0,undated=0,scheduled=0,todayPreserved=0,movedToInbox=0,movedToTodo=0,localDuePreserved=0;
 
   for(const task of active){
