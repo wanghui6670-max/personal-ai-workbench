@@ -10,6 +10,7 @@ import { loadWorkbenchEnv } from '../src/env.mjs';
 import { aiRuntimeConfig, aiEnabled } from '../src/ai.mjs';
 import { integrationFromConfig } from '../src/task-sync-domain.mjs';
 import { createGetnoteReader } from '../src/getnote-runtime.mjs';
+import {getnoteCliEnv,larkCliEnv} from '../src/external-cli-env.mjs';
 import { localCalendarPath } from '../src/local-calendar.mjs';
 import { createJoycrewClient } from '../src/joycrew-client.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from '../src/product.mjs';
@@ -65,7 +66,9 @@ try{
       const reader=createGetnoteReader({env:process.env});
       const runtime=reader.status();
       if(runtime.mode==='local_cli'){
-        const result=await execFileAsync('getnote',['doctor','-o','json'],{timeout:15_000,windowsHide:true,maxBuffer:2*1024*1024,env:{...process.env}});
+        const result=await execFileAsync('getnote',['doctor','-o','json'],{
+          timeout:15_000,windowsHide:true,maxBuffer:2*1024*1024,env:getnoteCliEnv(process.env)
+        });
         const raw=String(result.stdout||'').trim();
         if(raw){
           const payload=JSON.parse(raw);
@@ -85,8 +88,10 @@ try{
     }
 
     if(feishuJournalRequired){
-      try{await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true});check('飞书每日工作日记',true,'已配置目标且找到 lark-cli；未执行真实文档写入');}
-      catch(error){check('飞书每日工作日记',false,error.code==='ENOENT'?'已配置飞书 sink，但未找到 lark-cli 可执行文件':'已配置飞书 sink，但 lark-cli 不可用');}
+      try{
+        await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true,env:larkCliEnv(process.env)});
+        check('飞书每日工作日记',true,'已配置目标且找到 lark-cli；未执行真实文档写入');
+      }catch(error){check('飞书每日工作日记',false,error.code==='ENOENT'?'已配置飞书 sink，但未找到 lark-cli 可执行文件':'已配置飞书 sink，但 lark-cli 不可用');}
     }else{
       check('飞书每日工作日记',true,'未配置；核心 GetNote → Workbench 同步不依赖 lark-cli');
     }
