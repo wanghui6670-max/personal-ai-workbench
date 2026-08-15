@@ -49,6 +49,10 @@ function setTextIfChanged(node,text){
   if(node&&node.textContent!==text)node.textContent=text;
 }
 
+function normalizeHarnessChrome(){
+  setTextIfChanged(document.querySelector('.harness-nav-head>strong'),'聊天');
+}
+
 function wrapSecondary(node,{className,label}){
   if(!node||node.closest('.today-secondary-details'))return null;
   const details=document.createElement('details');
@@ -121,7 +125,9 @@ function simplifyToday(){
   const primary=grid.querySelector('section.card.pad');
   setTextIfChanged(primary?.querySelector('.card-desc'),'只显示你明确加入今天的任务。');
   const empty=primary?.querySelector('.empty');
-  if(empty&&empty.textContent.includes('今天还没有正式安排任务')){
+  const primaryEmpty=Boolean(empty&&empty.textContent.includes('今天还没有正式安排任务'));
+  if(primary)primary.classList.toggle('today-primary-empty',primaryEmpty);
+  if(primaryEmpty){
     const emptyHtml='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';
     if(empty.innerHTML!==emptyHtml)empty.innerHTML=emptyHtml;
   }
@@ -144,6 +150,7 @@ function simplifyToday(){
 
 function enhance(){
   ensureThemeButton();
+  normalizeHarnessChrome();
   simplifyToday();
 }
 
