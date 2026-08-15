@@ -10,6 +10,7 @@ GetNote 当前稳定待办身份使用 `text_fingerprint`。当一个无截止�
 - 删除：`dismissed`
 - 保存为备忘：`memo`
 - 归入已有项目作为项目记录：`project_note`
+- 从该收件箱事项创建正式项目：`project_created`
 
 来源决策只保存最小必要字段：Workbench 决策 ID、`externalId`、可选 `sourceNoteId`、disposition、决策时间；不复制原待办正文。
 
@@ -42,7 +43,9 @@ GetNote 来源 Todo 使用：
 
 ## 4. 原子性与 fail-safe
 
-来源决策、Inbox 移除、Todo/Note 创建必须位于同一个 `JsonStore.updateState(...)` 提交中。不得采用“先删/先转，再追加 tombstone”的事后补丁。
+来源决策、Inbox 移除、Todo/Note/Project 创建必须位于同一个 `JsonStore.updateState(...)` 提交中。不得采用“先删/先转/先建项目，再追加 tombstone”的事后补丁。
+
+正式项目创建只有在同一状态事务成功提交后，`project_created` 决策才会生效；文件系统准备或状态提交失败时，来源收件箱和来源决策都必须保持未处理状态。
 
 飞书工作日志与 ICS 日历仍然是 Workbench 核心提交之后的派生 sink；sink 失败不得回滚核心状态。
 
@@ -51,6 +54,8 @@ GetNote 来源 Todo 使用：
 `tests/external-task-user-decisions.test.mjs` 覆盖：
 
 1. 删除后同 externalId 不再导入，源端显式完成后清理决策；
-2. Inbox → Todo 保持同一 Workbench ID 与 externalId；
-3. 用户截止日期在无日期/改期的后续来源同步中不被覆盖；
-4. Workbench 修改 GetNote Todo 截止日期时显式切换 `dueDateOwner=user`。
+2. 从 GetNote Inbox 创建正式项目后写入 `project_created`，同一来源后续同步不再回到 Inbox/Todo；
+3. Inbox → Todo 保持同一 Workbench ID 与 externalId；
+4. 用户截止日期在无日期/改期的后续来源同步中不被覆盖；
+5. Workbench 修改 GetNote Todo 截止日期时显式切换 `dueDateOwner=user`；
+6. 来源决策字段和截止日期所有权枚举执行 fail-closed 校验，不允许正文进入 tombstone。
