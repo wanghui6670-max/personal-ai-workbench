@@ -51,27 +51,16 @@ B. Workbench 中仍未完成的 GetNote Todo / Inbox 对应 sourceNoteId
 
 该策略仍然是有界、按需的，不做得到大脑全量镜像或后台扫描。
 
-## 4. 稳定任务身份
+## 4. 当前任务身份合同
 
-### 4.1 上游提供稳定 todo ID
-
-若 `meeting_todos.items[]` 提供以下任一稳定字段：
+当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只暴露：
 
 ```text
-todo_id / todoId / task_id / taskId / id
+text
+completed
 ```
 
-Workbench 以：
-
-```text
-noteId + sourceTodoId
-```
-
-派生外部 ID。待办文案编辑不会改变身份。
-
-### 4.2 上游没有稳定 todo ID
-
-才退化到：
+**当前没有 per-todo 稳定 ID。** Workbench 因此固定使用历史兼容 fingerprint：
 
 ```text
 noteId
@@ -79,14 +68,25 @@ noteId
 + 同文案出现序号
 ```
 
-并标记 `externalIdentityKind=fallback_text`。
+并标记：
 
-若旧版本文本指纹和新解析结果不一致，只允许两种保守迁移：
+```text
+externalIdentityKind = text_fingerprint
+```
 
-1. 新结果开始提供稳定 source todo ID，且 `noteId + 规范化标题` 唯一匹配旧实体；
-2. 同一 note 中去掉所有精确匹配后，恰好只剩一个旧实体和一个新的 fallback 实体。
+同一 note、同一文案、同一出现序号会保持同一个外部 ID。文案被编辑后，原始 fingerprint 会变化。
 
-其他歧义场景不自动合并。
+为了避免文案微调制造明显重复，Reconcile 只做一个保守规则：
+
+```text
+去掉所有精确 externalId 匹配后
+同一 note 恰好只剩 1 个旧实体 + 1 个新 item
+→ 新 fingerprint 继承旧 Workbench 实体
+```
+
+如果同一 note 同时有多个旧实体和多个新 item，属于歧义，**不自动猜测合并**。不使用语义相似度批量配对。
+
+即使未来 GetNote 响应中出现未文档化的 `id` 字段，当前 v2 也不会偷偷改变身份算法；只有官方合同明确提供稳定 per-todo ID 后，才能通过新的受测版本升级身份模型。
 
 ## 5. 日期、相对时间和时区
 
@@ -129,36 +129,59 @@ Asia/Shanghai
 有空时
 ```
 
-## 6. Workbench 状态对账
+## 6. Workbench 状态与用户所有权
 
-### 有明确日期
+### 来源首次给出明确日期
 
 进入正式 Todo。新建任务不会自动加入 Today。
 
 来源同步可以更新：
 
 - 标题；
-- 来源日期 / 时刻；
+- 来源明确日期 / 时刻；
 - 来源笔记引用；
-- 上游完成状态。
+- 上游明确完成状态。
 
-来源同步不得覆盖用户拥有的：
+Workbench 另外保存：
+
+```text
+sourceDueDate
+```
+
+用于区分“来源计划”和“用户本地截止日期”。
+
+### 用户自己修改过截止日期
+
+如果 Workbench 当前 `dueDate` 与此前 `sourceDueDate` 不一致，视为用户本地覆盖：
+
+```text
+sourceDueDate = 得到大脑最新来源日期
+dueDate       = 用户本地日期
+```
+
+后续来源日期变化只更新 `sourceDueDate`，**不覆盖用户的 `dueDate`**。
+
+旧版本 GetNote Todo 没有 `sourceDueDate` 时，第一次 v2 同步如果现有 `dueDate` 与新来源日期不一致，保守按“用户已经改过日期”处理，宁可保留用户决定，也不在升级时静默覆盖。
+
+### 来源变成无明确日期
+
+默认情况下，来源无明确日期的未完成事项进入 Inbox。
+
+如果某个已存在 Todo 的来源日期后来被移除：
+
+- **没有本地截止日期覆盖，且未被用户选入 Today**：转回 Inbox；
+- **已经被用户选入 Today**：保留现有 Todo 与 Today 选择，`sourceDueDate=null`；
+- **用户已经手工覆盖本地截止日期**：即使不在 Today，也保留 Todo 和本地 `dueDate`，只把 `sourceDueDate` 设为 `null`。
+
+Todo ↔ Inbox 因来源日期出现/消失迁移时，继续保留同一个 Workbench 实体 ID 和用户拥有的：
 
 - `projectId`；
 - 本地 priority / priorityLabel；
 - 本地 tags；
+- `createdAt`；
 - Today 选择。
 
-### 无明确日期
-
-默认进入 Inbox。
-
-如果某个已存在 Todo 的来源日期后来被移除：
-
-- **未被用户选入 Today**：转回 Inbox；
-- **已经被用户选入 Today**：保留现有 Workbench Todo 和 Today 选择，标记 `externalStatus=active_without_due_date_today_preserved`，并把 `sourceDueDate` 设为 `null`。
-
-这是“来源计划”和“用户已经做出的今日决定”的边界。来源变化不能擅自撤销 Today。
+来源变化不能擅自撤销这些用户决定。
 
 ### 明确完成
 
@@ -167,6 +190,8 @@ Asia/Shanghai
 - 对应 Todo 标记完成；
 - 从 Today 移除；
 - 下一版 ICS 自然移除。
+
+某条来源事项本轮没有出现，不据此猜测完成。
 
 ## 7. 核心事务边界
 
@@ -230,13 +255,15 @@ data/calendar/personal-ai-workbench.ics
 规则：
 
 - 文件 `0600`，目录 `0700`；
-- 只镜像未完成且有明确日期的来源任务；
+- 只镜像未完成且有 Workbench 明确日期的任务；
 - 全天事项使用 `VALUE=DATE`；
 - 明确本地时刻使用 `TZID=<配置时区>`；
 - 已带 offset 的时间可以规范成 UTC；
 - 不猜持续时长；
-- UID 由稳定外部 ID 派生；
+- UID 由稳定的当前 externalId 派生；
 - 每次完整重建，因此来源明确完成后自然消失。
+
+当用户已经覆盖本地 `dueDate` 时，ICS 镜像 Workbench 的本地任务日期，而不是强行恢复来源 `sourceDueDate`。
 
 ICS 是派生镜像，不是 Workbench 的任务真源。
 
