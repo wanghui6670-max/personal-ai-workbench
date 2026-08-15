@@ -27,3 +27,24 @@ services:
         target: /workspace
         read_only: false
     restart: unless-stopped
+
+  # Optional. Start explicitly with:
+  # docker compose --profile employee-runtime up -d --build
+  # Joycrew can then use http://host.docker.internal:${EMPLOYEE_HARNESS_PORT:-4300}
+  # (or another approved private route) as DEEPSEEK_HARNESS_URL.
+  employee-harness-runtime:
+    profiles: ["employee-runtime"]
+    build:
+      context: .
+    user: "${WORKBENCH_UID:-1000}:${WORKBENCH_GID:-1000}"
+    ports:
+      - "${EMPLOYEE_HARNESS_BIND_ADDRESS:-127.0.0.1}:${EMPLOYEE_HARNESS_PORT:-4300}:${EMPLOYEE_HARNESS_PORT:-4300}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      EMPLOYEE_HARNESS_HOST: 0.0.0.0
+      EMPLOYEE_HARNESS_PORT: "${EMPLOYEE_HARNESS_PORT:-4300}"
+      EMPLOYEE_HARNESS_ALLOW_PRIVATE_BIND: "1"
+    command: ["node", "harness/employee-runtime-server.mjs"]
+    restart: unless-stopped
