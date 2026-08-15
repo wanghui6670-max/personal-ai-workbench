@@ -8,6 +8,12 @@ const DEFAULT_TIMEOUT_MS=45_000;
 const MAX_BUFFER=16*1024*1024;
 const MAX_HTTP_BYTES=16*1024*1024;
 const MODES=new Set(['local_cli','private_http']);
+const LOCAL_CLI_ENV_KEYS=Object.freeze([
+  'HOME','PATH','USER','LOGNAME','TMPDIR','LANG','LC_ALL','LC_CTYPE','XDG_CONFIG_HOME',
+  'HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','http_proxy','https_proxy','all_proxy','no_proxy',
+  'SSL_CERT_FILE','SSL_CERT_DIR','NODE_EXTRA_CA_CERTS',
+  'GETNOTE_API_KEY','GETNOTE_CLIENT_ID'
+]);
 
 export class GetnoteRuntimeError extends Error{
   constructor(message,{code='GETNOTE_RUNTIME_UNAVAILABLE',statusCode=502,cause}={}){
@@ -53,12 +59,21 @@ function localCliError(error,action){
   if(error?.killed||error?.signal)return new GetnoteRuntimeError(`得到大脑 CLI ${action}超时。`,{code:'GETNOTE_RUNTIME_TIMEOUT',statusCode:504,cause:error});
   return new GetnoteRuntimeError(`得到大脑 CLI ${action}失败。请运行 getnote doctor -o json 检查登录和网络。`,{cause:error});
 }
+function localCliEnv(source={}){
+  const env={};
+  for(const key of LOCAL_CLI_ENV_KEYS){
+    const value=source?.[key];
+    if(typeof value==='string'&&value.length)env[key]=value;
+  }
+  return env;
+}
 
 export function createLocalGetnoteReader({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
   const timeout=integer(timeoutMs,DEFAULT_TIMEOUT_MS,1_000,120_000,'GetNote timeout');
+  const childEnv=localCliEnv(processEnv);
   async function run(args,action){
     try{
-      const result=await exec(CLI,args,{timeout,maxBuffer:MAX_BUFFER,windowsHide:true,env:{...processEnv}});
+      const result=await exec(CLI,args,{timeout,maxBuffer:MAX_BUFFER,windowsHide:true,env:childEnv});
       return parseJsonText(result.stdout,'得到大脑 CLI');
     }catch(error){throw localCliError(error,action);}
   }
