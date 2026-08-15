@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { addActivity } from './store.mjs';
-import { nowIso, todayIso, compactText } from './utils.mjs';
+import { nowIso, compactText } from './utils.mjs';
 import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
-import { createTaskCliClient, normalizeNoteLimit, normalizeGetnoteTimeZone, ExternalTaskSourceError } from './task-cli.mjs';
+import { createTaskCliClient, normalizeNoteLimit, normalizeGetnoteTimeZone, getnoteDateOnlyInTimeZone, ExternalTaskSourceError } from './task-cli.mjs';
 import { createFeishuDailyJournalClient, DAILY_JOURNAL_HEADING } from './feishu-daily-journal.mjs';
 import { writeLocalCalendar } from './local-calendar.mjs';
 import {applyGetnoteTaskSnapshot,collectTrackedGetnoteNotes} from './external-task-reconcile.mjs';
@@ -229,7 +229,7 @@ export async function syncExternalTasks({
   const config=await store.readConfig();
   const integration=integrationFromConfig(config);
   if(!integration.enabled)throw new ExternalTaskIntegrationError('得到大脑 CLI 待办来源尚未启用。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:409});
-  const date=todayIso();
+  const date=getnoteDateOnlyInTimeZone(new Date(),integration.timeZone);
   let source,changes,sinkSource;
   try{
     const before=await store.readState();
@@ -296,23 +296,24 @@ export async function syncExternalTasks({
 export async function publishDailySummary({
   store,
   notes='',
-  date=todayIso(),
+  date=null,
   journalClient=createFeishuDailyJournalClient()
 }={}){
   const config=await store.readConfig();
   const integration=integrationFromConfig(config);
   if(!integration.enabled)throw new ExternalTaskIntegrationError('得到大脑 CLI 待办来源尚未启用。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:409});
   if(!integration.journalDocumentUrl)throw new ExternalTaskIntegrationError('尚未配置飞书每日工作日记 URL；任务同步不受影响，但每日总结需要先配置飞书沉淀目标。',{code:'FEISHU_DAILY_JOURNAL_NOT_CONFIGURED',statusCode:409});
+  const summaryDate=date||getnoteDateOnlyInTimeZone(new Date(),integration.timeZone);
   const state=await store.readState();
-  const text=summaryText(state,date,notes);
-  const op=operationId('summary',date,text);
+  const text=summaryText(state,summaryDate,notes);
+  const op=operationId('summary',summaryDate,text);
   const journal=await journalClient.appendSummary(integration.journalDocumentUrl,text,{operationId:op,heading:integration.journalHeading});
-  await store.updateState(current=>{addActivity(current,{type:'daily_summary_published',text:`${date} 的每日总结已沉淀到飞书工作日记。`});});
+  await store.updateState(current=>{addActivity(current,{type:'daily_summary_published',text:`${summaryDate} 的每日总结已沉淀到飞书工作日记。`});});
   await store.updateConfig(current=>{
     const previous=current.settings?.[SETTINGS_KEY]||{};
     current.settings={...(current.settings||{}),[SETTINGS_KEY]:{
       ...previous,provider:'getnote_cli',lastSummaryAt:nowIso(),lastSummaryBlockId:journal.item?.blockId||null
     }};return true;
   });
-  return{date,operationId:op,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed)};
+  return{date:summaryDate,operationId:op,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed)};
 }
