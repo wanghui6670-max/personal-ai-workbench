@@ -56,13 +56,47 @@ test('source date removal never ejects a user-selected Today task',()=>{
   assert.equal(current.inbox.length,0);
 });
 
-test('unselected scheduled task becomes Inbox when source removes its date',()=>{
+test('dated -> Inbox -> dated keeps one Workbench entity and local project/priority/tags',()=>{
   const current=state();
-  current.todos.push({id:'td-old',title:'联系供应商',context:'',dueDate:'2026-08-16',done:false,projectId:null,createdAt:'2026-08-11T00:00:00Z',source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3'});
-  applyGetnoteTaskSnapshot(current,{active:[task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null})]});
+  current.todos.push({
+    id:'td-stable',title:'联系供应商',context:'',dueDate:'2026-08-16',done:false,projectId:'project-local',createdAt:'2026-08-11T00:00:00Z',
+    source:'getnote_cli',externalId:'same-id',sourceNoteId:'note-3',priority:7,priorityLabel:'我定的重要',tags:['客户','本地']
+  });
+
+  const undated=task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:null,dueAt:null});
+  applyGetnoteTaskSnapshot(current,{active:[undated]});
   assert.equal(current.todos.length,0);
   assert.equal(current.inbox.length,1);
-  assert.equal(current.inbox[0].externalTaskId,'same-id');
+  const inbox=current.inbox[0];
+  assert.equal(inbox.id,'td-stable');
+  assert.equal(inbox.workbenchEntityId,'td-stable');
+  assert.equal(inbox.localProjectId,'project-local');
+  assert.equal(inbox.localPriority,7);
+  assert.equal(inbox.localPriorityLabel,'我定的重要');
+  assert.deepEqual(inbox.localTags,['客户','本地']);
+
+  const redated=task({externalId:'same-id',sourceTodoId:'todo-3',sourceNoteId:'note-3',title:'联系供应商',dueDate:'2026-08-25',dueAt:'2026-08-25'});
+  applyGetnoteTaskSnapshot(current,{active:[redated]});
+  assert.equal(current.inbox.length,0);
+  assert.equal(current.todos.length,1);
+  const restored=current.todos[0];
+  assert.equal(restored.id,'td-stable');
+  assert.equal(restored.dueDate,'2026-08-25');
+  assert.equal(restored.projectId,'project-local');
+  assert.equal(restored.priority,7);
+  assert.equal(restored.priorityLabel,'我定的重要');
+  assert.deepEqual(restored.tags,['客户','本地']);
+  assert.equal(restored.createdAt,'2026-08-11T00:00:00Z');
+});
+
+test('an initially undated task keeps its Workbench entity id when a source date later appears',()=>{
+  const current=state();
+  const undated=task({externalId:'new-undated',sourceTodoId:'todo-u',sourceNoteId:'note-u',dueDate:null,dueAt:null});
+  applyGetnoteTaskSnapshot(current,{active:[undated]});
+  const firstId=current.inbox[0].id;
+  applyGetnoteTaskSnapshot(current,{active:[task({externalId:'new-undated',sourceTodoId:'todo-u',sourceNoteId:'note-u',dueDate:'2026-08-30',dueAt:'2026-08-30'})]});
+  assert.equal(current.inbox.length,0);
+  assert.equal(current.todos[0].id,firstId);
 });
 
 test('tracked notes include unresolved Todo and Inbox sources but exclude completed tasks',()=>{
