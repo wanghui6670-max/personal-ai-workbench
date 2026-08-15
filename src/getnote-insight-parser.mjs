@@ -1,5 +1,5 @@
-import {providerRuntimeConfig,runStructuredDecision} from './ai/index.mjs';
-import {GETNOTE_INSIGHT_SCHEMA_VERSION,GetnoteInsightError,candidateKeyFor,evidenceIdFor,getnoteContentHash} from './getnote-insight.mjs';
+import {aiRuntimeConfig,runStructuredDecision} from './ai/index.mjs';
+import {GETNOTE_INSIGHT_SCHEMA_VERSION,GetnoteInsightError,evidenceIdFor,getnoteContentHash} from './getnote-insight.mjs';
 
 export const GETNOTE_INSIGHT_PARSER_VERSION='1.0.0';
 const WORKFLOW='getnote_insight';
@@ -113,7 +113,7 @@ function translateDecision(raw,note,runtime,parsedAt){
   };
 }
 
-export async function analyzeGetnoteNote({note,store,env=process.env,runtimeConfig=providerRuntimeConfig,runStructured=runStructuredDecision,now=()=>new Date()}={}){
+export async function analyzeGetnoteNote({note,store,env=process.env,runtimeConfig=aiRuntimeConfig,runStructured=runStructuredDecision,now=()=>new Date()}={}){
   if(!note||!note.noteId||typeof note.content!=='string'||!note.content.trim())fail('缺少得到大脑真实原文。','GETNOTE_RAW_CONTENT_UNAVAILABLE',409);
   if(!store||typeof store.findCachedInsight!=='function'||typeof store.putInsight!=='function')fail('GetNote Insight Store 不可用。','GETNOTE_INSIGHT_STORE_UNAVAILABLE',500);
   let runtime;
