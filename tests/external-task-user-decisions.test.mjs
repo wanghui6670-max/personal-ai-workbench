@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {JsonStore} from '../src/store.mjs';
-import {processInbox,updateTodo} from '../src/domain.mjs';
+import {processInbox,updateTodo,createProject} from '../src/domain.mjs';
 import {applyGetnoteTaskSnapshot} from '../src/external-task-reconcile.mjs';
 
 async function fixture(t){
@@ -13,6 +13,14 @@ async function fixture(t){
   const store=new JsonStore(path.join(root,'data'));
   await store.ensure();
   return store;
+}
+
+async function projectFixture(t){
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'paw-getnote-project-decision-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const store=new JsonStore(path.join(root,'data'));
+  await store.ensure();
+  return{root,store};
 }
 
 function sourceTask(overrides={}){
@@ -93,6 +101,35 @@ test('deleting a GetNote inbox item persists an exact source decision and preven
   assert.equal(completion.clearedDecisions,1);
   state=await store.readState();
   assert.deepEqual(state.externalTaskDecisions,[]);
+});
+
+test('creating a project from a GetNote inbox item persists a terminal source decision',async t=>{
+  const {root,store}=await projectFixture(t);
+  await seedUndatedInbox(store);
+  const source=(await store.readState()).inbox.find(item=>item.id==='in_getnote_1');
+
+  const result=await createProject({
+    appRoot:root,
+    store,
+    description:source.text,
+    endDate:'2026-09-01',
+    sourceInboxId:source.id
+  });
+  assert.equal(result.replay,false);
+
+  let state=await store.readState();
+  assert.equal(state.projects.length,1);
+  assert.equal(state.inbox.length,0);
+  assert.equal(state.externalTaskDecisions.length,1);
+  assert.equal(state.externalTaskDecisions[0].externalId,'getnote-task-1');
+  assert.equal(state.externalTaskDecisions[0].disposition,'project_created');
+
+  const changes=await store.updateState(current=>applyGetnoteTaskSnapshot(current,{active:[sourceTask()]}));
+  assert.equal(changes.suppressed,1);
+  state=await store.readState();
+  assert.equal(state.projects.length,1);
+  assert.equal(state.inbox.length,0);
+  assert.equal(state.todos.length,0);
 });
 
 test('manual GetNote Inbox -> Todo conversion keeps one entity and a user-owned due date across syncs',async t=>{
