@@ -1,7 +1,7 @@
 import {newId,nowIso} from './utils.mjs';
 
 const MAX_DECISIONS=2000;
-const DISPOSITIONS=new Set(['dismissed','memo','project_note']);
+const DISPOSITIONS=new Set(['dismissed','memo','project_note','project_created']);
 
 function text(value){return typeof value==='string'?value.trim():'';}
 function validDecision(item){
