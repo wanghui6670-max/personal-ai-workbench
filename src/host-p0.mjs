@@ -21,6 +21,12 @@ function safePort(value){
   return port;
 }
 
+function gitCommit(value){
+  const commit=String(value??'').trim().toLowerCase();
+  if(!/^[a-f0-9]{40}$/.test(commit))throw new Error('buildCommit 必须是完整的 40 位 Git SHA。');
+  return commit;
+}
+
 export function validateHostBinding({appRoot,dataDir,workspaceRoot,host='127.0.0.1',port='4173',joycrewEnabled='0',requireJoycrewDisabled=true}={}){
   const app=path.resolve(String(appRoot||''));
   const data=String(dataDir||'').trim();
@@ -124,10 +130,11 @@ function xmlEscape(value){
   }[char]));
 }
 
-export function buildMacosLaunchAgentPlist({label='com.dongjue.personal-ai-workbench',appRoot,nodePath,home,pathEnv,stdoutPath,stderrPath}={}){
+export function buildMacosLaunchAgentPlist({label='com.dongjue.personal-ai-workbench',appRoot,nodePath,home,pathEnv,stdoutPath,stderrPath,buildCommit}={}){
   for(const [name,value] of Object.entries({label,appRoot,nodePath,home,pathEnv,stdoutPath,stderrPath})){
     if(typeof value!=='string'||!value.trim())throw new Error(`${name} 不能为空。`);
   }
+  const commit=gitCommit(buildCommit);
   const serverPath=path.join(appRoot,'src','server.mjs');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -150,6 +157,8 @@ export function buildMacosLaunchAgentPlist({label='com.dongjue.personal-ai-workb
     <string>${xmlEscape(pathEnv)}</string>
     <key>NODE_ENV</key>
     <string>production</string>
+    <key>WORKBENCH_BUILD_COMMIT</key>
+    <string>${xmlEscape(commit)}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
