@@ -4,6 +4,8 @@ import {createGetnoteReader,GetnoteRuntimeError} from './getnote-runtime.mjs';
 const PAGE_SIZE=20;
 const DEFAULT_NOTE_LIMIT=100;
 const MAX_NOTE_LIMIT=500;
+const DEFAULT_TIME_ZONE='Asia/Shanghai';
+const MAX_TRACKED_NOTES=500;
 
 export class ExternalTaskSourceError extends Error{
   constructor(message,{cause,code='EXTERNAL_TASK_SOURCE_UNAVAILABLE',statusCode=502}={}){
@@ -42,9 +44,7 @@ function addDays(dateOnly,days){
   date.setUTCDate(date.getUTCDate()+days);
   return date.toISOString().slice(0,10);
 }
-function monthDayInReferenceYear(month,day,referenceDate){
-  return validDate(Number(referenceDate.slice(0,4)),month,day);
-}
+function monthDayInReferenceYear(month,day,referenceDate){return validDate(Number(referenceDate.slice(0,4)),month,day);}
 function parseDate(text,referenceDate){
   const fullChinese=text.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日?/);
   if(fullChinese)return validDate(Number(fullChinese[1]),Number(fullChinese[2]),Number(fullChinese[3]));
@@ -74,17 +74,26 @@ function parseTime(text){
   return `${pad(hour)}:${pad(minute)}`;
 }
 
-export function parseTodoSchedule(text,{referenceDate=new Date().toISOString().slice(0,10)}={}){
+export function normalizeGetnoteTimeZone(value=DEFAULT_TIME_ZONE){
+  const timeZone=String(value||DEFAULT_TIME_ZONE).trim();
+  if(!timeZone||timeZone.length>100)throw new ExternalTaskSourceError('得到大脑任务时区无效。',{code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});
+  try{new Intl.DateTimeFormat('en-US',{timeZone}).format(new Date('2026-01-01T00:00:00Z'));}
+  catch(error){throw new ExternalTaskSourceError(`得到大脑任务时区无效：${timeZone}`,{cause:error,code:'INVALID_EXTERNAL_TASK_SOURCE',statusCode:400});}
+  return timeZone;
+}
+
+export function parseTodoSchedule(text,{referenceDate=new Date().toISOString().slice(0,10),timeZone=DEFAULT_TIME_ZONE}={}){
+  const zone=normalizeGetnoteTimeZone(timeZone);
   const base=referenceDateOnly(referenceDate);
   const dueDate=parseDate(String(text||''),base);
-  if(!dueDate)return{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:null};
+  if(!dueDate)return{dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:zone};
   const time=parseTime(String(text||''));
   return{
     dueDate,
     dueAt:time?`${dueDate}T${time}:00`:dueDate,
     startAt:null,
     allDay:!time,
-    timeZone:null
+    timeZone:zone
   };
 }
 
@@ -98,15 +107,15 @@ function assertSuccessful(payload){
 
 function normalizeNote(raw){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
-  const noteId=firstText(raw.note_id,raw.noteId,raw.id);
+  const noteId=firstText(raw.note_id,raw.noteId,raw.id,raw.sourceNoteId);
   if(!noteId)return null;
   return{
     noteId,
-    title:firstText(raw.title)||'未命名笔记',
-    noteType:firstText(raw.note_type,raw.noteType)||'',
-    createdAt:firstText(raw.created_at,raw.createdAt),
-    updatedAt:firstText(raw.updated_at,raw.updatedAt),
-    noteUrl:firstText(raw.note_url,raw.noteUrl)||''
+    title:firstText(raw.title,raw.sourceNoteTitle)||'未命名笔记',
+    noteType:firstText(raw.note_type,raw.noteType,raw.sourceNoteType)||'',
+    createdAt:firstText(raw.created_at,raw.createdAt,raw.sourceNoteCreatedAt),
+    updatedAt:firstText(raw.updated_at,raw.updatedAt,raw.sourceNoteUpdatedAt,raw.externalUpdatedAt),
+    noteUrl:firstText(raw.note_url,raw.noteUrl,raw.sourceNoteUrl)||''
   };
 }
 
@@ -128,8 +137,24 @@ function todoContainer(payload){
   const container=data?.meeting_todos??data?.meetingTodos??value?.meeting_todos??value?.meetingTodos??{};
   return{data,container:container&&typeof container==='object'?container:{}};
 }
+function stableExternalId(noteId,item,text,occurrence){
+  const sourceTodoId=typeof item==='object'&&item!==null?firstText(item.todo_id,item.todoId,item.task_id,item.taskId,item.id):null;
+  if(sourceTodoId){
+    return{
+      externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0source_id\0${sourceTodoId}`).digest('hex').slice(0,32)}`,
+      sourceTodoId,
+      identityKind:'source_id'
+    };
+  }
+  const normalized=text.toLocaleLowerCase('zh-CN');
+  return{
+    externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0fallback_text\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`,
+    sourceTodoId:null,
+    identityKind:'fallback_text'
+  };
+}
 
-export function parseMeetingTodos(payload,note={}){
+export function parseMeetingTodos(payload,note={},options={}){
   const {data,container}=todoContainer(payload);
   const noteId=firstText(data?.note_id,data?.noteId,note.noteId,note.id);
   if(!noteId)throw new ExternalTaskSourceError('得到大脑待办结果缺少 note_id。',{code:'EXTERNAL_TASK_SOURCE_SCHEMA'});
@@ -137,7 +162,8 @@ export function parseMeetingTodos(payload,note={}){
   const noteUrl=firstText(data?.note_url,data?.noteUrl,note.noteUrl)||'';
   const source=firstText(container.source)||'meeting_summary';
   const items=Array.isArray(container.items)?container.items:[];
-  const referenceDate=referenceDateOnly(note.updatedAt||note.createdAt||new Date().toISOString());
+  const referenceDate=referenceDateOnly(note.createdAt||note.updatedAt||new Date().toISOString());
+  const timeZone=normalizeGetnoteTimeZone(options.timeZone||DEFAULT_TIME_ZONE);
   const occurrences=new Map();
   const tasks=[];
   for(const item of items){
@@ -146,10 +172,10 @@ export function parseMeetingTodos(payload,note={}){
     const normalized=text.toLocaleLowerCase('zh-CN');
     const occurrence=occurrences.get(normalized)||0;
     occurrences.set(normalized,occurrence+1);
-    const externalId=`getnote-${crypto.createHash('sha256').update(`${noteId}\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`;
-    const schedule=parseTodoSchedule(text,{referenceDate});
+    const identity=stableExternalId(noteId,item,text,occurrence);
+    const schedule=parseTodoSchedule(text,{referenceDate,timeZone});
     tasks.push({
-      externalId,
+      ...identity,
       title:text,
       content:'',
       description:'',
@@ -164,6 +190,8 @@ export function parseMeetingTodos(payload,note={}){
       sourceNoteTitle:noteTitle,
       sourceNoteUrl:noteUrl,
       sourceNoteType:note.noteType||'',
+      sourceNoteCreatedAt:note.createdAt||null,
+      sourceNoteUpdatedAt:note.updatedAt||null,
       todoSource:source
     });
   }
@@ -185,9 +213,7 @@ function sourceError(error,action){
   }
   return new ExternalTaskSourceError(`得到大脑 ${action}失败。`,{cause:error});
 }
-async function runtimeCall(action,fn){
-  try{return await fn();}catch(error){throw sourceError(error,action);}
-}
+async function runtimeCall(action,fn){try{return await fn();}catch(error){throw sourceError(error,action);}}
 
 async function listRecentNotes(noteLimit,reader){
   const notes=[];
@@ -204,17 +230,33 @@ async function listRecentNotes(noteLimit,reader){
   }
   return notes.slice(0,noteLimit);
 }
+function normalizeTrackedNotes(value){
+  if(!Array.isArray(value))return[];
+  const notes=new Map();
+  for(const raw of value.slice(0,MAX_TRACKED_NOTES)){
+    const note=normalizeNote(raw);if(note&&!notes.has(note.noteId))notes.set(note.noteId,note);
+  }
+  return [...notes.values()];
+}
 
 export function createTaskCliClient({reader=null,exec,timeoutMs,env=process.env,fetchImpl}={}){
   const runtime=reader||createGetnoteReader({env,exec,timeoutMs,fetchImpl});
   return{
     async fetch(config={}){
       const noteLimit=normalizeNoteLimit(config.noteLimit);
-      const notes=await listRecentNotes(noteLimit,runtime);
+      const timeZone=normalizeGetnoteTimeZone(config.timeZone||DEFAULT_TIME_ZONE);
+      const recentNotes=await listRecentNotes(noteLimit,runtime);
+      const notesById=new Map(recentNotes.map(note=>[note.noteId,note]));
+      let trackedNoteCount=0;
+      for(const note of normalizeTrackedNotes(config.trackedNotes)){
+        if(notesById.has(note.noteId))continue;
+        notesById.set(note.noteId,note);trackedNoteCount+=1;
+      }
+      const notes=[...notesById.values()];
       const parsed=[];
       for(const note of notes){
         const payload=await runtimeCall(`读取笔记“${note.title}”的待办`,()=>runtime.fetchTodos(note.noteId));
-        parsed.push(...parseMeetingTodos(payload,note));
+        parsed.push(...parseMeetingTodos(payload,note,{timeZone}));
       }
       const unique=new Map();
       for(const task of parsed)unique.set(task.externalId,task);
@@ -223,6 +265,8 @@ export function createTaskCliClient({reader=null,exec,timeoutMs,env=process.env,
         provider:'getnote_cli',
         runtimeMode:runtime.status?.().mode||'unknown',
         noteCount:notes.length,
+        recentNoteCount:recentNotes.length,
+        trackedNoteCount,
         todoCount:tasks.length,
         active:tasks.filter(task=>!task.done),
         completed:tasks.filter(task=>task.done),
