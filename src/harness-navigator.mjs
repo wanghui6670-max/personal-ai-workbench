@@ -106,6 +106,7 @@ export function resolveHarnessWebUrl(env=process.env){
   const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,'');
   if(host!=='127.0.0.1'&&host!=='localhost'&&host!=='::1')return null;
   url.hash='';
+  url.search='';
   return url.toString();
 }
 

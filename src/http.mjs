@@ -99,7 +99,7 @@ export function securityHeaders({allowFrame=false,allowAnyFrame=false,frameSrc='
     'X-Content-Type-Options':'nosniff',
     'Referrer-Policy':'no-referrer',
     'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
-    'Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src ${frameSrc||"'self'"}; frame-ancestors ${frameAncestors}; base-uri 'self'; form-action 'self'`,
+    'Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self'${frameSrc?` ${frameSrc}`:''}; frame-ancestors ${frameAncestors}; base-uri 'self'; form-action 'self'`,
     'Vary':'Origin'
   };
   if(!allowAnyFrame)headers['X-Frame-Options']=allowFrame?'SAMEORIGIN':'DENY';

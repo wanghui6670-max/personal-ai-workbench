@@ -108,7 +108,7 @@ function rateLimited(req,res,scope){
 async function apiState(){return deriveState(APP_ROOT,await store.readState(),await store.readConfig(),aiEnabled());}
 async function requestBody(req,schema){return validateRequestBody(await readJsonBody(req),schema);}
 
-const harnessWebUrl=resolveHarnessWebUrl(process.env);
+const harnessWebUrl=process.env.HARNESS_ENABLED==='1'?resolveHarnessWebUrl(process.env):null;
 const harnessFrameSrc=harnessWebUrl?new URL(harnessWebUrl).origin:'';
 
 const server=http.createServer(async(req,rawRes)=>{
