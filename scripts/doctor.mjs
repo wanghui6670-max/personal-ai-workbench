@@ -9,6 +9,7 @@ import { resolveWorkspace, ensureBusinessDirs } from '../src/projects.mjs';
 import { loadWorkbenchEnv } from '../src/env.mjs';
 import { aiRuntimeConfig, aiEnabled } from '../src/ai.mjs';
 import { integrationFromConfig } from '../src/task-sync-domain.mjs';
+import { createGetnoteReader } from '../src/getnote-runtime.mjs';
 import { localCalendarPath } from '../src/local-calendar.mjs';
 import { createJoycrewClient } from '../src/joycrew-client.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from '../src/product.mjs';
@@ -51,28 +52,49 @@ try{
 }catch(error){check('文件系统',false,error.message);}
 
 let externalIntegration=null;
+let getnoteRuntimeRequired=false;
+let feishuJournalRequired=false;
 try{
   externalIntegration=config?integrationFromConfig(config):null;
   if(externalIntegration?.enabled){
-    check('得到大脑待办管线',true,`最近 ${externalIntegration.noteLimit} 篇笔记 · ${externalIntegration.journalDocumentUrl} · ${externalIntegration.calendarEnabled?'本机日历开启':'本机日历关闭'}`);
+    getnoteRuntimeRequired=true;
+    feishuJournalRequired=Boolean(externalIntegration.journalDocumentUrl);
+    check('得到大脑待办管线',true,`最近 ${externalIntegration.noteLimit} 篇 + 未完成旧笔记追踪 · 时区 ${externalIntegration.timeZone} · 飞书${feishuJournalRequired?'已配置':'未配置（可选）'} · ${externalIntegration.calendarEnabled?'ICS 开启':'ICS 关闭'}`);
+
     try{
-      const result=await execFileAsync('getnote',['doctor','-o','json'],{timeout:15_000,windowsHide:true,maxBuffer:2*1024*1024,env:{...process.env}});
-      const raw=String(result.stdout||'').trim();
-      if(raw){
-        const payload=JSON.parse(raw);
-        if(payload?.success===false)throw new Error(payload.message||payload.reason||'getnote doctor 返回失败');
+      const reader=createGetnoteReader({env:process.env});
+      const runtime=reader.status();
+      if(runtime.mode==='local_cli'){
+        const result=await execFileAsync('getnote',['doctor','-o','json'],{timeout:15_000,windowsHide:true,maxBuffer:2*1024*1024,env:{...process.env}});
+        const raw=String(result.stdout||'').trim();
+        if(raw){
+          const payload=JSON.parse(raw);
+          if(payload?.success===false)throw new Error(payload.message||payload.reason||'getnote doctor 返回失败');
+        }
+        check('GetNote 读取运行时',true,'local_cli：安装、会员、登录和 API 连通性检查通过；未执行写入');
+      }else{
+        await reader.listNotes({limit:1});
+        check('GetNote 读取运行时',true,`private_http：${runtime.origin} 只读连通性与鉴权检查通过`);
       }
-      check('getnote CLI',true,'安装、会员、登录和 API 连通性检查通过；未执行写入');
     }catch(error){
-      check('getnote CLI',false,error.code==='ENOENT'?'未找到 getnote；请执行 npx -y @getnote/cli@latest setup':'getnote doctor 未通过，请检查安装、会员、登录状态和网络');
+      const mode=String(process.env.GETNOTE_RUNTIME_MODE||'local_cli').trim()||'local_cli';
+      const detail=mode==='private_http'
+        ?`private_http 不可用：${error?.message||'请检查 sidecar、service token 和私网地址'}`
+        :(error?.code==='ENOENT'||error?.code==='GETNOTE_CLI_MISSING'?'local_cli 未找到 getnote；请在宿主机安装并授权，或改用 private_http Runtime':'local_cli getnote doctor 未通过，请检查安装、会员、登录状态和网络');
+      check('GetNote 读取运行时',false,detail);
     }
-    try{await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true});check('lark-cli',true,'已找到；未执行真实文档读写');}
-    catch(error){check('lark-cli',false,error.code==='ENOENT'?'未找到 lark-cli 可执行文件':'命令不可用，请检查安装和登录状态');}
+
+    if(feishuJournalRequired){
+      try{await execFileAsync('lark-cli',['--version'],{timeout:3000,windowsHide:true});check('飞书每日工作日记',true,'已配置目标且找到 lark-cli；未执行真实文档写入');}
+      catch(error){check('飞书每日工作日记',false,error.code==='ENOENT'?'已配置飞书 sink，但未找到 lark-cli 可执行文件':'已配置飞书 sink，但 lark-cli 不可用');}
+    }else{
+      check('飞书每日工作日记',true,'未配置；核心 GetNote → Workbench 同步不依赖 lark-cli');
+    }
     if(store&&externalIntegration.calendarEnabled)check('本机日历路径',true,localCalendarPath(store));
   }else{
     const detail=externalIntegration?.lastSyncStatus==='needs_reconfiguration'
-      ?'此前误配置为滴答清单，已停用；请在设置中重新确认得到大脑 CLI 与飞书日记'
-      :'未启用；不会调用 getnote、lark-cli 或生成本机日历';
+      ?'此前误配置为滴答清单，已停用；请在设置中重新确认得到大脑来源'
+      :'未启用；不会调用 GetNote Runtime、飞书 sink 或生成 ICS';
     check('得到大脑待办管线',true,detail);
   }
 }catch(error){check('得到大脑待办管线',false,error.message);}
@@ -99,6 +121,7 @@ for(const result of results)console.log(`${result.ok?'✓':'!'} ${result.name}: 
 console.log('');
 
 const required=new Set(['Node.js >= 24','文件系统','数据目录可写','工作区可写','业务板块配置']);
-if(externalIntegration?.enabled){required.add('得到大脑待办管线');required.add('getnote CLI');required.add('lark-cli');}
+if(externalIntegration?.enabled&&getnoteRuntimeRequired)required.add('GetNote 读取运行时');
+if(externalIntegration?.enabled&&feishuJournalRequired)required.add('飞书每日工作日记');
 if(joycrewConfig.enabled)required.add('Joycrew 业务执行');
 process.exit(results.some(result=>required.has(result.name)&&!result.ok)?1:0);
