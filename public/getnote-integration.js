@@ -166,9 +166,15 @@ async function syncTasks(event,target){
   try{
     const result=await rpc('external_tasks_sync',{},true);
     const metadataError=result.metadata?.status==='error';
+    const sinkError=result.journal?.status==='error'||result.calendar?.status==='error';
     const detail=`最近 ${result.recentNoteCount||0} 篇 + 旧未完成 ${result.trackedNoteCount||0} 篇，解析 ${result.todoCount||0} 条；新增 ${result.changes?.created||0}，更新 ${result.changes?.updated||0}，完成 ${result.changes?.completed||0}，Today 保留 ${result.changes?.todayPreserved||0}。${resultSinkText(result)}`;
-    receipt(metadataError?'核心已提交，状态元数据异常':'得到大脑核心同步已提交',detail,metadataError);
-    setTimeout(()=>location.reload(),metadataError?5000:900);
+    const title=metadataError?'核心已提交，状态元数据异常':sinkError?'核心已提交，派生输出异常':'得到大脑核心同步已提交';
+    receipt(title,detail,metadataError||sinkError);
+    if(metadataError){
+      target.disabled=false;target.textContent='同步得到大脑待办';getnoteBusy=false;
+      return true;
+    }
+    setTimeout(()=>location.reload(),sinkError?2500:900);
   }catch(error){receipt('得到大脑待办核心同步失败',error.message,true);target.disabled=false;target.textContent='同步得到大脑待办';getnoteBusy=false;}
   return true;
 }
