@@ -49,3 +49,12 @@ test('设置入口在侧边栏底部，顶栏只剩新建项目',async()=>{
   assert.match(script,/class="sidebar-foot"/);
   assert.match(script,/class="settings-link" data-action="settings"/);
 });
+
+test('AI 面板只有一个收起开关，浮层重开按钮保留',async()=>{
+  const script=await read('public/ux-enhancements.js');
+  const controls=(script.match(/function ensurePanelControls\([^)]*\)\{[\s\S]*?\n\}/)||[])[0]||'';
+  assert.match(controls,/panelButton\('[^']*','ai-close'/);
+  assert.doesNotMatch(controls,/ai-open/);
+  assert.doesNotMatch(controls,/ai-rail/);
+  assert.match(script,/'ai-open'/);
+});

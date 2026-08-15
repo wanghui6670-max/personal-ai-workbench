@@ -118,9 +118,7 @@ function ensurePanelControls(panel){
   const controls=document.createElement('div');
   controls.className='ux-ai-controls';
   controls.append(
-    panelButton('展开','ai-open','展开 AI 工作区'),
-    panelButton('窄条','ai-rail','把 AI 工作区收窄为入口条'),
-    panelButton('收起','ai-close','完全收起 AI 工作区')
+    panelButton('› 收起','ai-close','收起 AI 工作区')
   );
   top.append(controls);
 }
