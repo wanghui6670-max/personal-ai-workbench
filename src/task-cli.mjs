@@ -148,7 +148,7 @@ function stableExternalId(noteId,item,text,occurrence){
   }
   const normalized=text.toLocaleLowerCase('zh-CN');
   return{
-    externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0fallback_text\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`,
+    externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`,
     sourceTodoId:null,
     identityKind:'fallback_text'
   };
