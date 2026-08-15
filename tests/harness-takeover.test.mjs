@@ -4,11 +4,12 @@ import fsp from 'node:fs/promises';
 
 async function read(file){return fsp.readFile(file,'utf8');}
 
-test('Harness 启用后 DSH 接管整个右侧 AI 控制面',async()=>{
+test('DSH 永久接管整个右侧 AI 控制面，不回退旧 Workbench AI',async()=>{
   const script=await read('public/harness-navigator.js');
-  assert.match(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
-  assert.match(script,/panel\.classList\.toggle\('harness-primary',visible\)/);
+  assert.match(script,/panel\.classList\.add\('harness-primary'\)/);
+  assert.doesNotMatch(script,/const visible=Boolean\(status\?\.available\)\|\|Boolean\(status\?\.enabled\)/);
   assert.match(script,/panel\.classList\.toggle\('harness-native',Boolean\(webUrl\)\)/);
+  assert.match(script,/available\?\(messages\|\|emptyStateHtml\(\)\):unavailableHtml/);
 });
 
 test('DSH 接管态隐藏全部 Workbench AI chrome，而不是只隐藏聊天输入',async()=>{
