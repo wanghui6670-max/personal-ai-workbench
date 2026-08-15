@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTaskCliClient, parseNotesPage, parseMeetingTodos, parseTodoSchedule, getnoteDateOnlyInTimeZone } from '../src/task-cli.mjs';
 
-test('GetNote notes parser preserves string note IDs and pagination metadata',()=>{
+test('GetNote notes parser preserves string note IDs and prefers the official cursor field',()=>{
   const page=parseNotesPage({success:true,data:{notes:[{
     id:'1896830231705320746',note_id:'1896830231705320746',title:'产品周会',note_type:'MEETING',
     created_at:'2026-08-14T01:00:00Z',updated_at:'2026-08-14T02:00:00Z',note_url:'https://www.biji.com/note/1896830231705320746'
-  }],has_more:true,cursor:'1896830231705320746'}});
+  }],has_more:true,cursor:'1896830231705320746',next_cursor:'compat-next-cursor'}});
   assert.equal(page.notes[0].noteId,'1896830231705320746');
   assert.equal(page.notes[0].title,'产品周会');
   assert.equal(page.hasMore,true);
