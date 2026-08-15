@@ -22,7 +22,7 @@ test('DSH 空态靠前展示，并提供真实只读工作入口而不是装饰�
   assert.match(script,/data-harness-suggest="查看收件箱/);
   assert.match(script,/data-harness-suggest="查看项目/);
   assert.match(script,/const suggestion=event\.target\.closest\?\.\('\[data-harness-suggest\]'\);if\(suggestion\)\{void sendMessage\(suggestion\.dataset\.harnessSuggest\);return;\}/);
-  assert.match(theme,/\.harness-nav-empty\{margin:72px auto auto!important/);
+  assert.match(theme,/\.harness-nav-empty\{margin:44px auto auto!important/);
   assert.match(theme,/\.harness-nav-empty-actions button\{/);
 });
 

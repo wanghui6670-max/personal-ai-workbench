@@ -59,11 +59,19 @@ test('MutationObserver 增强层是幂等的，不会通过重复文本写入自
   assert.doesNotMatch(script,/if\(primaryDesc\)primaryDesc\.textContent='只显示你明确加入今天的任务。'/);
 });
 
-test('今日任务为空时不会重复写 innerHTML 并再次触发 Observer',async()=>{
-  const script=await read('public/theme-focus.js');
+test('今日任务为空时不会重复写 innerHTML，并使用紧凑主工作区',async()=>{
+  const [script,styles]=await Promise.all([read('public/theme-focus.js'),read('public/theme-focus.css')]);
   assert.match(script,/const emptyHtml='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
   assert.match(script,/if\(empty\.innerHTML!==emptyHtml\)empty\.innerHTML=emptyHtml/);
+  assert.match(script,/primary\.classList\.toggle\('today-primary-empty',primaryEmpty\)/);
+  assert.match(styles,/html\.today-focus \.grid>section\.card\.pad\.today-primary-empty\{min-height:180px/);
   assert.doesNotMatch(script,/empty\.innerHTML='<strong>今天还没有正式安排任务。<\/strong><br>从待办中选择真正要做的，再加入今日。';/);
+});
+
+test('DSH 顶部始终规范为聊天，避免旧 Copilot 标题回流',async()=>{
+  const script=await read('public/theme-focus.js');
+  assert.match(script,/function normalizeHarnessChrome\(\)\{\s*setTextIfChanged\(document\.querySelector\('\.harness-nav-head>strong'\),'聊天'\);/);
+  assert.match(script,/normalizeHarnessChrome\(\);/);
 });
 
 test('聚焦层不引入自动排期、自动同步或写入 DSH 权限边界',async()=>{
