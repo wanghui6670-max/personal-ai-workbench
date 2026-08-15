@@ -7,3 +7,7 @@
 .harness-nav-card button:focus-visible,.harness-nav-card input:focus-visible,.harness-nav-card summary:focus-visible{outline:2px solid #91b8ff;outline-offset:2px}
 html[data-ai-panel-mode="rail"] .harness-nav-card,html[data-ai-panel-mode="closed"] .harness-nav-card{display:none}
 @media(max-width:900px){.harness-nav-messages{max-height:210px}.harness-nav-message.user{margin-left:14px}.harness-nav-head{align-items:flex-start}.harness-nav-head-actions{flex-direction:column;align-items:flex-end}}
+.ai-panel.harness-primary .ai-chat,
+.ai-panel.harness-primary .ai-input,
+.ai-panel.harness-primary .ai-capabilities,
+.ai-panel.harness-primary .ai-plan{display:none}
