@@ -13,13 +13,10 @@ test('Harness 启用后 DSH 接管整个右侧 AI 控制面',async()=>{
 
 test('DSH 接管态隐藏全部 Workbench AI chrome，而不是只隐藏聊天输入',async()=>{
   const styles=await read('public/harness-navigator.css');
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-panel-top/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-context/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-capabilities/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-chat/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-plan/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-input/);
-  assert.match(styles,/\.ai-panel\.harness-primary>\.ai-foot\{display:none!important\}/);
+  for(const selector of ['ai-panel-top','ai-context','ai-capabilities','ai-chat','ai-plan','ai-input','ai-foot','ux-morning-panel']){
+    assert.match(styles,new RegExp(`\\.ai-panel\\.harness-primary>\\.${selector}`));
+  }
+  assert.match(styles,/\.ux-morning-panel\{display:none!important\}/);
   assert.match(styles,/\.ai-panel\.harness-primary\{padding:0/);
   assert.match(styles,/\[data-harness-navigator-mount\]\{flex:1/);
 });
@@ -34,6 +31,15 @@ test('受控 DSH 会话面是全高聊天工作区，并使用底部 composer',a
   assert.match(styles,/\.harness-nav-card\{flex:1/);
   assert.match(styles,/\.harness-nav-messages\{flex:1/);
   assert.match(styles,/\.harness-nav-form\{flex:none/);
+});
+
+test('旧 Workbench AI 入口在接管态直接路由成 DSH 对话',async()=>{
+  const script=await read('public/harness-navigator.js');
+  assert.match(script,/\[data-ux-action="morning-focus"\]/);
+  assert.match(script,/document\.querySelector\('\.ai-panel\.harness-primary'\)/);
+  assert.match(script,/event\.stopImmediatePropagation\(\)/);
+  assert.match(script,/void sendMessage\('开始早晨对焦/);
+  assert.match(script,/data-ux-action="ai-close"/);
 });
 
 test('通过 attestation 的原生 DSH Web 也无外层 Workbench chrome 地铺满右栏',async()=>{
