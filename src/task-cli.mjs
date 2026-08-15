@@ -137,21 +137,9 @@ function todoContainer(payload){
   const container=data?.meeting_todos??data?.meetingTodos??value?.meeting_todos??value?.meetingTodos??{};
   return{data,container:container&&typeof container==='object'?container:{}};
 }
-function stableExternalId(noteId,item,text,occurrence){
-  const sourceTodoId=typeof item==='object'&&item!==null?firstText(item.todo_id,item.todoId,item.task_id,item.taskId,item.id):null;
-  if(sourceTodoId){
-    return{
-      externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0source_id\0${sourceTodoId}`).digest('hex').slice(0,32)}`,
-      sourceTodoId,
-      identityKind:'source_id'
-    };
-  }
+function stableExternalId(noteId,text,occurrence){
   const normalized=text.toLocaleLowerCase('zh-CN');
-  return{
-    externalId:`getnote-${crypto.createHash('sha256').update(`${noteId}\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`,
-    sourceTodoId:null,
-    identityKind:'fallback_text'
-  };
+  return `getnote-${crypto.createHash('sha256').update(`${noteId}\0${normalized}\0${occurrence}`).digest('hex').slice(0,32)}`;
 }
 
 export function parseMeetingTodos(payload,note={},options={}){
@@ -172,10 +160,11 @@ export function parseMeetingTodos(payload,note={},options={}){
     const normalized=text.toLocaleLowerCase('zh-CN');
     const occurrence=occurrences.get(normalized)||0;
     occurrences.set(normalized,occurrence+1);
-    const identity=stableExternalId(noteId,item,text,occurrence);
+    const externalId=stableExternalId(noteId,text,occurrence);
     const schedule=parseTodoSchedule(text,{referenceDate,timeZone});
     tasks.push({
-      ...identity,
+      externalId,
+      externalIdentityKind:'text_fingerprint',
       title:text,
       content:'',
       description:'',
