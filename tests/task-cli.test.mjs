@@ -42,6 +42,10 @@ test('GetNote day boundary follows configured IANA timezone instead of host time
   const instant=new Date('2026-08-15T16:30:00.000Z');
   assert.equal(getnoteDateOnlyInTimeZone(instant,'Asia/Shanghai'),'2026-08-16');
   assert.equal(getnoteDateOnlyInTimeZone(instant,'America/Los_Angeles'),'2026-08-15');
+  const tasks=parseMeetingTodos({success:true,data:{note_id:'tz-note',meeting_todos:{items:[{text:'今天 回复客户',completed:false}]}}},{
+    noteId:'tz-note',title:'跨日会议',createdAt:'2026-08-15T16:30:00.000Z'
+  },{timeZone:'Asia/Shanghai'});
+  assert.equal(tasks[0].dueDate,'2026-08-16','note createdAt must be interpreted in the configured task timezone');
 });
 
 test('unknown future item metadata does not silently replace the documented text fingerprint contract',()=>{
