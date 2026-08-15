@@ -87,11 +87,16 @@ export async function readJsonBody(req,maxBytes=1024*1024){
   try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Object.assign(new Error('JSON 格式错误'),{statusCode:400});}
 }
 export function mime(file){const ext=path.extname(file).toLowerCase();return({'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.webmanifest':'application/manifest+json'}[ext]||'application/octet-stream');}
+function staticCacheControl(file){
+  const ext=path.extname(file).toLowerCase();
+  if(['.html','.js','.css','.webmanifest'].includes(ext))return 'no-store, max-age=0';
+  return 'public, max-age=3600';
+}
 export async function serveStatic(publicDir,pathname,res){
   let rel=pathname==='/'?'index.html':pathname.replace(/^\//,'');
   let file=path.resolve(publicDir,rel);const root=path.resolve(publicDir);
   if(file!==root&&!file.startsWith(root+path.sep))return false;
-  try{const st=await fsp.stat(file);if(st.isDirectory())file=path.join(file,'index.html');const buf=await fsp.readFile(file);res.writeHead(200,{'Content-Type':mime(file),'Cache-Control':file.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.end(buf);return true;}catch{return false;}
+  try{const st=await fsp.stat(file);if(st.isDirectory())file=path.join(file,'index.html');const buf=await fsp.readFile(file);res.writeHead(200,{'Content-Type':mime(file),'Cache-Control':staticCacheControl(file),'X-Content-Type-Options':'nosniff'});res.end(buf);return true;}catch{return false;}
 }
 export function securityHeaders({allowFrame=false,frameSrc=''}={}){
   const frameAncestors=allowFrame?"'self'":"'none'";

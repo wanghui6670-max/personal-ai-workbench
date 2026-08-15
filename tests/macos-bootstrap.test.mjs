@@ -9,6 +9,8 @@ import {
   encodeEnvValue,
   envValuesFromSource,
   macosP0Updates,
+  macosUpgradeUpdates,
+  recoverLegacyRuntimeEnvSource,
   restoreEnvFile,
   upsertEnvSource,
   writeEnvAtomically
@@ -27,6 +29,76 @@ test('env upsert preserves secrets, quotes spaces, and removes duplicate managed
   assert.equal(envValuesFromSource(output).OPENAI_API_KEY,'keep-me');
   assert.equal(encodeEnvValue('plain/path'),'plain/path');
   assert.equal(encodeEnvValue('path with spaces'),'"path with spaces"');
+});
+
+test('first install disables external runtimes but upgrade bindings preserve validated runtime settings',()=>{
+  const options={workspaceRoot:'/Users/wanghui/AI-Work-OS',dataDir:'/Users/wanghui/Library/Application Support/PersonalAIWorkbench/data',port:44173};
+  const first=macosP0Updates(options);
+  assert.equal(first.JOYCREW_ENABLED,'0');
+  assert.equal(first.HARNESS_ENABLED,'0');
+  assert.equal(first.AI_PROVIDER_ENABLED,'0');
+
+  const source=[
+    'JOYCREW_ENABLED=1',
+    'JOYCREW_BASE_URL=http://127.0.0.1:4000',
+    'HARNESS_ENABLED=1',
+    'HARNESS_PROVIDER_API_KEY=keep-harness-secret',
+    'AI_PROVIDER_ENABLED=1',
+    'AI_PROVIDER_API_KEY=keep-provider-secret',
+    'PORT=41000',
+    ''
+  ].join('\n');
+  const upgrade=macosUpgradeUpdates(options);
+  assert.equal('JOYCREW_ENABLED' in upgrade,false);
+  assert.equal('HARNESS_ENABLED' in upgrade,false);
+  assert.equal('AI_PROVIDER_ENABLED' in upgrade,false);
+  const output=upsertEnvSource(source,upgrade);
+  const values=envValuesFromSource(output);
+  assert.equal(values.JOYCREW_ENABLED,'1');
+  assert.equal(values.HARNESS_ENABLED,'1');
+  assert.equal(values.AI_PROVIDER_ENABLED,'1');
+  assert.equal(values.HARNESS_PROVIDER_API_KEY,'keep-harness-secret');
+  assert.equal(values.AI_PROVIDER_API_KEY,'keep-provider-secret');
+  assert.equal(values.PORT,'44173');
+});
+
+test('legacy deployment recovery restores only runtime settings from the exact pre-deploy backup',()=>{
+  const current=[
+    'PORT=44173',
+    'JOYCREW_ENABLED=0',
+    'HARNESS_ENABLED=0',
+    'AI_PROVIDER_ENABLED=0',
+    'CAPTURE_TOKEN=current-capture-token',
+    ''
+  ].join('\n');
+  const backup=[
+    'PORT=4173',
+    'JOYCREW_ENABLED=1',
+    'JOYCREW_BASE_URL=http://127.0.0.1:4000',
+    'JOYCREW_TRUSTED_PROXY_TOKEN=joycrew-secret',
+    'HARNESS_ENABLED=1',
+    'HARNESS_PROVIDER_API_KEY=harness-secret',
+    'AI_PROVIDER_ENABLED=1',
+    'AI_PROVIDER_API_KEY=provider-secret',
+    'OPENAI_API_KEY=openai-secret',
+    'CAPTURE_TOKEN=old-capture-token',
+    ''
+  ].join('\n');
+  const result=recoverLegacyRuntimeEnvSource(current,backup);
+  assert.equal(result.recovered,true);
+  const values=envValuesFromSource(result.source);
+  assert.equal(values.JOYCREW_ENABLED,'1');
+  assert.equal(values.JOYCREW_TRUSTED_PROXY_TOKEN,'joycrew-secret');
+  assert.equal(values.HARNESS_ENABLED,'1');
+  assert.equal(values.HARNESS_PROVIDER_API_KEY,'harness-secret');
+  assert.equal(values.AI_PROVIDER_ENABLED,'1');
+  assert.equal(values.AI_PROVIDER_API_KEY,'provider-secret');
+  assert.equal(values.OPENAI_API_KEY,'openai-secret');
+  assert.equal(values.PORT,'44173','deployment binding must not be recovered from the old backup');
+  assert.equal(values.CAPTURE_TOKEN,'current-capture-token','non-runtime credentials must not be overwritten');
+
+  const intentional=recoverLegacyRuntimeEnvSource('JOYCREW_ENABLED=1\nHARNESS_ENABLED=0\nAI_PROVIDER_ENABLED=0\n',backup);
+  assert.equal(intentional.recovered,false,'a currently enabled runtime means the config was not globally clobbered');
 });
 
 test('workspace selection prefers explicit and existing bindings, then the known home AI-Work-OS root',async t=>{
@@ -66,6 +138,7 @@ test('atomic env write creates a private backup and can restore exactly',async t
 
 test('P0 updates refuse overlapping directories',()=>{
   assert.throws(()=>macosP0Updates({workspaceRoot:'/Users/wanghui/AI-Work-OS',dataDir:'/Users/wanghui/AI-Work-OS/data'}),/不能相同或互相嵌套/);
+  assert.throws(()=>macosUpgradeUpdates({workspaceRoot:'/Users/wanghui/AI-Work-OS',dataDir:'/Users/wanghui/AI-Work-OS/data'}),/不能相同或互相嵌套/);
 });
 
 test('one-click entry, bootstrap, service controls, package scripts, and docs stay aligned',async()=>{
@@ -82,11 +155,18 @@ test('one-click entry, bootstrap, service controls, package scripts, and docs st
   assert.match(command,/git pull --ff-only origin main/);
   assert.match(command,/scripts\/macos-bootstrap\.mjs/);
   assert.doesNotMatch(command,/curl[^\n]*\|\s*(?:ba|z)?sh|\beval\b/);
+  assert.match(bootstrapModule,/macosUpgradeUpdates/);
+  assert.match(bootstrapModule,/recoverLegacyRuntimeEnvSource/);
   assert.match(bootstrapModule,/AI-Work-OS/);
   assert.match(bootstrap,/p0-host-preflight\.mjs/);
-  assert.match(bootstrap,/serviceCommand\('install'\)/);
+  assert.match(bootstrap,/legacyBootstrapBackup/);
+  assert.match(bootstrap,/deploymentMode/);
+  assert.match(bootstrap,/--preserve-runtime/);
+  assert.match(bootstrap,/serviceCommand\('install'/);
+  assert.match(service,/WORKBENCH_BUILD_COMMIT/);
+  assert.match(service,/--preserve-runtime/);
   assert.match(service,/command==='start'/);
   assert.match(service,/command==='stop'/);
   assert.equal(packageJson.scripts['bootstrap:macos'],'node scripts/macos-bootstrap.mjs');
-  for(const phrase of ['双击 install-macos.command','/Users/wanghui/AI-Work-OS','backup v2','JOYCREW_ENABLED=0','失败时恢复'])assert.match(document,new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+  for(const phrase of ['双击 install-macos.command','/Users/wanghui/AI-Work-OS','backup v2','首次安装','后续升级','自动恢复','失败时恢复'])assert.match(document,new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
 });

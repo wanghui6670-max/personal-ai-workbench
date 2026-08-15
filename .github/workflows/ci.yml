@@ -134,7 +134,7 @@ jobs:
             fi
             sleep 1
           done
-          node -e "const fs=require('node:fs'); const v=JSON.parse(fs.readFileSync('/tmp/employee-harness-health.json','utf8')); if(v.status!=='ok'||v.protocol!=='joycrew.deepseek-harness.v1'||v.harnessVersion!=='0.1.0-rc.6'||v.mode!=='evidence_only') throw new Error('unexpected employee harness health');"
+          node -e "const fs=require('node:fs'); const v=JSON.parse(fs.readFileSync('/tmp/employee-harness-health.json','utf8')); if(v.status!=='ok'||v.protocol!=='joycrew.deepseek-harness.v2'||v.harnessVersion!=='0.1.0-rc.6'||v.mode!=='resolved_evidence_only') throw new Error('unexpected employee harness health');"
           docker rm -f employee-harness-smoke >/dev/null
           trap - EXIT
       - name: Start unified Workbench with Joycrew disabled and verify fail-isolation
