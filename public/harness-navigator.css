@@ -11,3 +11,4 @@ html[data-ai-panel-mode="rail"] .harness-nav-card,html[data-ai-panel-mode="close
 .ai-panel.harness-primary .ai-input,
 .ai-panel.harness-primary .ai-capabilities,
 .ai-panel.harness-primary .ai-plan{display:none}
+.harness-embed{flex:1;width:100%;border:0;background:#fff;min-height:0}
