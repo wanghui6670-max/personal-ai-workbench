@@ -131,6 +131,33 @@ export async function updateExternalTaskIntegration({store,patch}){
 function hash(value){return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function operationId(kind,date,value){return `${kind}-${date}-${hash(value).slice(0,24)}`;}
 function sourceSuffix(task){return task.sourceNoteTitle?`｜来自《${task.sourceNoteTitle}》`:'';}
+function inboxTaskTitle(item){
+  const text=String(item?.text||'').split('｜来自得到大脑《')[0].trim();
+  return text||'未命名待办';
+}
+function committedGetnoteActive(state){
+  const todos=state.todos
+    .filter(todo=>todo.source==='getnote_cli'&&todo.done!==true&&todo.externalStatus!=='completed'&&todo.externalId)
+    .map(todo=>({...todo,title:todo.title||'未命名待办',updatedAt:todo.externalUpdatedAt||null}));
+  const inbox=state.inbox
+    .filter(item=>item.source==='getnote_cli'&&item.externalStatus!=='completed'&&item.externalTaskId)
+    .map(item=>({
+      externalId:item.externalTaskId,
+      externalIdentityKind:item.externalIdentityKind||'text_fingerprint',
+      title:inboxTaskTitle(item),
+      content:'',description:'',done:false,
+      dueDate:null,dueAt:null,startAt:null,allDay:true,timeZone:item.timeZone||null,
+      updatedAt:item.externalUpdatedAt||null,
+      priority:item.localPriority??0,priorityLabel:item.localPriorityLabel||'',tags:Array.isArray(item.localTags)?item.localTags:[],
+      sourceNoteId:item.sourceNoteId,sourceNoteTitle:item.sourceNoteTitle,sourceNoteType:item.sourceNoteType||'',
+      sourceNoteCreatedAt:item.sourceNoteCreatedAt||null,sourceNoteUpdatedAt:item.sourceNoteUpdatedAt||null,
+      sourceNoteUrl:item.sourceNoteUrl||'',todoSource:item.todoSource||''
+    }));
+  return [...todos,...inbox];
+}
+function sinkSourceFromCommittedState(state,source){
+  return{...source,active:committedGetnoteActive(state),completed:[...source.completed]};
+}
 
 function taskSnapshotText(source,date){
   const active=[...source.active].sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||a.title.localeCompare(b.title));
@@ -203,7 +230,7 @@ export async function syncExternalTasks({
   const integration=integrationFromConfig(config);
   if(!integration.enabled)throw new ExternalTaskIntegrationError('得到大脑 CLI 待办来源尚未启用。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:409});
   const date=todayIso();
-  let source,changes;
+  let source,changes,sinkSource;
   try{
     const before=await store.readState();
     const trackedNotes=collectTrackedGetnoteNotes(before);
@@ -214,6 +241,7 @@ export async function syncExternalTasks({
         type:'external_tasks_synced',
         text:`得到大脑待办核心同步已提交到工作台：读取笔记 ${source.noteCount}，解析 ${source.todoCount}，新增 ${changes.created}，更新 ${changes.updated}，完成 ${changes.completed}，无日期 ${changes.undated}，身份对账 ${changes.reconciled}。`
       });
+      sinkSource=sinkSourceFromCommittedState(state,source);
       return changes;
     });
   }catch(error){
@@ -222,11 +250,12 @@ export async function syncExternalTasks({
     throw new ExternalTaskIntegrationError(error.message||'得到大脑待办同步失败。',{cause:error,code:error.code||'EXTERNAL_TASK_INTEGRATION_FAILED',statusCode:error.statusCode||500});
   }
 
-  // Workbench state is already committed. Everything below is a derived sink:
-  // failure is reported and retryable, but can never roll back the task state.
-  const snapshot=taskSnapshotText(source,date);
+  // Workbench state is already committed. Both sinks derive only from that
+  // committed state, so local due-date/Today/user ownership cannot be undone by
+  // a stale source value in a downstream mirror.
+  const snapshot=taskSnapshotText(sinkSource,date);
   const journal=await journalSink({integration,journalClient,snapshot,date});
-  const calendar=await calendarSink({integration,calendarWriter,store,tasks:source.active});
+  const calendar=await calendarSink({integration,calendarWriter,store,tasks:sinkSource.active});
   const sinkErrors=[journal.status==='error'?`飞书：${journal.error}`:null,calendar.status==='error'?`ICS：${calendar.error}`:null].filter(Boolean);
   if(sinkErrors.length){
     await store.updateState(state=>{
@@ -242,8 +271,8 @@ export async function syncExternalTasks({
       current.settings={...(current.settings||{}),[SETTINGS_KEY]:{
         ...previous,provider:'getnote_cli',noteLimit:integration.noteLimit,timeZone:integration.timeZone,
         lastSyncAt:nowIso(),lastSyncStatus:sinkErrors.length?'ok_with_sink_errors':'ok',lastSyncError:null,
-        lastImportedCount:source.active.length,lastCompletedCount:source.completed.length,
-        lastUndatedCount:source.active.filter(task=>!task.dueDate).length,
+        lastImportedCount:sinkSource.active.length,lastCompletedCount:source.completed.length,
+        lastUndatedCount:sinkSource.active.filter(task=>!task.dueDate).length,
         lastSourceNoteCount:source.noteCount,lastRecentNoteCount:source.recentNoteCount??source.noteCount,
         lastTrackedNoteCount:source.trackedNoteCount||0,lastParsedTodoCount:source.todoCount,
         lastJournalStatus:journal.status,lastJournalError:journal.error,
@@ -258,7 +287,7 @@ export async function syncExternalTasks({
   return{
     provider:'getnote_cli',committed:true,fetchedAt:source.fetchedAt,noteCount:source.noteCount,
     recentNoteCount:source.recentNoteCount??source.noteCount,trackedNoteCount:source.trackedNoteCount||0,todoCount:source.todoCount,
-    activeCount:source.active.length,completedCount:source.completed.length,
+    activeCount:sinkSource.active.length,completedCount:source.completed.length,
     completedAvailable:source.completedAvailable,completedWarning:source.completedWarning,
     changes,journal,calendar,metadata:{status:metadataError?'error':'ok',error:metadataError}
   };
