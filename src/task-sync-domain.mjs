@@ -1,16 +1,18 @@
 import crypto from 'node:crypto';
 import { addActivity } from './store.mjs';
-import { newId, nowIso, todayIso, compactText } from './utils.mjs';
+import { nowIso, todayIso, compactText } from './utils.mjs';
 import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
-import { createTaskCliClient, normalizeNoteLimit, ExternalTaskSourceError } from './task-cli.mjs';
+import { createTaskCliClient, normalizeNoteLimit, normalizeGetnoteTimeZone, ExternalTaskSourceError } from './task-cli.mjs';
 import { createFeishuDailyJournalClient, DAILY_JOURNAL_HEADING } from './feishu-daily-journal.mjs';
 import { writeLocalCalendar } from './local-calendar.mjs';
+import {applyGetnoteTaskSnapshot,collectTrackedGetnoteNotes} from './external-task-reconcile.mjs';
 
 const SETTINGS_KEY='externalTaskPipeline';
 const DEFAULT_INTEGRATION=Object.freeze({
   enabled:false,
   provider:'getnote_cli',
   noteLimit:100,
+  timeZone:'Asia/Shanghai',
   journalDocumentUrl:'',
   journalHeading:DAILY_JOURNAL_HEADING,
   calendarEnabled:true,
@@ -22,16 +24,22 @@ const DEFAULT_INTEGRATION=Object.freeze({
   lastCompletedCount:0,
   lastUndatedCount:0,
   lastSourceNoteCount:0,
+  lastRecentNoteCount:0,
+  lastTrackedNoteCount:0,
   lastParsedTodoCount:0,
+  lastJournalStatus:'not_configured',
+  lastJournalError:null,
   lastJournalAt:null,
   lastJournalBlockId:null,
+  lastCalendarStatus:'not_synced',
+  lastCalendarError:null,
   lastCalendarAt:null,
   lastCalendarPath:null,
   lastCalendarEventCount:0,
   lastSummaryAt:null,
   lastSummaryBlockId:null
 });
-const CONFIG_FIELDS=new Set(['enabled','noteLimit','journalDocumentUrl','journalHeading','calendarEnabled','calendarName']);
+const CONFIG_FIELDS=new Set(['enabled','noteLimit','timeZone','journalDocumentUrl','journalHeading','calendarEnabled','calendarName']);
 
 export class ExternalTaskIntegrationError extends Error{
   constructor(message,{cause,code='EXTERNAL_TASK_INTEGRATION_FAILED',statusCode=500}={}){
@@ -47,22 +55,23 @@ function boundedText(value,fallback,max){
   const text=String(value??'').trim();
   return (text||fallback).slice(0,max);
 }
-function wasWrongDidaConfiguration(source){
-  return source?.provider==='dida_cli'||Object.hasOwn(source||{},'cliFlavor');
-}
+function wasWrongDidaConfiguration(source){return source?.provider==='dida_cli'||Object.hasOwn(source||{},'cliFlavor');}
 
 export function normalizeExternalTaskIntegration(value={}){
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
   const wrongSource=wasWrongDidaConfiguration(source);
-  let noteLimit;
-  try{noteLimit=normalizeNoteLimit(source.noteLimit??DEFAULT_INTEGRATION.noteLimit);}
-  catch(error){throw new ExternalTaskIntegrationError(error.message,{cause:error,code:error.code,statusCode:error.statusCode});}
+  let noteLimit,timeZone;
+  try{
+    noteLimit=normalizeNoteLimit(source.noteLimit??DEFAULT_INTEGRATION.noteLimit);
+    timeZone=normalizeGetnoteTimeZone(source.timeZone??DEFAULT_INTEGRATION.timeZone);
+  }catch(error){throw new ExternalTaskIntegrationError(error.message,{cause:error,code:error.code,statusCode:error.statusCode});}
   const next={
     ...DEFAULT_INTEGRATION,
     ...source,
     enabled:wrongSource?false:asBoolean(source.enabled,DEFAULT_INTEGRATION.enabled),
     provider:'getnote_cli',
     noteLimit,
+    timeZone,
     journalDocumentUrl:String(source.journalDocumentUrl||'').trim(),
     journalHeading:boundedText(source.journalHeading,DAILY_JOURNAL_HEADING,80),
     calendarEnabled:asBoolean(source.calendarEnabled,DEFAULT_INTEGRATION.calendarEnabled),
@@ -77,27 +86,17 @@ export function normalizeExternalTaskIntegration(value={}){
     try{next.journalDocumentUrl=normalizeFeishuProjectDocumentUrl(next.journalDocumentUrl);}
     catch(error){throw new ExternalTaskIntegrationError(`飞书每日工作日记 URL 无效：${error.message}`,{cause:error,code:'INVALID_FEISHU_JOURNAL',statusCode:400});}
   }
-  if(next.enabled&&!next.journalDocumentUrl){
-    throw new ExternalTaskIntegrationError('启用得到大脑待办同步时，必须配置飞书每日工作日记 URL。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:400});
-  }
   return next;
 }
 
-export function integrationFromConfig(config={}){
-  return normalizeExternalTaskIntegration(config?.settings?.[SETTINGS_KEY]||{});
-}
-
-export async function readExternalTaskIntegration({store}){
-  return integrationFromConfig(await store.readConfig());
-}
+export function integrationFromConfig(config={}){return normalizeExternalTaskIntegration(config?.settings?.[SETTINGS_KEY]||{});}
+export async function readExternalTaskIntegration({store}){return integrationFromConfig(await store.readConfig());}
 
 async function removeWrongDidaArtifacts(store){
-  let removedTodos=0;
-  let removedInbox=0;
+  let removedTodos=0;let removedInbox=0;
   await store.updateState(state=>{
     const ids=new Set(state.todos.filter(todo=>todo.source==='dida_cli').map(todo=>todo.id));
-    removedTodos=ids.size;
-    removedInbox=state.inbox.filter(item=>item.source==='dida_cli').length;
+    removedTodos=ids.size;removedInbox=state.inbox.filter(item=>item.source==='dida_cli').length;
     state.todayPlan=state.todayPlan.filter(id=>!ids.has(id));
     state.todos=state.todos.filter(todo=>todo.source!=='dida_cli');
     state.inbox=state.inbox.filter(item=>item.source!=='dida_cli');
@@ -118,14 +117,12 @@ export async function updateExternalTaskIntegration({store,patch}){
   let saved;
   await store.updateConfig(config=>{
     const current={...(config?.settings?.[SETTINGS_KEY]||{})};
-    delete current.cliFlavor;
-    current.provider='getnote_cli';
+    delete current.cliFlavor;current.provider='getnote_cli';
     if(wrongSource){current.enabled=false;current.lastSyncStatus='not_synced';current.lastSyncError=null;}
     const next=normalizeExternalTaskIntegration({...current,...patch});
     config.settings={...(config.settings||{}),[SETTINGS_KEY]:next};
     if(config.dataSource?.provider==='feishu_doc')config.dataSource=null;
-    saved=structuredClone(next);
-    return saved;
+    saved=structuredClone(next);return saved;
   });
   if(wrongSource)await removeWrongDidaArtifacts(store);
   return saved;
@@ -133,112 +130,21 @@ export async function updateExternalTaskIntegration({store,patch}){
 
 function hash(value){return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function operationId(kind,date,value){return `${kind}-${date}-${hash(value).slice(0,24)}`;}
-function externalTodo(state,externalId){return state.todos.find(todo=>todo.source==='getnote_cli'&&todo.externalId===externalId)||null;}
-function externalInbox(state,externalId){return state.inbox.find(item=>item.source==='getnote_cli'&&item.externalTaskId===externalId)||null;}
-
-function todoContext(task){
-  const parts=[`来源：得到大脑《${task.sourceNoteTitle||'未命名笔记'}》`,`笔记 ID：${task.sourceNoteId||'unknown'}`];
-  if(task.sourceNoteUrl)parts.push(`笔记链接：${task.sourceNoteUrl}`);
-  if(task.todoSource)parts.push(`待办解析来源：${task.todoSource}`);
-  return compactText(parts.join('\n'),2000);
-}
-
-function inboxText(task){return compactText(`${task.title}｜来自得到大脑《${task.sourceNoteTitle||'未命名笔记'}》`,1000);}
-
-function applyTaskSnapshot(state,{active,completed}){
-  const now=nowIso();
-  let created=0,updated=0,completedCount=0,undated=0,scheduled=0;
-  for(const task of active){
-    const existingTodo=externalTodo(state,task.externalId);
-    const existingInbox=externalInbox(state,task.externalId);
-    if(!task.dueDate){
-      undated+=1;
-      if(existingTodo){
-        state.todayPlan=state.todayPlan.filter(id=>id!==existingTodo.id);
-        state.todos=state.todos.filter(todo=>todo.id!==existingTodo.id);
-      }
-      const patch={
-        text:inboxText(task),source:'getnote_cli',externalTaskId:task.externalId,
-        externalStatus:'active_without_due_date',externalUpdatedAt:task.updatedAt||now,
-        sourceNoteId:task.sourceNoteId,sourceNoteTitle:task.sourceNoteTitle,sourceNoteUrl:task.sourceNoteUrl||'',
-        todoSource:task.todoSource||''
-      };
-      if(existingInbox){Object.assign(existingInbox,patch);updated+=1;}
-      else{state.inbox.unshift({id:newId('in'),...patch,createdAt:now});created+=1;}
-      continue;
-    }
-    scheduled+=1;
-    if(existingInbox)state.inbox=state.inbox.filter(item=>item.id!==existingInbox.id);
-    const patch={
-      title:compactText(task.title,200),
-      context:todoContext(task),
-      dueDate:task.dueDate,
-      done:false,
-      source:'getnote_cli',
-      externalId:task.externalId,
-      externalStatus:'active',
-      externalUpdatedAt:task.updatedAt||now,
-      startAt:task.startAt,
-      dueAt:task.dueAt,
-      allDay:task.allDay,
-      timeZone:task.timeZone,
-      priority:task.priority||0,
-      priorityLabel:task.priorityLabel||'',
-      tags:Array.isArray(task.tags)?task.tags:[],
-      sourceNoteId:task.sourceNoteId,
-      sourceNoteTitle:task.sourceNoteTitle,
-      sourceNoteUrl:task.sourceNoteUrl||'',
-      todoSource:task.todoSource||''
-    };
-    if(existingTodo){
-      const before=JSON.stringify(existingTodo);
-      Object.assign(existingTodo,patch,{projectId:existingTodo.projectId??null,createdAt:existingTodo.createdAt||now});
-      if(JSON.stringify(existingTodo)!==before)updated+=1;
-    }else{
-      state.todos.unshift({id:newId('td'),...patch,projectId:null,createdAt:now});
-      created+=1;
-    }
-  }
-
-  for(const task of completed){
-    const todo=externalTodo(state,task.externalId);
-    const inbox=externalInbox(state,task.externalId);
-    if(inbox)state.inbox=state.inbox.filter(item=>item.id!==inbox.id);
-    if(!todo)continue;
-    if(!todo.done)completedCount+=1;
-    todo.done=true;
-    todo.externalStatus='completed';
-    todo.completedAt=task.completedAt||now;
-    todo.externalUpdatedAt=task.updatedAt||now;
-    state.todayPlan=state.todayPlan.filter(id=>id!==todo.id);
-  }
-  return{created,updated,completed:completedCount,undated,scheduled};
-}
-
 function sourceSuffix(task){return task.sourceNoteTitle?`｜来自《${task.sourceNoteTitle}》`:'';}
+
 function taskSnapshotText(source,date){
   const active=[...source.active].sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'))||a.title.localeCompare(b.title));
   const completed=[...source.completed].sort((a,b)=>String(b.completedAt||b.updatedAt||'').localeCompare(String(a.completedAt||a.updatedAt||''))).slice(0,30);
-  const due=active.filter(task=>task.dueDate);
-  const undated=active.filter(task=>!task.dueDate);
-  const overdue=due.filter(task=>task.dueDate<date);
+  const due=active.filter(task=>task.dueDate);const undated=active.filter(task=>!task.dueDate);const overdue=due.filter(task=>task.dueDate<date);
+  const recent=Number(source.recentNoteCount??source.noteCount??0);const tracked=Number(source.trackedNoteCount||0);
   const lines=[
     `日期：${date}`,
     '来源：得到大脑 CLI（getnote）',
-    `扫描最近笔记：${source.noteCount}；解析待办：${source.todoCount}；未完成：${active.length}；已设日期：${due.length}；无日期待确认：${undated.length}；逾期：${overdue.length}`
+    `扫描近期笔记：${recent}；额外追踪旧未完成笔记：${tracked}；读取笔记合计：${source.noteCount}；解析待办：${source.todoCount}；未完成：${active.length}；已设日期：${due.length}；无日期待确认：${undated.length}；逾期：${overdue.length}`
   ];
-  if(due.length){
-    lines.push('已确定日期的待办：');
-    due.slice(0,100).forEach((task,index)=>lines.push(`${index+1}. ${task.title}｜${task.dueAt||task.dueDate}${sourceSuffix(task)}`));
-  }
-  if(undated.length){
-    lines.push('未识别到明确日期（留在工作台收件箱）：');
-    undated.slice(0,50).forEach((task,index)=>lines.push(`${index+1}. ${task.title}${sourceSuffix(task)}`));
-  }
-  if(completed.length){
-    lines.push('得到大脑中已标记完成：');
-    completed.forEach((task,index)=>lines.push(`${index+1}. ${task.title}${sourceSuffix(task)}`));
-  }
+  if(due.length){lines.push('已确定日期的待办：');due.slice(0,100).forEach((task,index)=>lines.push(`${index+1}. ${task.title}｜${task.dueAt||task.dueDate}${sourceSuffix(task)}`));}
+  if(undated.length){lines.push('未识别到明确日期（留在工作台收件箱）：');undated.slice(0,50).forEach((task,index)=>lines.push(`${index+1}. ${task.title}${sourceSuffix(task)}`));}
+  if(completed.length){lines.push('得到大脑中已标记完成：');completed.forEach((task,index)=>lines.push(`${index+1}. ${task.title}${sourceSuffix(task)}`));}
   return lines.join('\n');
 }
 
@@ -248,13 +154,8 @@ function summaryText(state,date,notes=''){
   const active=externalTodos.filter(todo=>!todo.done);
   const dueToday=active.filter(todo=>todo.dueDate===date);
   const overdue=active.filter(todo=>todo.dueDate<date);
-  const activities=state.activities
-    .filter(activity=>activity.type!=='daily_summary_published'&&String(activity.at||'').slice(0,10)===date)
-    .slice(0,30);
-  const lines=[
-    `日期：${date}`,
-    `今日完成：${completed.length}；今日到期未完成：${dueToday.length}；逾期待办：${overdue.length}；当前得到大脑待办：${active.length}`
-  ];
+  const activities=state.activities.filter(activity=>activity.type!=='daily_summary_published'&&String(activity.at||'').slice(0,10)===date).slice(0,30);
+  const lines=[`日期：${date}`,`今日完成：${completed.length}；今日到期未完成：${dueToday.length}；逾期待办：${overdue.length}；当前得到大脑待办：${active.length}`];
   if(completed.length){lines.push('完成事项：');completed.slice(0,30).forEach((todo,index)=>lines.push(`${index+1}. ${todo.title}`));}
   if(dueToday.length){lines.push('今日仍未完成：');dueToday.slice(0,30).forEach((todo,index)=>lines.push(`${index+1}. ${todo.title}`));}
   if(activities.length){lines.push('工作台关键动作：');activities.slice(0,20).forEach((activity,index)=>lines.push(`${index+1}. ${activity.text}`));}
@@ -268,9 +169,28 @@ async function recordSyncError(store,error){
     const current={...(config.settings?.[SETTINGS_KEY]||{})};
     config.settings={...(config.settings||{}),[SETTINGS_KEY]:{
       ...current,provider:'getnote_cli',lastSyncAt:nowIso(),lastSyncStatus:'error',lastSyncError:compactText(error?.message||'同步失败',300)
-    }};
-    return true;
+    }};return true;
   }).catch(()=>{});
+}
+function sinkError(error){return compactText(error?.message||'派生输出失败',300);}
+async function journalSink({integration,journalClient,snapshot,date}){
+  if(!integration.journalDocumentUrl){
+    return{enabled:false,configured:false,status:'not_configured',operationId:null,blockId:null,replayed:false,writtenAt:null,error:null};
+  }
+  const op=operationId('tasks',date,snapshot);
+  try{
+    const journal=await journalClient.appendTasks(integration.journalDocumentUrl,snapshot,{operationId:op,heading:integration.journalHeading});
+    return{enabled:true,configured:true,status:'ok',operationId:op,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed),writtenAt:nowIso(),error:null};
+  }catch(error){
+    return{enabled:true,configured:true,status:'error',operationId:op,blockId:null,replayed:false,writtenAt:null,error:sinkError(error)};
+  }
+}
+async function calendarSink({integration,calendarWriter,store,tasks}){
+  if(!integration.calendarEnabled)return{enabled:false,status:'disabled',path:null,eventCount:0,writtenAt:null,error:null};
+  try{
+    const calendar=await calendarWriter({store,tasks,calendarName:integration.calendarName});
+    return{...calendar,status:'ok',error:null};
+  }catch(error){return{enabled:true,status:'error',path:null,eventCount:0,writtenAt:null,error:sinkError(error)};}
 }
 
 export async function syncExternalTasks({
@@ -283,51 +203,65 @@ export async function syncExternalTasks({
   const integration=integrationFromConfig(config);
   if(!integration.enabled)throw new ExternalTaskIntegrationError('得到大脑 CLI 待办来源尚未启用。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:409});
   const date=todayIso();
+  let source,changes;
   try{
-    const source=await taskClient.fetch(integration);
-    const snapshot=taskSnapshotText(source,date);
-    const journalOp=operationId('tasks',date,snapshot);
-    const journal=await journalClient.appendTasks(integration.journalDocumentUrl,snapshot,{
-      operationId:journalOp,heading:integration.journalHeading
-    });
-    const calendar=integration.calendarEnabled
-      ?await calendarWriter({store,tasks:source.active,calendarName:integration.calendarName})
-      :{enabled:false,path:null,eventCount:0,writtenAt:null};
-    let changes;
+    const before=await store.readState();
+    const trackedNotes=collectTrackedGetnoteNotes(before);
+    source=await taskClient.fetch({...integration,trackedNotes,timeZone:integration.timeZone});
     await store.updateState(state=>{
-      changes=applyTaskSnapshot(state,source);
+      changes=applyGetnoteTaskSnapshot(state,source);
       addActivity(state,{
         type:'external_tasks_synced',
-        text:`得到大脑待办已同步：扫描笔记 ${source.noteCount}，解析 ${source.todoCount}，新增 ${changes.created}，更新 ${changes.updated}，完成 ${changes.completed}，无日期 ${changes.undated}；飞书日记已读回${calendar.enabled?'，本机日历已更新':''}。`
+        text:`得到大脑待办核心同步已提交到工作台：读取笔记 ${source.noteCount}，解析 ${source.todoCount}，新增 ${changes.created}，更新 ${changes.updated}，完成 ${changes.completed}，无日期 ${changes.undated}，身份对账 ${changes.reconciled}。`
       });
       return changes;
     });
-    await store.updateConfig(current=>{
-      const previous=current.settings?.[SETTINGS_KEY]||{};
-      current.settings={...(current.settings||{}),[SETTINGS_KEY]:{
-        ...previous,provider:'getnote_cli',noteLimit:integration.noteLimit,
-        lastSyncAt:nowIso(),lastSyncStatus:'ok',lastSyncError:null,
-        lastImportedCount:source.active.length,lastCompletedCount:source.completed.length,
-        lastUndatedCount:source.active.filter(task=>!task.dueDate).length,
-        lastSourceNoteCount:source.noteCount,lastParsedTodoCount:source.todoCount,
-        lastJournalAt:nowIso(),lastJournalBlockId:journal.item?.blockId||null,
-        lastCalendarAt:calendar.writtenAt,lastCalendarPath:calendar.path,
-        lastCalendarEventCount:calendar.eventCount
-      }};
-      return true;
-    });
-    return{
-      provider:'getnote_cli',fetchedAt:source.fetchedAt,noteCount:source.noteCount,todoCount:source.todoCount,
-      activeCount:source.active.length,completedCount:source.completed.length,
-      completedAvailable:source.completedAvailable,completedWarning:source.completedWarning,
-      changes,journal:{operationId:journalOp,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed)},
-      calendar
-    };
   }catch(error){
     await recordSyncError(store,error);
     if(error instanceof ExternalTaskSourceError||error instanceof ExternalTaskIntegrationError)throw error;
     throw new ExternalTaskIntegrationError(error.message||'得到大脑待办同步失败。',{cause:error,code:error.code||'EXTERNAL_TASK_INTEGRATION_FAILED',statusCode:error.statusCode||500});
   }
+
+  // Workbench state is already committed. Everything below is a derived sink:
+  // failure is reported and retryable, but can never roll back the task state.
+  const snapshot=taskSnapshotText(source,date);
+  const journal=await journalSink({integration,journalClient,snapshot,date});
+  const calendar=await calendarSink({integration,calendarWriter,store,tasks:source.active});
+  const sinkErrors=[journal.status==='error'?`飞书：${journal.error}`:null,calendar.status==='error'?`ICS：${calendar.error}`:null].filter(Boolean);
+  if(sinkErrors.length){
+    await store.updateState(state=>{
+      addActivity(state,{type:'external_task_sink_failed',text:`得到大脑核心同步已成功；派生输出异常：${sinkErrors.join('；')}`});
+      return true;
+    }).catch(()=>{});
+  }
+
+  let metadataError=null;
+  try{
+    await store.updateConfig(current=>{
+      const previous=current.settings?.[SETTINGS_KEY]||{};
+      current.settings={...(current.settings||{}),[SETTINGS_KEY]:{
+        ...previous,provider:'getnote_cli',noteLimit:integration.noteLimit,timeZone:integration.timeZone,
+        lastSyncAt:nowIso(),lastSyncStatus:sinkErrors.length?'ok_with_sink_errors':'ok',lastSyncError:null,
+        lastImportedCount:source.active.length,lastCompletedCount:source.completed.length,
+        lastUndatedCount:source.active.filter(task=>!task.dueDate).length,
+        lastSourceNoteCount:source.noteCount,lastRecentNoteCount:source.recentNoteCount??source.noteCount,
+        lastTrackedNoteCount:source.trackedNoteCount||0,lastParsedTodoCount:source.todoCount,
+        lastJournalStatus:journal.status,lastJournalError:journal.error,
+        lastJournalAt:journal.writtenAt||previous.lastJournalAt||null,lastJournalBlockId:journal.blockId||previous.lastJournalBlockId||null,
+        lastCalendarStatus:calendar.status,lastCalendarError:calendar.error,
+        lastCalendarAt:calendar.writtenAt||previous.lastCalendarAt||null,lastCalendarPath:calendar.path||previous.lastCalendarPath||null,
+        lastCalendarEventCount:calendar.status==='ok'?calendar.eventCount:Number(previous.lastCalendarEventCount||0)
+      }};return true;
+    });
+  }catch(error){metadataError=sinkError(error);}
+
+  return{
+    provider:'getnote_cli',committed:true,fetchedAt:source.fetchedAt,noteCount:source.noteCount,
+    recentNoteCount:source.recentNoteCount??source.noteCount,trackedNoteCount:source.trackedNoteCount||0,todoCount:source.todoCount,
+    activeCount:source.active.length,completedCount:source.completed.length,
+    completedAvailable:source.completedAvailable,completedWarning:source.completedWarning,
+    changes,journal,calendar,metadata:{status:metadataError?'error':'ok',error:metadataError}
+  };
 }
 
 export async function publishDailySummary({
@@ -339,21 +273,17 @@ export async function publishDailySummary({
   const config=await store.readConfig();
   const integration=integrationFromConfig(config);
   if(!integration.enabled)throw new ExternalTaskIntegrationError('得到大脑 CLI 待办来源尚未启用。',{code:'EXTERNAL_TASK_INTEGRATION_NOT_CONFIGURED',statusCode:409});
+  if(!integration.journalDocumentUrl)throw new ExternalTaskIntegrationError('尚未配置飞书每日工作日记 URL；任务同步不受影响，但每日总结需要先配置飞书沉淀目标。',{code:'FEISHU_DAILY_JOURNAL_NOT_CONFIGURED',statusCode:409});
   const state=await store.readState();
   const text=summaryText(state,date,notes);
   const op=operationId('summary',date,text);
-  const journal=await journalClient.appendSummary(integration.journalDocumentUrl,text,{
-    operationId:op,heading:integration.journalHeading
-  });
-  await store.updateState(current=>{
-    addActivity(current,{type:'daily_summary_published',text:`${date} 的每日总结已沉淀到飞书工作日记。`});
-  });
+  const journal=await journalClient.appendSummary(integration.journalDocumentUrl,text,{operationId:op,heading:integration.journalHeading});
+  await store.updateState(current=>{addActivity(current,{type:'daily_summary_published',text:`${date} 的每日总结已沉淀到飞书工作日记。`});});
   await store.updateConfig(current=>{
     const previous=current.settings?.[SETTINGS_KEY]||{};
     current.settings={...(current.settings||{}),[SETTINGS_KEY]:{
       ...previous,provider:'getnote_cli',lastSummaryAt:nowIso(),lastSummaryBlockId:journal.item?.blockId||null
-    }};
-    return true;
+    }};return true;
   });
   return{date,operationId:op,blockId:journal.item?.blockId||null,replayed:Boolean(journal.replayed)};
 }
