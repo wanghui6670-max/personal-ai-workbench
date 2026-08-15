@@ -119,7 +119,8 @@ function simplifyToday(){
   setTextIfChanged(primary?.querySelector('.card-desc'),'只显示你明确加入今天的任务。');
   const empty=primary?.querySelector('.empty');
   if(empty&&empty.textContent.includes('今天还没有正式安排任务')){
-    empty.innerHTML='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';
+    const emptyHtml='<strong>今天还没有正式安排任务。</strong><br>从待办中选择真正要做的，再加入今日。';
+    if(empty.innerHTML!==emptyHtml)empty.innerHTML=emptyHtml;
   }
   compactRecentWork(primary);
   simplifyDecisionCard(grid.querySelector('.human-decision-card'));
