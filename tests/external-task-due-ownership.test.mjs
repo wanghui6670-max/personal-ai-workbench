@@ -38,11 +38,38 @@ test('a user-edited due date is preserved while sourceDueDate continues tracking
 });
 
 test('legacy GetNote todos without sourceDueDate conservatively preserve a mismatching current due date',()=>{
-  const current=state(todo({dueDate:'2026-08-21',sourceDueDate:undefined}));
+  const current=state(todo({dueDate:'2026-08-21'}));
   const changes=applyGetnoteTaskSnapshot(current,{active:[source({dueDate:'2026-08-25',dueAt:'2026-08-25'})]});
   assert.equal(changes.localDuePreserved,1);
   assert.equal(current.todos[0].dueDate,'2026-08-21');
   assert.equal(current.todos[0].sourceDueDate,'2026-08-25');
+});
+
+test('a v2 source-owned due date moves back to Inbox when GetNote removes the date outside Today',()=>{
+  const current=state(todo({sourceDueDate:'2026-08-20'}));
+  const changes=applyGetnoteTaskSnapshot(current,{active:[source({dueDate:null,dueAt:null})]});
+  assert.equal(changes.localDuePreserved,0);
+  assert.equal(changes.movedToInbox,1);
+  assert.equal(current.todos.length,0);
+  assert.equal(current.inbox.length,1);
+  assert.equal(current.inbox[0].id,'td-1');
+  assert.equal(current.inbox[0].externalTaskId,'ext-1');
+  assert.equal(current.inbox[0].sourceDueDate,null);
+  assert.equal(current.inbox[0].sourcePreviousDueDate,'2026-08-20');
+  assert.equal(current.inbox[0].externalStatus,'active_without_due_date');
+});
+
+test('a legacy Todo with no source due history is preserved conservatively when the first v2 source becomes undated',()=>{
+  const current=state(todo());
+  const changes=applyGetnoteTaskSnapshot(current,{active:[source({dueDate:null,dueAt:null})]});
+  assert.equal(changes.localDuePreserved,1);
+  assert.equal(changes.movedToInbox,0);
+  assert.equal(current.inbox.length,0);
+  assert.equal(current.todos.length,1);
+  assert.equal(current.todos[0].dueDate,'2026-08-20');
+  assert.equal(current.todos[0].sourceDueDate,null);
+  assert.equal(current.todos[0].sourcePreviousDueDate,'2026-08-20');
+  assert.equal(current.todos[0].externalStatus,'active_without_due_date_local_override');
 });
 
 test('when GetNote removes its date, a local due-date override keeps the Todo even outside Today',()=>{
@@ -70,4 +97,19 @@ test('Today preservation can later detect a user date edit while the source rema
   assert.equal(current.todos[0].dueDate,'2026-08-23');
   assert.equal(current.todos[0].externalStatus,'active_without_due_date_local_override');
   assert.deepEqual(current.todayPlan,['td-1']);
+});
+
+test('Today-only preservation stops keeping an unchanged source-owned date after the user removes Today',()=>{
+  const current=state(todo({dueDate:'2026-08-20',sourceDueDate:'2026-08-20'}));
+  current.todayPlan=['td-1'];
+  const first=applyGetnoteTaskSnapshot(current,{active:[source({dueDate:null,dueAt:null})]});
+  assert.equal(first.todayPreserved,1);
+  assert.equal(current.todos[0].externalStatus,'active_without_due_date_today_preserved');
+  current.todayPlan=[];
+  const second=applyGetnoteTaskSnapshot(current,{active:[source({dueDate:null,dueAt:null})]});
+  assert.equal(second.localDuePreserved,0);
+  assert.equal(second.movedToInbox,1);
+  assert.equal(current.todos.length,0);
+  assert.equal(current.inbox.length,1);
+  assert.equal(current.inbox[0].sourcePreviousDueDate,'2026-08-20');
 });
