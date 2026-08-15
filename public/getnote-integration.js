@@ -4,7 +4,7 @@ let getnoteState=null;
 let getnoteBusy=false;
 let scheduled=false;
 
-function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));}
+function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
 function pipeline(){
   const raw=getnoteState?.config?.settings?.[PIPELINE_KEY]||{};
   const mistaken=raw?.provider==='dida_cli'||Object.hasOwn(raw,'cliFlavor');
