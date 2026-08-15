@@ -3,14 +3,22 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from './harness-policy.mjs';
+import {
+  HARNESS_COMPOSITION_ID,
+  HARNESS_NAVIGATOR_TOOL_ALLOWLIST,
+  HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
+} from './harness-policy.mjs';
 
 export const HARNESS_VERSION='0.1.0-rc.6';
+export const HARNESS_UI_MODE_WORKBENCH='workbench';
+export const HARNESS_UI_MODE_EMBEDDED_EXPERIMENTAL='embedded_experimental';
 const PROVIDER_ROUTE='joycrew';
 const MAX_MESSAGE_CHARS=12_000;
 const MAX_RESPONSE_CHARS=12_000;
 const MAX_TRAJECTORY_ITEMS=40;
 const MAX_TOOL_TEXT_CHARS=2_000;
+const EMBEDDED_WEB_ATTESTATION_MAX_BYTES=64*1024;
+const EMBEDDED_WEB_ATTESTATION_TTL_MS=30_000;
 const SESSION_ID_PATTERN=/^[A-Za-z0-9._:-]{1,160}$/;
 const ALLOWED_PROVIDER_APIS=new Set(['openai-responses','openai-completions']);
 const PASSTHROUGH_ENV_KEYS=[
@@ -48,6 +56,23 @@ function normalizedBaseUrl(value,networkZone){
   }
   url.pathname=url.pathname.replace(/\/+$/,'')||'/';
   return {ok:true,url:url.toString().replace(/\/$/,'')};
+}
+
+function normalizedLoopbackUiUrl(value){
+  let url;
+  try{url=new URL(String(value||''));}catch{return null;}
+  if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
+  if(!isLoopbackHostname(url.hostname))return null;
+  return url;
+}
+
+async function boundedJson(response,maxBytes=EMBEDDED_WEB_ATTESTATION_MAX_BYTES){
+  const declared=Number(response.headers.get('content-length'));
+  if(Number.isFinite(declared)&&declared>maxBytes)throw new Error('response_too_large');
+  const buffer=Buffer.from(await response.arrayBuffer());
+  if(buffer.byteLength>maxBytes)throw new Error('response_too_large');
+  try{return JSON.parse(buffer.toString('utf8'));}
+  catch{throw new Error('response_invalid_json');}
 }
 
 export function harnessNodeSupported(version=process.versions.node){
@@ -97,17 +122,31 @@ export function resolveHarnessProviderConfig(env=process.env){
   };
 }
 
+export function resolveHarnessUiMode(env=process.env){
+  return firstNonEmpty(env.HARNESS_UI_MODE,HARNESS_UI_MODE_WORKBENCH)===HARNESS_UI_MODE_EMBEDDED_EXPERIMENTAL
+    ?HARNESS_UI_MODE_EMBEDDED_EXPERIMENTAL
+    :HARNESS_UI_MODE_WORKBENCH;
+}
+
+export function resolveHarnessWebConfig(env=process.env){
+  const uiMode=resolveHarnessUiMode(env);
+  if(uiMode!==HARNESS_UI_MODE_EMBEDDED_EXPERIMENTAL)return {uiMode,enabled:false,reason:'workbench_ui'};
+  if(env.HARNESS_ENABLED!=='1')return {uiMode,enabled:false,reason:'disabled'};
+  const rawWeb=firstNonEmpty(env.HARNESS_WEB_URL);
+  const rawAttestation=firstNonEmpty(env.HARNESS_WEB_ATTESTATION_URL);
+  if(!rawWeb)return {uiMode,enabled:false,reason:'web_url_missing'};
+  if(!rawAttestation)return {uiMode,enabled:false,reason:'attestation_url_missing'};
+  const webUrl=normalizedLoopbackUiUrl(rawWeb);
+  const attestationUrl=normalizedLoopbackUiUrl(rawAttestation);
+  if(!webUrl)return {uiMode,enabled:false,reason:'web_url_invalid'};
+  if(!attestationUrl)return {uiMode,enabled:false,reason:'attestation_url_invalid'};
+  if(webUrl.origin!==attestationUrl.origin)return {uiMode,enabled:false,reason:'attestation_origin_mismatch'};
+  return {uiMode,enabled:true,webUrl:webUrl.toString(),attestationUrl:attestationUrl.toString()};
+}
+
 export function resolveHarnessWebUrl(env=process.env){
-  const value=firstNonEmpty(env.HARNESS_WEB_URL,'http://127.0.0.1:3080/');
-  let url;
-  try{url=new URL(value);}catch{return null;}
-  if(!['http:','https:'].includes(url.protocol))return null;
-  if(url.username||url.password)return null;
-  const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,'');
-  if(host!=='127.0.0.1'&&host!=='localhost'&&host!=='::1')return null;
-  url.hash='';
-  url.search='';
-  return url.toString();
+  const config=resolveHarnessWebConfig(env);
+  return config.enabled?config.webUrl:null;
 }
 
 export function buildHarnessChildEnv({env=process.env,provider,bridgeUrl,bridgeToken}){
@@ -263,7 +302,7 @@ function routeContext(route={}){
 }
 
 export class HarnessNavigatorRuntime{
-  constructor({appRoot,bridgeUrl,env=process.env,importModule=specifier=>import(specifier)}={}){
+  constructor({appRoot,bridgeUrl,env=process.env,importModule=specifier=>import(specifier),fetchImpl=fetch}={}){
     if(!appRoot||!bridgeUrl)throw new Error('HarnessNavigatorRuntime requires appRoot and bridgeUrl');
     this.appRoot=path.resolve(appRoot);
     this.harnessDir=path.join(this.appRoot,'harness');
@@ -271,11 +310,13 @@ export class HarnessNavigatorRuntime{
     this.bridgeToken=crypto.randomBytes(32).toString('base64url');
     this.env=env;
     this.importModule=importModule;
+    this.fetchImpl=fetchImpl;
     this.runtime=null;
     this.starting=null;
     this.state='idle';
     this.lastErrorCode=null;
     this.activeSessions=new Set();
+    this.embeddedWebAttestation=null;
     this.closed=false;
     this.require=createRequire(path.join(this.harnessDir,'package.json'));
   }
@@ -297,23 +338,88 @@ export class HarnessNavigatorRuntime{
     return {available:true,provider,sdkEntry,runtimeBin};
   }
 
+  embeddedWebStatus(config=resolveHarnessWebConfig(this.env)){
+    if(!config.enabled){
+      return{
+        enabled:false,
+        verified:false,
+        reason:config.reason,
+        compositionId:HARNESS_COMPOSITION_ID,
+        toolCatalogHash:HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
+      };
+    }
+    const cached=this.embeddedWebAttestation;
+    return{
+      enabled:true,
+      verified:Boolean(cached?.verified),
+      reason:cached?.reason??'not_verified',
+      checkedAt:cached?.checkedAt??null,
+      compositionId:HARNESS_COMPOSITION_ID,
+      toolCatalogHash:HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
+    };
+  }
+
+  async verifyEmbeddedWeb({force=false}={}){
+    const config=resolveHarnessWebConfig(this.env);
+    if(!config.enabled)return this.embeddedWebStatus(config);
+    const cached=this.embeddedWebAttestation;
+    if(!force&&cached&&Date.now()-cached.checkedAtMs<EMBEDDED_WEB_ATTESTATION_TTL_MS)return this.embeddedWebStatus(config);
+    const controller=new AbortController();
+    const timeoutMs=boundedInteger(this.env.HARNESS_WEB_ATTESTATION_TIMEOUT_MS,1500,{min:250,max:5000});
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    const checkedAt=new Date().toISOString();
+    try{
+      const response=await this.fetchImpl(config.attestationUrl,{
+        method:'GET',
+        redirect:'error',
+        headers:{accept:'application/json'},
+        signal:controller.signal
+      });
+      if(!response.ok)throw new Error('attestation_http_error');
+      const payload=await boundedJson(response);
+      if(payload?.ok!==true)throw new Error('attestation_not_ready');
+      if(payload?.compositionId!==HARNESS_COMPOSITION_ID)throw new Error('composition_mismatch');
+      if(payload?.toolCatalogHash!==HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256)throw new Error('tool_catalog_mismatch');
+      if(payload?.harnessVersion!==HARNESS_VERSION)throw new Error('harness_version_mismatch');
+      this.embeddedWebAttestation={verified:true,reason:null,checkedAt,checkedAtMs:Date.now()};
+    }catch(error){
+      const reason=error instanceof Error&&error.name==='AbortError'?'attestation_timeout':String(error?.message||'attestation_failed').slice(0,80);
+      this.embeddedWebAttestation={verified:false,reason,checkedAt,checkedAtMs:Date.now()};
+    }finally{
+      clearTimeout(timer);
+    }
+    return this.embeddedWebStatus(config);
+  }
+
   status(){
     const availability=this.availability();
+    const webConfig=resolveHarnessWebConfig(this.env);
+    const embeddedWeb=this.embeddedWebStatus(webConfig);
+    const webFallback=webConfig.uiMode===HARNESS_UI_MODE_EMBEDDED_EXPERIMENTAL&&!embeddedWeb.verified;
     return {
       enabled:this.env.HARNESS_ENABLED==='1',
       available:availability.available,
       state:this.state,
       reason:availability.available?null:availability.reason,
-      message:availability.available?'Navigator Sidecar 已就绪；会话仅保存在 Sidecar 内存。':statusReasonMessage(availability.reason),
+      message:availability.available
+        ?webFallback?'Navigator Sidecar 已就绪；原生 DSH 界面未通过组成校验，已使用受控 Workbench 面板。':'Navigator Sidecar 已就绪；会话仅保存在 Sidecar 内存。'
+        :statusReasonMessage(availability.reason),
       harnessVersion:HARNESS_VERSION,
       model:availability.available?availability.provider.model:null,
       providerApi:availability.available?availability.provider.api:null,
       mode:'read_only',
       persistence:'memory_only',
       toolCount:HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,
-      webUrl:this.env.HARNESS_ENABLED==='1'?resolveHarnessWebUrl(this.env):null,
+      uiMode:webConfig.uiMode,
+      webUrl:embeddedWeb.verified?webConfig.webUrl:null,
+      embeddedWeb,
       lastErrorCode:this.lastErrorCode
     };
+  }
+
+  async checkedStatus(options={}){
+    await this.verifyEmbeddedWeb(options);
+    return this.status();
   }
 
   async ensureRuntime(){
