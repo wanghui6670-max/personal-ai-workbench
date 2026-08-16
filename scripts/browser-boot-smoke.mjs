@@ -3,13 +3,13 @@ import { spawn } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import puppeteer from 'puppeteer-core';
 
 const root=process.cwd();
 const tmp=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-browser-smoke-'));
 const dataDir=path.join(tmp,'data');
 const workspaceRoot=path.join(tmp,'workspace');
 const port=49271;
-const debugPort=49272;
 const base=`http://127.0.0.1:${port}`;
 const env={
   ...process.env,
@@ -19,9 +19,9 @@ const env={
 };
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-function run(file,args,{env:childEnv=process.env,timeout=10_000}={}){
+function run(file,args,{timeout=8_000}={}){
   return new Promise((resolve,reject)=>{
-    const child=spawn(file,args,{cwd:root,env:childEnv,stdio:['ignore','pipe','pipe']});
+    const child=spawn(file,args,{cwd:root,stdio:['ignore','pipe','pipe']});
     const out=[],err=[];
     const timer=setTimeout(()=>{child.kill('SIGKILL');reject(new Error(`${file} timed out`));},timeout);
     child.stdout.on('data',chunk=>out.push(chunk));child.stderr.on('data',chunk=>err.push(chunk));
@@ -47,66 +47,36 @@ async function findChrome(){
   throw new Error('No Chrome/Chromium executable found on runner');
 }
 
-async function waitForTarget(){
-  const started=Date.now();
-  while(Date.now()-started<12_000){
-    try{
-      const list=await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
-      const target=list.find(item=>item.type==='page'&&String(item.url||'').startsWith(base));
-      if(target?.webSocketDebuggerUrl)return target;
-    }catch{}
-    await sleep(150);
-  }
-  throw new Error('Chrome DevTools target did not appear');
-}
-
-async function inspectWithCdp(target){
-  if(typeof WebSocket!=='function')throw new Error('Node runtime does not provide WebSocket');
-  const ws=new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve,reject)=>{ws.addEventListener('open',resolve,{once:true});ws.addEventListener('error',reject,{once:true});});
-  let seq=0;const pending=new Map();const exceptions=[];const consoleErrors=[];
-  ws.addEventListener('message',event=>{
-    let message;try{message=JSON.parse(String(event.data));}catch{return;}
-    if(message.id&&pending.has(message.id)){const {resolve,reject}=pending.get(message.id);pending.delete(message.id);if(message.error)reject(new Error(JSON.stringify(message.error)));else resolve(message.result);return;}
-    if(message.method==='Runtime.exceptionThrown')exceptions.push(message.params?.exceptionDetails||{});
-    if(message.method==='Runtime.consoleAPICalled'&&message.params?.type==='error')consoleErrors.push(message.params);
-    if(message.method==='Log.entryAdded'&&message.params?.entry?.level==='error')consoleErrors.push(message.params.entry);
-  });
-  const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
-  try{
-    await send('Runtime.enable');await send('Page.enable');await send('Log.enable');
-    await sleep(4500);
-    const result=await send('Runtime.evaluate',{
-      expression:`JSON.stringify({readyState:document.readyState,text:document.body?.innerText||'',html:document.documentElement?.outerHTML?.slice(0,12000)||''})`,
-      returnByValue:true,awaitPromise:true
-    });
-    const value=JSON.parse(result?.result?.value||'{}');
-    return{...value,exceptions,consoleErrors};
-  }finally{ws.close();}
-}
-
 const server=spawn(process.execPath,['src/server.mjs'],{cwd:root,env,stdio:['ignore','pipe','pipe']});
 const serverErr=[];server.stderr.on('data',c=>serverErr.push(c));
-let chrome=null;const chromeErr=[];
+let browser=null;
 try{
   await waitForHealth();
-  const executable=await findChrome();
-  chrome=spawn(executable,[
-    '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
-    `--remote-debugging-port=${debugPort}`,`--user-data-dir=${path.join(tmp,'chrome-profile')}`,base
-  ],{cwd:root,stdio:['ignore','ignore','pipe']});
-  chrome.stderr.on('data',c=>chromeErr.push(c));
-  const target=await waitForTarget();
-  const page=await inspectWithCdp(target);
-  const diagnostic=JSON.stringify({readyState:page.readyState,exceptions:page.exceptions,consoleErrors:page.consoleErrors}).slice(0,8000);
-  if(page.text.includes('正在打开动觉 AI 工作台'))throw new Error(`Browser remained on boot placeholder. ${diagnostic}`);
-  if(!page.text.includes('今日与收件箱'))throw new Error(`Browser did not render Workbench v3 dashboard. text=${page.text.slice(0,3000)} ${diagnostic}`);
-  if(page.exceptions.length)throw new Error(`Browser rendered but emitted runtime exceptions: ${diagnostic}`);
+  const executablePath=await findChrome();
+  browser=await puppeteer.launch({
+    executablePath,headless:true,
+    args:['--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check']
+  });
+  const page=await browser.newPage();
+  const pageErrors=[];const consoleErrors=[];const failedRequests=[];
+  page.on('pageerror',error=>pageErrors.push(String(error?.stack||error)));
+  page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text());});
+  page.on('requestfailed',request=>failedRequests.push({url:request.url(),error:request.failure()?.errorText||'failed'}));
+  const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:15_000});
+  if(!response||response.status()!==200)throw new Error(`Homepage navigation failed: ${response?.status()||'no response'}`);
+  try{
+    await page.waitForFunction(()=>!document.body?.innerText?.includes('正在打开动觉 AI 工作台'),{timeout:8_000});
+  }catch{
+    const snapshot=await page.evaluate(()=>({readyState:document.readyState,text:document.body?.innerText||'',html:document.documentElement?.outerHTML?.slice(0,8000)||''}));
+    throw new Error(`Browser stayed on boot placeholder. snapshot=${JSON.stringify(snapshot).slice(0,9000)} pageErrors=${JSON.stringify(pageErrors).slice(0,5000)} consoleErrors=${JSON.stringify(consoleErrors).slice(0,5000)} failedRequests=${JSON.stringify(failedRequests).slice(0,5000)}`);
+  }
+  const text=await page.evaluate(()=>document.body?.innerText||'');
+  if(!text.includes('今日与收件箱'))throw new Error(`Workbench v3 dashboard not rendered. text=${text.slice(0,4000)} pageErrors=${JSON.stringify(pageErrors).slice(0,5000)} consoleErrors=${JSON.stringify(consoleErrors).slice(0,5000)} failedRequests=${JSON.stringify(failedRequests).slice(0,5000)}`);
+  if(pageErrors.length)throw new Error(`Workbench rendered but emitted page errors: ${JSON.stringify(pageErrors).slice(0,8000)}`);
   console.log('browser-boot-smoke: ok');
 }finally{
-  if(chrome){chrome.kill('SIGTERM');await sleep(150);if(chrome.exitCode===null)chrome.kill('SIGKILL');}
+  if(browser)await browser.close().catch(()=>undefined);
   server.kill('SIGTERM');await sleep(150);if(server.exitCode===null)server.kill('SIGKILL');
   if(serverErr.length)process.stderr.write(Buffer.concat(serverErr));
-  if(chromeErr.length)process.stderr.write(Buffer.concat(chromeErr).toString('utf8').split('\n').filter(line=>!/dbus|DevTools listening/.test(line)).slice(0,30).join('\n'));
   await fsp.rm(tmp,{recursive:true,force:true});
 }
