@@ -17,7 +17,7 @@ test('browser keeps GetNote only as confirmed self-media content ingestion',asyn
   assert.match(script,/不加入 Today/);
   assert.match(script,/不写回得到大脑/);
   assert.match(script,/确认同步最近 50 篇/);
-  assert.match(script,/confirmed\}\)\);/);
+  assert.match(script,/rpc\('getnote_content_sync',\{limit:50\},true\)/);
   assert.doesNotMatch(script,/external_tasks_sync/);
   assert.doesNotMatch(script,/external_task_integration_update/);
   assert.doesNotMatch(script,/daily_summary_publish/);
