@@ -47,7 +47,7 @@ async function dismissFilteredNonTodo(item,category){
     const response=await fetch('/api/inbox/command',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({itemId:id,command:'删除'})
+      body:JSON.stringify({itemId:id,command:`不进入待办：${category}`})
     });
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
