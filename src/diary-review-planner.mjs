@@ -1,4 +1,5 @@
 import { askStructured } from './ai.mjs';
+import { isValidDateOnly } from './validation.mjs';
 
 const CATEGORY_LABELS=Object.freeze({
   todo:'待办候选',
@@ -54,22 +55,29 @@ function toolPlan(decision,analysis,args){
   };
 }
 
-export function normalizeDiaryReviewDecision(decision={},analysis={},route={}){
+function targetProject(projects,id){return id?projects.find(project=>project.id===id)||null:null;}
+
+export function normalizeDiaryReviewDecision(decision={},analysis={},route={},options={}){
   if(!route?.id||!CATEGORY_LABELS[decision.category])return null;
+  const projects=Array.isArray(options.projects)?options.projects:[];
+  const project=targetProject(projects,decision.targetProjectId);
   const destination=decision.destination;
   if(destination==='memo'){
     return toolPlan(decision,analysis,{itemId:route.id,command:'只是备忘'});
   }
   if(destination==='project_note'){
-    if(!decision.targetProjectId)return clarification(decision,analysis,'识别为项目进展，但还不能唯一确定目标项目。');
-    return toolPlan(decision,analysis,{itemId:route.id,command:'归入该项目作为项目记录',targetProjectId:decision.targetProjectId});
+    if(!decision.targetProjectId||!project)return clarification(decision,analysis,'识别为项目进展，但还不能唯一确定目标项目。');
+    return toolPlan(decision,analysis,{itemId:route.id,command:`归入「${project.name}」项目作为项目记录`,targetProjectId:project.id});
   }
   if(destination==='todo'){
     if(!decision.dueDate)return clarification(decision,analysis,'已经识别为待办候选；还缺一个明确截止日期。');
-    const args={itemId:route.id,command:`创建待办，截止 ${decision.dueDate}`};
-    if(decision.targetProjectId)args.targetProjectId=decision.targetProjectId;
-    if(decision.targetProjectId)args.command=`作为项目待办，截止 ${decision.dueDate}`;
-    else args.command=`创建独立待办，截止 ${decision.dueDate}`;
+    if(!isValidDateOnly(decision.dueDate))return clarification(decision,analysis,'已经识别为待办候选，但截止日期无效，请重新确认日期。');
+    if(decision.targetProjectId&&!project)return clarification(decision,analysis,'已经识别为待办候选，但目标项目无法确认。');
+    const args={itemId:route.id,command:`创建独立待办，截止 ${decision.dueDate}`};
+    if(project){
+      args.targetProjectId=project.id;
+      args.command=`放到「${project.name}」项目做成待办，截止 ${decision.dueDate}`;
+    }
     return toolPlan(decision,analysis,args);
   }
   return clarification(decision,analysis);
@@ -120,7 +128,7 @@ export async function planDiaryReviewAI({state={},route={},env=process.env,fetch
     env,fetchImpl
   });
   if(!result?.decision)return null;
-  return normalizeDiaryReviewDecision(result.decision,result.analysis,route);
+  return normalizeDiaryReviewDecision(result.decision,result.analysis,route,{projects});
 }
 
 export function localDiaryReviewPlan({state={},route={}}={}){
@@ -133,7 +141,8 @@ export function localDiaryReviewPlan({state={},route={}}={}){
   const progressSignal=/进展|已完成|完成了|做到|目前|当前|卡点|结果|交付|上线|更新到|推进到/i.test(text);
   const analysisSignal=/分析|复盘|建议|结论|策略|价值|方法|原则|思考|应该|核心是|不是.*而是/i.test(text);
   if(matched.length===1&&progressSignal){
-    return toolPlan({category:'project_progress',destination:'project_note',confidence:.66,reason:'本地回退识别到唯一项目名称和进展表达。',message:'已自动归为项目进展，等你确认后写入项目记录。'},[],{itemId:route.id,command:'归入该项目作为项目记录',targetProjectId:matched[0].id});
+    const project=matched[0];
+    return toolPlan({category:'project_progress',destination:'project_note',confidence:.66,reason:'本地回退识别到唯一项目名称和进展表达。',message:'已自动归为项目进展，等你确认后写入项目记录。'},[],{itemId:route.id,command:`归入「${project.name}」项目作为项目记录`,targetProjectId:project.id});
   }
   if(todoSignal){
     return clarification({category:'todo',destination:'todo',confidence:.58,reason:'本地回退识别到明确行动表达，但没有可靠截止日期。',message:'已经自动归为待办候选；补一个截止日期即可。'},[],'已经自动归为待办候选；补一个截止日期即可。');
