@@ -6,6 +6,7 @@
 - 范围：仓内合同、GetNote v2 实现与测试、macOS 安装器、现网读回
 - 未做：不改产品行为、不读 `.env` / `state.json` / `config.json` 正文、不声称 live GetNote / 飞书 / Joycrew / iPhone 已验收
 - 现网（审查当时）：`http://127.0.0.1:8080/api/health` → `ok=true`，`version=2.0.0`；进程为 `nohup node src/server.mjs`，不是 LaunchAgent
+- 增补：独立运维审查已复核安装回滚、P0 与 `--preserve-runtime`、Joycrew health 探针和文档漂移；GetNote v2 红线仍以本文件 §3.1 为准
 
 ## 0. 总裁决
 
@@ -20,7 +21,7 @@
 | 允许声明 live GetNote / 飞书 / Joycrew / iPhone 已验收 | **NO** |
 | 允许把本审查文档推到 GitHub | **YES** — 不含凭证、不含 `data/p0` |
 
-建议下一刀只做两件事：修 LaunchAgent 失败回滚，以及忽略 `data/p0/`。未批准前不写新功能。
+建议下一刀只做两件事：修 LaunchAgent 失败回滚，以及忽略 `data/p0/`。**在安装器修好之前，不要再跑会 `bootout` 的 `install`。** 未批准前不写新功能。
 
 ## 1. 路径与阶段
 
@@ -85,9 +86,14 @@
    2026-08-16 现场：P0 8 项绿 → bootstrap I/O error → LaunchAgent 消失 → 8080 空窗。  
    `docs/MACOS_ONE_CLICK.md` §8 写「原 LaunchAgent 之前在运行时重新启动」，实现把恢复失败吞掉，与文档不符。  
    测试 `tests/macos-launch-agent-bootstrap.test.mjs` 只断言「不要立即 kickstart」，不覆盖失败回滚。  
-   **改法：** 新 plist 校验通过后再 bootout；恢复 bootstrap 失败必须显式报错，不能 `undefined`。
+   **改法：** 新 plist 校验通过后再 bootout；恢复 bootstrap 失败必须显式报错，不能 `undefined`。回滚成功要以 `launchctl print` + health 为准。
 
-2. **未跟踪 `CLAUDE.md` 与现行 GetNote 合同相反。**  
+2. **`GET /api/health` 的 `joycrew.available` 恒为 `false`，不能当现场探针。**  
+   `src/server.mjs` 健康检查调用 `joycrewClient.status()`，而 `JoycrewClient.status()` 写死 `available:false`。真正探活是 `probe()`，走 `GET /api/joycrew/status`。  
+   现网 `enabled=true, available=false` **不能单独证明** `:4000` 已死（这次碰巧端口确实没进程）。Joycrew 离线隔离本身成立：4000 挂了不影响个人台 `health 200`。  
+   **改法：** loopback / 已登录的 `/api/health` 改调 `probe()`，或删掉恒假的 `available`。
+
+3. **未跟踪 `CLAUDE.md` 与现行 GetNote 合同相反。**  
    现文件写：`当前 main：4c83764`、`Node 20+`、`getnote notes --since-id`、以及「待办从笔记标题与内容提取（不再调用 note todos）」。  
    现行实现与 `docs/PRODUCT_SPEC.md` / `src/getnote-runtime.mjs` 是 `Node 24+`、`--cursor`、`getnote note todos`。  
    它现在未入库；一旦 `git add .` 会把错误进仓路由推到 GitHub。  
@@ -95,8 +101,11 @@
 
 **Optional：**
 
-3. `externalTaskDecisions` 上限 `MAX_DECISIONS=2000`。超出后旧 tombstone 被丢掉，同 `externalId` 可能复活。无测试。个人用量暂可后补。
-4. `PRODUCT_SPEC.md` 标题仍是 v1.4 draft；CHANGELOG 停在 2.0.0，PR #28 未入版本记录。`product.mjs` 仍报 `2.0.0`，无法用版本号区分 `09877cc` 与 `c698133`。LaunchAgent 用 `WORKBENCH_BUILD_COMMIT` 补了这一点，文档没有。
+4. `externalTaskDecisions` 上限 `MAX_DECISIONS=2000`。超出后旧 tombstone 被丢掉，同 `externalId` 可能复活。无测试。个人用量暂可后补。
+5. `PRODUCT_SPEC.md` 标题仍是 v1.4 draft；CHANGELOG 停在 2.0.0，PR #28 未入版本记录。`product.mjs` 仍报 `2.0.0`，无法用版本号区分 `09877cc` 与 `c698133`。LaunchAgent 用 `WORKBENCH_BUILD_COMMIT` 补了这一点，文档没有。
+6. README / `docs/DEPLOYMENT.md` 只写 `npm start` + `:4173`，官方一键 / LaunchAgent / `:44173` 只活在 `MACOS_ONE_CLICK.md`。
+7. `MACOS_ONE_CLICK.md` §4 写「P0 前暂停已有 LaunchAgent」，代码和测试明确禁止预停。
+8. 公开文档含本机路径 `/Users/wanghui/AI-Work-OS`；`.env.example` / README 默认 `ws-dongjue` / `user-chris`（不是密钥，但是可关联身份）。
 
 ### 3.2 Readability
 
@@ -106,7 +115,8 @@
 
 ### 3.3 Architecture
 
-- 个人台与 Joycrew 边界在 V2 基线里清楚：两套任务不互相同步；Joycrew 离线不影响个人台启动。现网 `joycrew.enabled=true`、`available=false`（`:4000` 无进程）符合该合同。
+- 个人台与 Joycrew 边界在 V2 基线里清楚：两套任务不互相同步；Joycrew 离线不影响个人台启动。`:4000` 无进程时个人台仍可 `health 200`，符合 fail-isolation。`/api/health` 上的 `available=false` 不能单独当探活证据，见 §3.1 #2。
+- `--preserve-runtime` **不是**这次停机原因。它只跳过 `JOYCREW_ENABLED=0` 门，并保留 Runtime 键。P0 绿 ≠ 05 完成。
 - 并行叙事未收口：本仓仍是日常入口；`projects/joycrew/sdd/merge-personal-app` 已 accepted「终局只留 joycrew」。两仓继续分头演进会分叉。这是产品决策，不是本 PR 的实现 bug。
 - `_ops/20260815_personal-ai-workbench-deploy/paw` 是另一份旧检出，不要再当运行源。
 - `preserve-runtime` 只改绑定字段，不关 Joycrew / Harness / AI。`macosUpgradeUpdates` + `tests/macos-bootstrap.test.mjs` 覆盖。P0 预检在临时环境里关 Joycrew，与现场保留 Runtime 不冲突。
@@ -118,10 +128,10 @@
 5. **`data/p0/` 未被 gitignore，且含完整 `.env` 备份。**  
    `scripts/macos-bootstrap.mjs` 把升级前 `.env` 写到 `<DATA_DIR>/p0/env-backups/`。  
    本机 `DATA_DIR` 现指向 Application Support，但仓库里仍有未跟踪的 `data/p0/env-backups/.env-before-bootstrap-*.`。  
-   `.gitignore` 只忽略 `data/state.json`、`data/config.json`、`data/backups/`，**不忽略 `data/p0/`**。  
+   审查当时 `.gitignore` 只忽略 `data/state.json`、`data/config.json`、`data/backups/`，**不忽略 `data/p0/`**。  
    `git add .` 或 `git add data` 会把运行时密钥推进这个公开仓。  
-   **本审查提交故意不加入这些文件。**  
-   **改法：** `.gitignore` 增加 `data/p0/`；确认远程从未跟踪过该目录。
+   **本审查提交已把 `data/p0/` 加入 `.gitignore`，且不加入这些文件。**  
+   **改法：** 保持忽略；确认远程从未跟踪过该目录。
 
 **Required：**
 
@@ -149,7 +159,7 @@
 | CI | `ci.yml`：syntax + contract tests + harness e2e + docker smoke（Joycrew 关闭） |
 | 现网 health | `ok=true`，`v2.0.0`，workspace=`/Users/wanghui/AI-Work-OS` |
 | 现网 AI / Harness | 开启；Harness `read_only` / `idle` |
-| 现网 Joycrew | `enabled=true`，`configured=true`，`available=false` |
+| 现网 Joycrew | `enabled=true`，`configured=true`；`/api/health.available` 恒假，不能当探针；`:4000` 当时无进程 |
 | LaunchAgent | `launchctl print` 找不到服务（exit 113） |
 | live GetNote 同步 | 本审查未跑 |
 
@@ -168,7 +178,9 @@
 | `docs/PRODUCT_SPEC.md` | 标题 `v1.4 draft` | 内容已含 Task Sync v2；权威顺序在 V2 基线 |
 | `CHANGELOG.md` | 止于 2.0.0 / 2026-08-14 | main 此后至少 95 个提交，含 PR #28 |
 | `src/product.mjs` | `PRODUCT_VERSION='2.0.0'` | 无法区分本机旧进程 `09877cc` 与现 `c698133` |
+| `docs/MACOS_ONE_CLICK.md` §4 | P0 前暂停已有 LaunchAgent | 升级期保持旧服务；测试禁止预停 |
 | `docs/MACOS_ONE_CLICK.md` §8 | 失败时恢复旧 LaunchAgent | 恢复 bootstrap 失败被吞掉 |
+| `README.md` / `docs/DEPLOYMENT.md` | 只写 `npm start` + `:4173` | 本机正式路径是 `install-macos.command` + LaunchAgent |
 | 工作台 `projects/INDEX.md` | 无本项目 | 代码仓已是日常入口 |
 
 ## 6. 05 上线缺口
@@ -181,15 +193,16 @@
 4. `data/p0/` 不会进入 git。
 5. Joycrew 现场验收另开，不和本次 GetNote v2 绑定。
 
-当前：1/2 不满足（nohup 顶着 8080）；3 已在 08-16 打脸；4 靠人工不 `git add data`；5 未做。
+当前：1/2 不满足（nohup 顶着 8080）；3 已在 08-16 打脸；4 本审查已 ignore `data/p0/`；5 未做。
 
 ## 7. 建议顺序
 
-1. `.gitignore` 增加 `data/p0/`，并确认 GitHub 上没有该目录。
-2. 修 `install()`：先写新 plist，bootstrap 成功后再认为切换完成；恢复失败要抛错。补测试。
-3. 在图形会话 Terminal 重装 LaunchAgent，读回 `launchctl print` + health。
-4. 重写或删除未跟踪 `CLAUDE.md`；补 CHANGELOG / SPEC 标题。
-5. Chris 拍板：是否建档 `projects/personal-ai-workbench/`；本仓是否继续当唯一入口；Joycrew `:4000` 现在要不要拉。
+1. `.gitignore` 增加 `data/p0/`（本审查已做），并确认 GitHub 上没有该目录。
+2. 修 `install()`：先写新 plist，bootstrap 成功后再认为切换完成；恢复失败要抛错。补测试。**修好之前不要再跑会 bootout 的 install。**
+3. 在图形会话 Terminal 重装 LaunchAgent，读回 `launchctl print` + health。现网 nohup 先保住，避免二次空窗。
+4. health 与文档对齐：`/api/health` 不要再露出恒假的 `joycrew.available`。
+5. 重写或删除未跟踪 `CLAUDE.md`；补 CHANGELOG / SPEC 标题；README/DEPLOYMENT 链到一键安装。
+6. Chris 拍板：是否建档 `projects/personal-ai-workbench/`；本仓是否继续当唯一入口；Joycrew `:4000` 现在要不要拉。
 
 不要做：06 SEO；在安装第二次失败未根治前再包一层安装器；把 `data/p0`、`.env`、`preview.html` 原样进仓。
 
