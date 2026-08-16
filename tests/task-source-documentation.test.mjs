@@ -4,10 +4,12 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('v3 normative source contract makes Feishu primary, Workbench state truth, and AI confirm-before-execute',async()=>{
+test('v3 normative source contract makes mixed Feishu diary primary, Workbench state truth, and AI confirm-before-execute',async()=>{
   const contract=await read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md');
   assert.match(contract,/Normative \/ 当前有效/);
-  assert.match(contract,/飞书云文档 → Workbench Inbox → AI 自动分析 → 用户确认 → Workbench 执行/);
+  assert.match(contract,/飞书工作日记 → 增量识别新增\/变化内容 → Workbench 待处理流 → AI 分类\/建议 → 用户确认 → Workbench 执行/);
+  assert.match(contract,/mixed diary/);
+  assert.match(contract,/待办 \/ 项目进展 \/ 分析思考 \/ 日常记录 \/ 需要用户决定/);
   assert.match(contract,/\/api\/inbox\/sync/);
   assert.match(contract,/\/api\/ai\/plan/);
   assert.match(contract,/\/api\/ai\/execute \{ confirmed: true \}/);
