@@ -4,28 +4,34 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('v3 normative source contract makes mixed Feishu diary primary, deduped, and todo-only before confirmed execution',async()=>{
+test('v3 normative source contract makes mixed Feishu diary primary, first-seen and atomic-todo-only before confirmed Todo creation',async()=>{
   const contract=await read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md');
   assert.match(contract,/Normative \/ 当前有效/);
-  assert.match(contract,/飞书工作日记 → 精确去重 → AI 分类 → 仅待办进入 Workbench 待办流 → 用户确认 → Workbench Todo/);
+  assert.match(contract,/个人工作事实：飞书工作日记/);
+  assert.match(contract,/用户主动同步/);
+  assert.match(contract,/first-seen \/ append-only/);
+  assert.match(contract,/单条日记 block 提取 0–5 个原子待办/);
+  assert.match(contract,/只有原子待办候选进入 Workbench 待处理流/);
+  assert.match(contract,/用户补齐必要字段并确认/);
+  assert.match(contract,/Workbench Todo/);
   assert.match(contract,/mixed diary/);
-  assert.match(contract,/待办 \/ 项目进展 \/ 分析思考 \/ 日常记录 \/ 需要用户决定/);
+  assert.match(contract,/原始飞书 block 是证据单元，不等于任务单元/);
+  assert.match(contract,/不把整个飞书段落直接当作 Todo/);
+  assert.match(contract,/一段允许提取 0–5 个原子待办/);
+  assert.match(contract,/feishu_todo_candidate/);
   assert.match(contract,/Unicode NFKC/);
   assert.match(contract,/不得用模糊语义相似度自动删除两个不同事项/);
-  assert.match(contract,/项目进展[\s\S]*不创建 Todo/);
-  assert.match(contract,/分析思考[\s\S]*不复制成 Workbench 备忘/);
-  assert.match(contract,/日常记录[\s\S]*不复制成 Workbench 备忘/);
-  assert.match(contract,/非待办过滤日志不得保存飞书原文/);
+  assert.match(contract,/0 个待办[\s\S]*不创建 Todo/);
+  assert.match(contract,/不创建 Note/);
+  assert.match(contract,/不写项目记录/);
+  assert.match(contract,/活动日志[\s\S]*不得复制私人日记正文/);
   assert.match(contract,/\/api\/inbox\/sync/);
-  assert.match(contract,/\/api\/ai\/plan/);
-  assert.match(contract,/\/api\/ai\/execute \{ confirmed: true \}/);
-  assert.match(contract,/Workbench 本地 `state\.json`.*真相源/);
-  assert.match(contract,/不得自动加入 Today/);
+  assert.match(contract,/不猜截止日期/);
   assert.match(contract,/不得自动新建项目/);
-  assert.match(contract,/不得仅凭猜测删除来源事项/);
+  assert.match(contract,/不得自动加入 Today/);
+  assert.match(contract,/不删除或改写飞书日记原文/);
+  assert.match(contract,/Workbench 本地 `state\.json`.*真相源/);
   assert.match(contract,/今日与收件箱/);
-  assert.match(contract,/最近工作现场.*项目进度/);
-  assert.match(contract,/覆盖并取代[\s\S]*GetNote Task Sync v2/);
 });
 
 test('v3 normative source contract keeps GetNote only as confirmed self-media content ingestion',async()=>{
@@ -34,15 +40,13 @@ test('v3 normative source contract keeps GetNote only as confirmed self-media co
     read('src/getnote-content-sync.mjs'),
     read('src/mcp/content-tools.mjs')
   ]);
-  assert.match(contract,/得到大脑不再进入个人待办主链路/);
+  assert.match(contract,/得到大脑只保留为自媒体内容来源/);
+  assert.match(contract,/不得再把得到大脑 `meeting_todos` 作为个人待办的产品级主来源/);
   assert.match(contract,/getnote_content_status/);
   assert.match(contract,/getnote_content_sync/);
-  assert.match(contract,/得到大脑内容/);
-  assert.match(contract,/不会创建 Todo|不会创建待办/);
-  assert.match(contract,/不会进入 Inbox/);
-  assert.match(contract,/不会加入 Today/);
-  assert.match(contract,/不会写回 GetNote/);
-  assert.match(contract,/fail closed/);
+  assert.match(contract,/用户确认后同步可验证真实原文到本地内容库/);
+  assert.match(contract,/external_tasks_sync[\s\S]*旧待办工具不得重新注册为当前个人任务主入口/);
+  assert.match(contract,/<WORKSPACE_ROOT>\/<业务序号>_自媒体\/得到大脑内容\//);
   assert.match(contentSync,/CONTENT_FOLDER='得到大脑内容'/);
   assert.match(contentSync,/safeAtomicWrite/);
   assert.match(contentSync,/createGetnoteNoteClient/);
@@ -50,27 +54,35 @@ test('v3 normative source contract keeps GetNote only as confirmed self-media co
   assert.match(contentTools,/requiresConfirmation:true/);
 });
 
-test('interactive registry exposes Feishu and content tools while legacy GetNote task tools stay compatibility-only',async()=>{
-  const [contract,registry,legacyTools,taskCli,runtime]=await Promise.all([
+test('interactive registry exposes Feishu extraction, initialization, batch and content tools while legacy GetNote task tools stay compatibility-only',async()=>{
+  const [contract,registry,legacyTools,taskCli,runtime,diaryTool,batchTool]=await Promise.all([
     read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md'),
     read('src/mcp/registry.mjs'),
     read('src/mcp/external-task-tools.mjs'),
     read('src/task-cli.mjs'),
-    read('src/getnote-runtime.mjs')
+    read('src/getnote-runtime.mjs'),
+    read('src/mcp/diary-extraction-tools.mjs'),
+    read('src/mcp/inbox-batch-tools.mjs')
   ]);
   assert.match(registry,/const workbenchTools=createWorkbenchTools\(\)/);
+  assert.match(registry,/createFeishuInitializeTools/);
+  assert.match(registry,/createInboxBatchTools/);
+  assert.match(registry,/createDiaryExtractionTools/);
   assert.match(registry,/createContentTools/);
   assert.doesNotMatch(registry,/createExternalTaskTools/);
   assert.doesNotMatch(registry,/planExternalTaskMessage/);
-  assert.match(contract,/`feishu_inbox_sync` \| 是 \| 是/);
-  assert.match(contract,/`getnote_content_sync` \| 是 \| 是/);
-  assert.match(contract,/`external_tasks_sync` \| 否/);
-  assert.match(contract,/“同步得到大脑待办” → clarification/);
+  assert.match(contract,/兼容 MCP 工具名可继续保留 `feishu_inbox_sync`/);
+  assert.match(contract,/`diary_extract_todos`/);
+  assert.match(contract,/`getnote_content_sync`/);
+  assert.match(contract,/`external_tasks_sync` \/ `external_task_integration_update` 等旧待办工具不得重新注册/);
+  assert.match(diaryTool,/name:'diary_extract_todos'/);
+  assert.match(diaryTool,/requiresConfirmation:false/);
+  assert.match(batchTool,/name:'inbox_batch_delete'/);
+  assert.match(batchTool,/requiresConfirmation:true/);
 
   for(const name of ['external_task_integration_read','external_task_integration_update','external_tasks_sync','daily_summary_publish']){
     assert.match(legacyTools,new RegExp(name));
   }
-  assert.match(contract,/旧模块可暂时留在代码库用于迁移、历史数据兼容和回归/);
 
   assert.match(taskCli,/createGetnoteReader/);
   assert.match(taskCli,/reader\.listNotes/);
