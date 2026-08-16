@@ -11,7 +11,7 @@ test('desktop center work surface is independently scrollable',async()=>{
   assert.match(css,/\.sidebar\{height:100vh;min-height:0;overflow-y:auto;/);
 });
 
-test('classification pools expose automatic buckets without subtree observer loops',async()=>{
+test('classification pool keeps todos active and automatically removes non-todo Feishu items from the local queue',async()=>{
   const [index,script,css,migration]=await Promise.all([
     fsp.readFile('public/index.html','utf8'),
     fsp.readFile('public/workbench-v3-auto-classify.js','utf8'),
@@ -21,6 +21,12 @@ test('classification pools expose automatic buckets without subtree observer loo
   assert.match(index,/workbench-v3-auto-classify\.js/);
   assert.ok(index.indexOf('workbench-v3-review-migration.js')<index.indexOf('workbench-v3.js'));
   for(const label of ['待办候选','项目进展','分析思考','日常记录','需要决定','分析中'])assert.match(script,new RegExp(label));
+  assert.match(script,/AUTO_FILTER_NON_TODO=new Set\(\['project','analysis','daily'\]\)/);
+  assert.match(script,/v3AutoFilter='active'/);
+  assert.match(script,/category==='todo'\|\|category==='pending'/);
+  assert.match(script,/fetch\('\/api\/inbox\/command'/);
+  assert.match(script,/command:'删除'/);
+  assert.match(script,/已过滤非待办/);
   assert.match(script,/observe\(main,\{childList:true\}\)/);
   assert.doesNotMatch(script,/observe\(main,\{childList:true,subtree:true\}\)/);
   assert.match(css,/\.v3-pool-filters/);
