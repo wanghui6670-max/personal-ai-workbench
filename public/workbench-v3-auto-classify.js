@@ -3,17 +3,17 @@ let v3AutoScheduled=false;
 let v3AutoObserver=null;
 
 const CATEGORY_META=Object.freeze({
-  todo:{label:'待办候选',tone:'amber'},
-  pending:{label:'提取中',tone:'muted'},
-  decision:{label:'需要决定',tone:'red'}
+  todo:{label:'飞书待办',tone:'amber'},
+  decision:{label:'需要决定',tone:'red'},
+  legacy:{label:'旧版日记项',tone:'muted'}
 });
 
 function inferCategory(item){
+  const source=item.dataset.v3Source||'';
   const label=item.querySelector('.v3-ai-label')?.textContent||'';
-  const reason=item.querySelector('.v3-ai-reason')?.textContent||'';
-  const text=`${label} ${reason}`;
-  if(/AI 待办提取|正在|等待进入|等待你点击|提取队列/.test(text))return'pending';
-  if(/待办候选|待补截止日期|确认创建待办/.test(text))return'todo';
+  if(source==='feishu_todo_candidate'||(source==='feishu_doc'&&/旧版/.test(item.querySelector('.v3-item-meta')?.textContent||'')))return'legacy';
+  if(/需要你决定/.test(label))return'decision';
+  if(source==='feishu_todo'||/飞书待办/.test(item.querySelector('.v3-item-meta')?.textContent||''))return'todo';
   return'decision';
 }
 
@@ -30,16 +30,16 @@ function ensureCategoryPill(item,category){
 
 function filterBarHtml(counts){
   const buttons=[
-    ['active','待办流',(counts.todo||0)+(counts.pending||0)],
-    ['todo','待办',counts.todo||0],
-    ['pending','提取中',counts.pending||0],
-    ['decision','需要决定',counts.decision||0]
+    ['active','待办流',(counts.todo||0)+(counts.decision||0)],
+    ['todo','飞书待办',counts.todo||0],
+    ['decision','需要决定',counts.decision||0],
+    ['legacy','旧版待清理',counts.legacy||0]
   ];
   return buttons.map(([key,label,count])=>`<button type="button" class="v3-pool-filter${v3AutoFilter===key?' active':''}" data-v3-pool="${key}">${label}<span>${count}</span></button>`).join('');
 }
 
 function visibleFor(category){
-  if(v3AutoFilter==='active')return category==='todo'||category==='pending';
+  if(v3AutoFilter==='active')return category==='todo'||category==='decision';
   return category===v3AutoFilter;
 }
 
