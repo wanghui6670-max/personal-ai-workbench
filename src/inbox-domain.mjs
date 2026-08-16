@@ -5,8 +5,6 @@ import { inboxContentHash, normalizeInboxAcks } from './inbox-ack.mjs';
 import { normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
 
 const defaultFeishuJournalClient=createFeishuJournalClient();
-const MIXED_DIARY_BOOTSTRAP_HEAD=30;
-const MIXED_DIARY_BOOTSTRAP_TAIL=30;
 
 function feishuSyncSummary(config,extra={}){
   const source=config?.dataSource;
@@ -50,27 +48,28 @@ function dedupeRemoteItems(items){
   return{unique,duplicates};
 }
 
-function mixedDiaryBootstrapSelection(items){
-  if(items.length<=MIXED_DIARY_BOOTSTRAP_HEAD+MIXED_DIARY_BOOTSTRAP_TAIL)return new Set(items.map(item=>item.blockId));
-  const ids=new Set();
-  for(const item of items.slice(0,MIXED_DIARY_BOOTSTRAP_HEAD))ids.add(item.blockId);
-  for(const item of items.slice(-MIXED_DIARY_BOOTSTRAP_TAIL))ids.add(item.blockId);
-  return ids;
-}
-
 function applyRemoteMetadata(local,remote,mode){
-  local.feishuMode=mode||'inbox_section';
+  local.feishuMode=mode||'todo_only';
   if(Array.isArray(remote.headingPath)&&remote.headingPath.length)local.feishuHeadingPath=[...remote.headingPath];
   else delete local.feishuHeadingPath;
   if(remote.tag)local.feishuTag=remote.tag;
   else delete local.feishuTag;
   local.feishuExplicitInbox=remote.explicitInbox===true;
+  local.feishuExplicitTodo=true;
+  if(remote.todoKind)local.feishuTodoKind=remote.todoKind;
+  else delete local.feishuTodoKind;
+}
+
+function legacyDiaryBlockId(item){
+  if(item?.source==='feishu_todo_candidate')return item.feishuSourceBlockId||null;
+  if(item?.source==='feishu_doc'&&item.feishuMode==='mixed_diary')return item.feishuBlockId||null;
+  return null;
 }
 
 export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,initialize=false}={}){
   const config=await store.readConfig();
   if(!sourceConfigured(config.dataSource)){
-    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,initialized:Boolean(initialize),reason:'not_configured'});
+    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,cleanedLegacy:0,initialized:Boolean(initialize),reason:'not_configured'});
   }
 
   let fetched;
@@ -90,24 +89,58 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
     throw error;
   }
 
-  const allRemoteItems=(fetched.items||[]).map(normalizeRemoteItem).filter(item=>item.blockId&&item.text);
+  const allRemoteItems=(fetched.items||[])
+    .map(normalizeRemoteItem)
+    .filter(item=>item.blockId&&item.text&&item.explicitTodo!==false);
   const {unique:uniqueRemoteItems,duplicates:duplicateRemoteItems}=dedupeRemoteItems(allRemoteItems);
-  const firstMixedSync=!initialize&&fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
-  const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(uniqueRemoteItems):null;
-  const remoteItems=bootstrapIds?uniqueRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):uniqueRemoteItems;
-  const baselineItems=bootstrapIds?uniqueRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
+  const remoteTodoBlockIds=new Set(uniqueRemoteItems.map(item=>item.blockId));
   let imported=0;
-  let baselined=0;
   let deduped=duplicateRemoteItems.length;
   let seenSkipped=0;
+  let cleanedLegacy=0;
 
   await store.updateState(state=>{
     state.inboxAcks=initialize?[]:normalizeInboxAcks(state.inboxAcks);
+
+    const legacyItemIds=new Set();
+    const legacyBlockIds=new Set();
+    const kept=[];
+    for(const item of state.inbox||[]){
+      const legacyBlock=legacyDiaryBlockId(item);
+      if(legacyBlock){
+        legacyItemIds.add(item.id);
+        legacyBlockIds.add(legacyBlock);
+        cleanedLegacy+=1;
+        continue;
+      }
+      if(item.source==='feishu_doc'&&item.feishuMode!=='mixed_diary'){
+        item.source='feishu_todo';
+        item.feishuMode='todo_only';
+        item.feishuExplicitTodo=true;
+      }
+      kept.push(item);
+    }
+    state.inbox=kept;
+    if(legacyItemIds.size){
+      state.confirmations=(state.confirmations||[]).filter(entry=>!legacyItemIds.has(entry.inboxId));
+    }
+
+    // 旧版曾把整篇日记的 block 都写进 ACK。迁移时，仅对“当前确实是显式待办”的
+    // 旧来源释放 ACK，让它能按新 todo-only 合同重新进入；普通日记的 ACK 继续保留。
+    if(!initialize&&legacyBlockIds.size){
+      state.inboxAcks=state.inboxAcks.filter(ack=>!(legacyBlockIds.has(ack.blockId)&&remoteTodoBlockIds.has(ack.blockId)));
+    }
+    if(cleanedLegacy){
+      addActivity(state,{
+        type:'feishu_todo_only_migrated',
+        text:`待办同步切换为飞书明确待办：撤下旧版日记解析暂存 ${cleanedLegacy} 条；飞书原文未改。`
+      });
+    }
+
     const ackByBlock=new Map(state.inboxAcks.map(item=>[item.blockId,item]));
     const localByBlock=new Map(
       state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item])
     );
-    const knownExactHashes=new Set(state.inboxAcks.map(item=>item.contentHash).filter(Boolean));
     const knownDedupeHashes=new Set();
     for(const item of state.inbox)if(item?.text)knownDedupeHashes.add(inboxDedupeHash(item.text));
     for(const todo of state.todos||[]){
@@ -126,17 +159,6 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
       return contentHash;
     };
 
-    for(const remote of baselineItems){
-      if(ackByBlock.has(remote.blockId)){
-        seenSkipped+=1;
-        continue;
-      }
-      const contentHash=ensureAck(remote);
-      knownExactHashes.add(contentHash);
-      knownDedupeHashes.add(inboxDedupeHash(remote.text));
-      baselined+=1;
-    }
-
     for(const {item:remote} of duplicateRemoteItems){
       if(ackByBlock.has(remote.blockId)){
         seenSkipped+=1;
@@ -145,28 +167,26 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
       ensureAck(remote);
     }
 
-    for(const remote of remoteItems){
+    for(const remote of uniqueRemoteItems){
       const priorAck=ackByBlock.get(remote.blockId);
       if(priorAck){
         seenSkipped+=1;
         continue;
       }
 
-      const contentHash=inboxContentHash(remote.text);
       const dedupeHash=inboxDedupeHash(remote.text);
       const local=localByBlock.get(remote.blockId);
       if(local){
-        applyRemoteMetadata(local,remote,fetched.mode);
+        local.source='feishu_todo';
+        applyRemoteMetadata(local,remote,'todo_only');
         ensureAck(remote);
-        knownExactHashes.add(contentHash);
         knownDedupeHashes.add(dedupeHash);
         seenSkipped+=1;
         continue;
       }
 
-      if(knownExactHashes.has(contentHash)||knownDedupeHashes.has(dedupeHash)){
+      if(knownDedupeHashes.has(dedupeHash)){
         ensureAck(remote);
-        knownExactHashes.add(contentHash);
         knownDedupeHashes.add(dedupeHash);
         deduped+=1;
         continue;
@@ -175,30 +195,31 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
       const item={
         id:newId('in'),
         text:remote.text,
-        source:'feishu_doc',
+        source:'feishu_todo',
         feishuBlockId:remote.blockId,
-        feishuMode:fetched.mode||'inbox_section',
+        feishuMode:'todo_only',
         ...(Array.isArray(remote.headingPath)&&remote.headingPath.length?{feishuHeadingPath:[...remote.headingPath]}:{}),
         ...(remote.tag?{feishuTag:remote.tag}:{}),
         feishuExplicitInbox:remote.explicitInbox===true,
+        feishuExplicitTodo:true,
+        ...(remote.todoKind?{feishuTodoKind:remote.todoKind}:{}),
         ...(remote.captureId?{captureId:remote.captureId}:{}),
         createdAt:nowIso()
       };
       state.inbox.unshift(item);
       ensureAck(remote);
-      knownExactHashes.add(contentHash);
       knownDedupeHashes.add(dedupeHash);
       imported+=1;
       addActivity(state,{
         type:initialize?'inbox_initialized':'inbox_synced',
         inboxId:item.id,
-        text:initialize?'初始化导入一条飞书日记内容。':fetched.mode==='mixed_diary'?'从飞书日记同步一条新增内容。':'从飞书收件箱同步一条新事项。'
+        text:initialize?'初始化导入一条飞书明确待办。':'从飞书云文档同步一条明确待办。'
       });
     }
 
-    // Append-only source contract: previously seen block IDs are permanent history.
-    // Remote edits/deletions never mutate or re-open Workbench state. The explicit
-    // initialize mode is the only path allowed to rebuild the source acknowledgement baseline.
+    // Todo-only source contract: only explicit todo blocks enter Workbench.
+    // Already-seen block IDs remain append-only history; normal remote edits/deletes do not
+    // silently mutate Workbench state. Reinitialize remains the explicit baseline reset path.
   });
 
   const completedAt=nowIso();
@@ -216,16 +237,17 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
 
   return feishuSyncSummary(await store.readConfig(),{
     imported,
-    removed:0,
+    removed:cleanedLegacy,
     updated:0,
     deduped,
     seenSkipped,
     remoteCount:allRemoteItems.length,
     uniqueRemoteCount:uniqueRemoteItems.length,
     sectionFound:fetched.sectionFound,
-    mode:fetched.mode||'inbox_section',
-    baselined,
-    firstMixedSync,
+    mode:'todo_only',
+    baselined:0,
+    firstMixedSync:false,
+    cleanedLegacy,
     initialized:Boolean(initialize)
   });
 }
@@ -243,11 +265,11 @@ export async function addInbox({
   const config=await store.readConfig();
   let remote=null;
   let resolvedSource=source;
-  if(source!=='feishu_doc'&&sourceConfigured(config.dataSource)){
+  if(source!=='feishu_doc'&&source!=='feishu_todo'&&sourceConfigured(config.dataSource)){
     remote=await client.appendAndFetch(config.dataSource,normalized,{
       ...(normalizedCaptureId?{captureId:normalizedCaptureId}:{})
     });
-    resolvedSource='feishu_doc';
+    resolvedSource='feishu_todo';
   }
 
   const resolvedCaptureId=remote?.item?.captureId||normalizedCaptureId;
@@ -260,7 +282,8 @@ export async function addInbox({
     ...(remote?.mode?{feishuMode:remote.mode}:{}),
     ...(Array.isArray(remote?.item?.headingPath)&&remote.item.headingPath.length?{feishuHeadingPath:[...remote.item.headingPath]}:{}),
     ...(remote?.item?.tag?{feishuTag:remote.item.tag}:{}),
-    ...(remote?.item?{feishuExplicitInbox:remote.item.explicitInbox===true}:{}),
+    ...(remote?.item?{feishuExplicitInbox:remote.item.explicitInbox===true,feishuExplicitTodo:true}:{}),
+    ...(remote?.item?.todoKind?{feishuTodoKind:remote.item.todoKind}:{}),
     ...(resolvedCaptureId?{captureId:resolvedCaptureId}:{})
   };
   await store.updateState(state=>{
