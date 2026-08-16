@@ -25,6 +25,7 @@
   function inboxNodes(){return [...document.querySelectorAll('#v3-dashboard .v3-inbox-item')];}
   function itemNode(id){return inboxNodes().find(node=>node.dataset.batchId===id)||null;}
   function visibleNodes(){return inboxNodes().filter(node=>!node.hidden);}
+  function stableItemId(node,fallback){return node.querySelector('[data-manual-dismiss]')?.dataset?.manualDismiss||fallback?.id||'';}
   function wait(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
   async function waitUntil(predicate,{timeoutMs=25000,intervalMs=160}={}){
     const started=Date.now();
@@ -35,8 +36,9 @@
     return false;
   }
 
-  function ensureItemCheckbox(node,item){
-    node.dataset.batchId=item.id;
+  function ensureItemCheckbox(node,id){
+    if(!id)return;
+    node.dataset.batchId=id;
     node.classList.add('v3-batch-selectable');
     let label=node.querySelector('.v3-batch-check');
     if(!label){
@@ -45,13 +47,13 @@
       label.title='选择这条记录进行批量处理';
       const input=document.createElement('input');
       input.type='checkbox';
-      input.dataset.batchSelect=item.id;
+      input.dataset.batchSelect=id;
       label.appendChild(input);
       node.prepend(label);
     }
     const input=label.querySelector('input');
-    input.dataset.batchSelect=item.id;
-    input.checked=selectedIds.has(item.id);
+    input.dataset.batchSelect=id;
+    input.checked=selectedIds.has(id);
     input.disabled=busy;
   }
 
@@ -91,8 +93,8 @@
       const inbox=Array.isArray(state?.inbox)?state.inbox:[];
       const nodes=inboxNodes();
       nodes.forEach((node,index)=>{
-        const item=inbox[index];
-        if(item)ensureItemCheckbox(node,item);
+        const id=stableItemId(node,inbox[index]);
+        if(id)ensureItemCheckbox(node,id);
       });
       renderBatchBar();
     }finally{attachObserver();}
