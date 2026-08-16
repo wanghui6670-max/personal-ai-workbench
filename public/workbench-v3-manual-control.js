@@ -8,9 +8,9 @@
   let enhanceScheduled=false;
   let statePromise=null;
 
-  // A normal page reload must never resume an old automatic diary-classification run.
+  // A normal page reload must never resume an old automatic diary extraction run.
   // The only exception is the single reload immediately following an explicit
-  // one-time initialization import.
+  // initialization/reinitialization import.
   try{
     classificationRun=sessionStorage.getItem(INIT_ANALYZE_ONCE)==='1';
     sessionStorage.removeItem(INIT_ANALYZE_ONCE);
@@ -56,7 +56,7 @@
       const body=requestBody(init);
       if(body?.view==='inbox-review'&&!classificationRun){
         const id=String(body.id||'');
-        if(!manualAnalyzeIds.has(id))return jsonResponse({error:'请先点击“同步飞书”，或手动点这条记录的“重新分析”。'});
+        if(!manualAnalyzeIds.has(id))return jsonResponse({error:'请先点击“同步飞书”，或手动点这条原始日记的“重新提取”。'});
         manualAnalyzeIds.delete(id);
       }
     }
@@ -68,17 +68,17 @@
 
   function sourceLabelFix(){
     for(const pill of document.querySelectorAll('.v3-item-meta .pill')){
-      if(pill.textContent===IDLE_SOURCE)pill.textContent='飞书同步';
+      if(pill.textContent===IDLE_SOURCE)pill.textContent='飞书日记';
     }
   }
   function pendingCopyFix(){
     if(classificationRun)return;
     for(const node of document.querySelectorAll('.v3-ai-review.pending .v3-ai-reason')){
-      if(/等待进入有界分析队列|正在用/.test(node.textContent||''))node.textContent='等待你点击“同步飞书”后开始去重和分类。';
+      if(/等待进入有界(?:分析|提取)队列|正在用|正在从当前日记段落/.test(node.textContent||''))node.textContent='等待你点击“同步飞书”后开始去重和待办提取。';
     }
     for(const button of document.querySelectorAll('[data-v3-action="sync-feishu"]')){
       if(!button.disabled&&button.textContent!=='同步飞书')button.textContent='同步飞书';
-      button.title='只有点击这里才会拉取飞书；成功后才开始去重和分类。';
+      button.title='只有点击这里才会拉取飞书；成功后才开始去重并从日记中提取真正待办。';
     }
   }
   async function currentState(){
@@ -93,13 +93,14 @@
     if(!items.length)return;
     const state=await currentState();
     const inbox=Array.isArray(state?.inbox)?state.inbox:[];
+    const byId=new Map(inbox.map(item=>[item.id,item]));
     items.forEach((node,index)=>{
-      const item=inbox[index];if(!item||node.querySelector('[data-manual-dismiss]'))return;
+      const item=byId.get(node.dataset.v3Id)||inbox[index];if(!item||node.querySelector('[data-manual-dismiss]'))return;
       let actions=node.querySelector('.v3-actions');
       if(!actions){actions=document.createElement('div');actions.className='v3-actions';node.appendChild(actions);}
       const button=document.createElement('button');
       button.type='button';button.className='btn small';button.dataset.manualDismiss=item.id;
-      button.textContent='删除本地';button.title=item.source==='feishu_doc'?'仅从 Workbench 撤下；飞书原文保留，这个来源以后不会重新导入。':'从 Workbench 本地待处理区删除。';
+      button.textContent='删除本地';button.title=(item.source==='feishu_doc'||item.source==='feishu_todo_candidate')?'仅从 Workbench 撤下；飞书原文保留，这个来源以后不会重新导入。':'从 Workbench 本地待处理区删除。';
       actions.appendChild(button);
     });
   }
