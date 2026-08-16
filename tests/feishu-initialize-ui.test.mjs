@@ -13,10 +13,11 @@ test('Feishu initialization stays explicit and remains available as reinitialize
     read('src/mcp/feishu-initialize-tools.mjs')
   ]);
   assert.match(index,/workbench-v3-initialize\.js/);
-  assert.match(initializer,/初始化导入并分析/);
+  assert.match(initializer,/初始化导入并提取待办/);
   assert.match(initializer,/重新初始化/);
   assert.match(initializer,/Boolean\(source\.initialImportAt\)/);
   assert.doesNotMatch(initializer,/source\.initialImportAt\)\{existing\?\.remove\(\);return;/);
+  assert.match(initializer,/提取 0-5 个真正可执行的待办/);
   assert.match(initializer,/feishu_initial_import/);
   assert.match(initializer,/confirmed:true/);
   assert.match(initializer,/__WORKBENCH_ARM_INITIAL_ANALYSIS__/);
