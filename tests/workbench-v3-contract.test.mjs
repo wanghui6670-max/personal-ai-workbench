@@ -47,6 +47,16 @@ test('Feishu auto review is bounded, scoped to one item and reuses unchanged ses
   assert.doesNotMatch(script,/inboxPlans\.clear\(\)/,'sync must retain unchanged cached reviews');
 });
 
+test('v3 enhancement observer cannot self-trigger through descendant rewrites',async()=>{
+  const script=await fsp.readFile('public/workbench-v3.js','utf8');
+  assert.match(script,/new MutationObserver\(schedule\)\.observe\(appRoot,\{childList:true\}\)/);
+  assert.doesNotMatch(script,/subtree:true/,'observing the whole #app subtree lets v3 DOM enhancements recursively trigger themselves');
+  assert.match(script,/requestAnimationFrame\(\(\)=>\{scheduled=false;renderEnhancements\(\);\}\)/);
+  assert.match(script,/today\.innerHTML!==wanted/);
+  assert.match(script,/h\.textContent!==title/);
+  assert.match(script,/button\.textContent!=='同步飞书收件箱'/);
+});
+
 test('legacy GetNote task UI no longer hijacks Feishu sync or settings',async()=>{
   const script=await fsp.readFile('public/getnote-integration.js','utf8');
   assert.doesNotMatch(script,/external_tasks_sync/);
