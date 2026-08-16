@@ -1,7 +1,8 @@
 import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
-import { enforceInboxReviewPlan, inboxReviewPlannerMessage, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
+import { enforceInboxReviewPlan, inboxReviewPlannerMessage, isInboxReviewRoute, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
+import { localDiaryReviewPlan, planDiaryReviewAI } from '../diary-review-planner.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createContentTools, planContentMessage } from './content-tools.mjs';
@@ -81,6 +82,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     const modelState=scopedInboxReviewState(derived,route);
     const modelTools=scopedInboxReviewTools(list(),route);
     const plannerMessage=inboxReviewPlannerMessage(derived,route,message);
+    const diaryReview=isInboxReviewRoute(route)&&modelState.inbox?.[0]?.text?.startsWith('[飞书混合日记');
     let planned=null;
     let planner='local_fallback';
     let plannerModel=null;
@@ -88,10 +90,13 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       try{
         const runtime=aiRuntimeConfig();
         plannerModel=runtime.model||null;
-        planned=await planAIConsole({message:plannerMessage,state:modelState,tools:modelTools,route});
+        planned=diaryReview
+          ?await planDiaryReviewAI({state:modelState,route})
+          :await planAIConsole({message:plannerMessage,state:modelState,tools:modelTools,route});
         if(planned)planner='model';
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
+    if(!planned&&diaryReview)planned=localDiaryReviewPlan({state:modelState,route});
     if(!planned)planned=planJoycrewMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planContentMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planProjectRecordMessage({message:plannerMessage,state:modelState});
@@ -99,16 +104,16 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人工作事项主来源是飞书日记；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人工作事项主来源是飞书日记；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
     }
     let input=planned.args||{};
     if(tool){
       try{input=validateArguments(tool,input);}catch(error){
-        return {kind:'clarification',message:'模型提出的参数未通过本地校验，我没有执行。请补齐或改写明确参数。',toolName:null,args:{},reason:error.message,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+        return {kind:'clarification',message:'模型提出的参数未通过本地校验，我没有执行。请补齐或改写明确参数。',toolName:null,args:{},reason:error.message,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
       }
       const guarded=planGuard(tool,input,derived);
       if(guarded){
-        return {kind:'clarification',message:guarded.message,toolName:null,args:{},reason:guarded.reason,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+        return {kind:'clarification',message:guarded.message,toolName:null,args:{},reason:guarded.reason,tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
       }
     }
     return {...planned,args:input,tool:tool?publicTool(tool):null,state:derived,confirmationRequired:Boolean(tool?.requiresConfirmation),planner,plannerModel,analysis:planned.analysis||null};
