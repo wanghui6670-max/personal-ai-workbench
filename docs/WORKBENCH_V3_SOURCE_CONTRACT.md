@@ -12,6 +12,8 @@
 状态真相：Workbench state
 ```
 
+Workbench 本地 `state.json` 继续是任务状态、用户决定、Today 选择、项目归属等个人状态的真相源。
+
 **不得再把得到大脑 `meeting_todos` 作为个人待办的产品级主来源。**
 
 ## 2. 飞书工作日记是个人工作事实主入口
@@ -84,7 +86,8 @@ AI 首先判断内容属于：
 - AI 不得自动加入 Today；
 - AI 不得自动新建项目；
 - AI 不得删除飞书原文；
-- AI 不得因猜测而处理内容。
+- AI 不得仅凭猜测删除来源事项或提出破坏性处理；
+- plan 过期、目标 item 已变化或参数未通过 schema 校验时必须 fail closed。
 
 处理链路：
 
@@ -103,7 +106,7 @@ Feishu diary block
 
 ## 4. 今日工作台与待处理流
 
-v3 主工作面把以下内容放在同一页面：
+v3 主工作面仍沿用“**今日与收件箱**”这一兼容入口名，但实际语义已经是“今日 + 飞书日记待处理流”。页面同时展示：
 
 - 今天已经明确确认要做的事项；
 - 飞书日记新增/变化后进入的待处理内容；
@@ -132,7 +135,7 @@ v3 把“最近工作现场”和“项目进度”合并为同一项目现场�
 - `getnote_content_status`：只读查看本地内容同步状态；
 - `getnote_content_sync`：用户确认后，从 GetNote 只读拉取可获得真实原文的笔记并保存到本地内容库。
 
-旧 `external_tasks_sync` / `external_task_integration_update` 等待办工具不再注册进交互式 AI/MCP registry。
+旧 `external_tasks_sync` / `external_task_integration_update` 等待办工具不再注册进交互式 AI/MCP registry。旧模块可暂时留在代码库用于迁移、历史数据兼容和回归，不构成当前产品能力面。
 
 固定本地内容目录：
 
@@ -140,13 +143,17 @@ v3 把“最近工作现场”和“项目进度”合并为同一项目现场�
 <WORKSPACE_ROOT>/<业务序号>_自媒体/得到大脑内容/
 ```
 
-GetNote 内容同步不会创建 Todo、不会进入待处理流、不会加入 Today、不会写回 GetNote。
+GetNote 内容同步不会创建 Todo、不会进入 Inbox（也不会进入 v3 待处理流）、不会加入 Today、不会写回 GetNote。
+
+对 `MEETING` / `AUDIO` / `WEB` / `MEDIA` 等来源，如果 API 没有提供可验证的真实原文字段，单篇必须 **fail closed**；不得把 AI 摘要冒充来源原文写入本地内容库。
 
 ## 7. 当前交互能力面
 
+`feishu_inbox_sync` 是保留的兼容工具名，当前产品语义已经是“飞书日记增量同步”。
+
 | 能力 | 是否暴露 | 是否需确认 |
 |---|---:|---:|
-| `feishu_inbox_sync`（兼容名，语义=飞书日记增量同步） | 是 | 是 |
+| `feishu_inbox_sync` | 是 | 是 |
 | `inbox_process` | 是 | 是 |
 | `todo_today` | 是 | 是 |
 | `getnote_content_status` | 是 | 否 |
