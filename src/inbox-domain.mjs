@@ -125,15 +125,17 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
       state.confirmations=(state.confirmations||[]).filter(entry=>!legacyItemIds.has(entry.inboxId));
     }
 
-    // 旧版曾把整篇日记的 block 都写进 ACK。迁移时，仅对“当前确实是显式待办”的
-    // 旧来源释放 ACK，让它能按新 todo-only 合同重新进入；普通日记的 ACK 继续保留。
-    if(!initialize&&legacyBlockIds.size){
-      state.inboxAcks=state.inboxAcks.filter(ack=>!(legacyBlockIds.has(ack.blockId)&&remoteTodoBlockIds.has(ack.blockId)));
-    }
+    // ACK remains permanent. During this one migration pass, a legacy diary block that is
+    // currently proven to be an explicit todo may bypass its historical ACK once so it can
+    // re-enter under the todo-only contract. The ACK itself is never deleted or rewritten.
+    const legacyTodoReimportIds=initialize
+      ?new Set()
+      :new Set([...legacyBlockIds].filter(blockId=>remoteTodoBlockIds.has(blockId)));
+
     if(cleanedLegacy){
       addActivity(state,{
         type:'feishu_todo_only_migrated',
-        text:`待办同步切换为飞书明确待办：撤下旧版日记解析暂存 ${cleanedLegacy} 条；飞书原文未改。`
+        text:`待办同步切换为飞书明确待办：撤下旧版日记解析暂存 ${cleanedLegacy} 条；飞书原文和来源 ACK 未改。`
       });
     }
 
@@ -169,7 +171,8 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
 
     for(const remote of uniqueRemoteItems){
       const priorAck=ackByBlock.get(remote.blockId);
-      if(priorAck){
+      const migrationReimport=legacyTodoReimportIds.has(remote.blockId);
+      if(priorAck&&!migrationReimport){
         seenSkipped+=1;
         continue;
       }
