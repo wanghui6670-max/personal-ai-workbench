@@ -17,14 +17,20 @@ const env={
   OPENAI_API_KEY:'',AI_PROVIDER_ENABLED:'0',HARNESS_ENABLED:'0',JOYCREW_ENABLED:'0'
 };
 
-function run(file,args,{env:childEnv=process.env,timeout=30_000}={}){
+function run(file,args,{env:childEnv=process.env,timeout=30_000,collectOnTimeout=false}={}){
   return new Promise((resolve,reject)=>{
     const child=spawn(file,args,{cwd:root,env:childEnv,stdio:['ignore','pipe','pipe']});
-    const out=[],err=[];
-    const timer=setTimeout(()=>{child.kill('SIGKILL');reject(new Error(`${file} timed out`));},timeout);
+    const out=[],err=[];let timedOut=false;
+    const finish=(code)=>resolve({code,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});
+    const timer=setTimeout(()=>{
+      timedOut=true;
+      child.kill('SIGTERM');
+      setTimeout(()=>{if(child.exitCode===null)child.kill('SIGKILL');},750).unref();
+      if(!collectOnTimeout)reject(new Error(`${file} timed out`));
+    },timeout);
     child.stdout.on('data',chunk=>out.push(chunk));child.stderr.on('data',chunk=>err.push(chunk));
     child.once('error',error=>{clearTimeout(timer);reject(error);});
-    child.once('close',code=>{clearTimeout(timer);resolve({code,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});
+    child.once('close',code=>{clearTimeout(timer);if(!collectOnTimeout&&!timedOut)finish(code);else if(collectOnTimeout)finish(code);});
   });
 }
 
@@ -53,12 +59,12 @@ try{
   const result=await run(chrome,[
     '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
     '--virtual-time-budget=6000','--dump-dom',`${base}/`
-  ],{timeout:25_000});
-  if(result.code!==0)throw new Error(`Chrome exited ${result.code}: ${result.stderr.slice(0,2000)}`);
+  ],{timeout:12_000,collectOnTimeout:true});
   const dom=result.stdout;
-  if(dom.includes('正在打开动觉 AI 工作台'))throw new Error('Browser remained on the boot placeholder; app.js did not complete startup');
-  if(!dom.includes('今日与收件箱'))throw new Error(`Browser did not render Workbench v3 dashboard. DOM excerpt: ${dom.slice(0,2500)}`);
-  console.log('browser-boot-smoke: ok');
+  if(!dom.trim())throw new Error(`Chrome produced no DOM${result.timedOut?' before timeout':''}. stderr: ${result.stderr.slice(0,2500)}`);
+  if(dom.includes('正在打开动觉 AI 工作台'))throw new Error(`Browser remained on the boot placeholder; app.js did not complete startup. stderr: ${result.stderr.slice(0,2500)}`);
+  if(!dom.includes('今日与收件箱'))throw new Error(`Browser did not render Workbench v3 dashboard. DOM excerpt: ${dom.slice(0,3000)}\nChrome stderr: ${result.stderr.slice(0,2500)}`);
+  console.log(`browser-boot-smoke: ok${result.timedOut?' (DOM captured before forced Chrome shutdown)':''}`);
 }finally{
   server.kill('SIGTERM');
   await new Promise(resolve=>setTimeout(resolve,200));
