@@ -1,7 +1,7 @@
 import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
-import { enforceInboxReviewPlan, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
+import { enforceInboxReviewPlan, inboxReviewPlannerMessage, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createContentTools, planContentMessage } from './content-tools.mjs';
@@ -38,9 +38,9 @@ function planGuard(tool,args,state){
 
 export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycrewActions=null}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  // Feishu inbox is the primary personal intake surface. Legacy GetNote task
-  // tools stay in the codebase only for compatibility/migration and are not
-  // registered into the interactive AI/MCP capability surface anymore.
+  // Feishu inbox/diary is the primary personal intake surface. Legacy GetNote
+  // task tools stay only for compatibility/migration and are not registered
+  // into the interactive AI/MCP capability surface anymore.
   const workbenchTools=createWorkbenchTools();
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
   const tools=[...workbenchTools,...createProjectRecordTools(),...createContentTools(),...joycrewTools];
@@ -80,6 +80,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     const derived=deriveState(current.appRoot,current.state,current.config,current.aiEnabled);
     const modelState=scopedInboxReviewState(derived,route);
     const modelTools=scopedInboxReviewTools(list(),route);
+    const plannerMessage=inboxReviewPlannerMessage(derived,route,message);
     let planned=null;
     let planner='local_fallback';
     let plannerModel=null;
@@ -87,18 +88,18 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       try{
         const runtime=aiRuntimeConfig();
         plannerModel=runtime.model||null;
-        planned=await planAIConsole({message,state:modelState,tools:modelTools,route});
+        planned=await planAIConsole({message:plannerMessage,state:modelState,tools:modelTools,route});
         if(planned)planner='model';
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
-    if(!planned)planned=planJoycrewMessage({message,state:modelState});
-    if(!planned)planned=planContentMessage({message,state:modelState});
-    if(!planned)planned=planProjectRecordMessage({message,state:modelState});
-    if(!planned)planned=planWorkbenchMessage({message,state:modelState});
+    if(!planned)planned=planJoycrewMessage({message:plannerMessage,state:modelState});
+    if(!planned)planned=planContentMessage({message:plannerMessage,state:modelState});
+    if(!planned)planned=planProjectRecordMessage({message:plannerMessage,state:modelState});
+    if(!planned)planned=planWorkbenchMessage({message:plannerMessage,state:modelState});
     planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人收件箱主来源是飞书云文档；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人工作事项主来源是飞书日记；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){

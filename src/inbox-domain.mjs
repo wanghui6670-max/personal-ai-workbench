@@ -5,6 +5,8 @@ import { inboxContentHash, inboxAckMatches, normalizeInboxAcks } from './inbox-a
 import { normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
 
 const defaultFeishuJournalClient=createFeishuJournalClient();
+const MIXED_DIARY_BOOTSTRAP_HEAD=30;
+const MIXED_DIARY_BOOTSTRAP_TAIL=30;
 
 function feishuSyncSummary(config,extra={}){
   const source=config?.dataSource;
@@ -24,6 +26,23 @@ function normalizeRemoteItem(item){
   if(item?.captureId)return{...item,text:String(item.text??'').trim(),captureId:normalizeCaptureId(item.captureId)};
   const parsed=parseCaptureMarker(item?.text);
   return{...item,text:parsed.text,captureId:parsed.captureId};
+}
+
+function mixedDiaryBootstrapSelection(items){
+  if(items.length<=MIXED_DIARY_BOOTSTRAP_HEAD+MIXED_DIARY_BOOTSTRAP_TAIL)return new Set(items.map(item=>item.blockId));
+  const ids=new Set();
+  for(const item of items.slice(0,MIXED_DIARY_BOOTSTRAP_HEAD))ids.add(item.blockId);
+  for(const item of items.slice(-MIXED_DIARY_BOOTSTRAP_TAIL))ids.add(item.blockId);
+  return ids;
+}
+
+function applyRemoteMetadata(local,remote,mode){
+  local.feishuMode=mode||'inbox_section';
+  if(Array.isArray(remote.headingPath)&&remote.headingPath.length)local.feishuHeadingPath=[...remote.headingPath];
+  else delete local.feishuHeadingPath;
+  if(remote.tag)local.feishuTag=remote.tag;
+  else delete local.feishuTag;
+  local.feishuExplicitInbox=remote.explicitInbox===true;
 }
 
 export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
@@ -49,17 +68,35 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     throw error;
   }
 
-  const remoteItems=fetched.items.map(normalizeRemoteItem);
-  const remoteByBlock=new Map(remoteItems.map(item=>[item.blockId,item]));
+  const allRemoteItems=(fetched.items||[]).map(normalizeRemoteItem).filter(item=>item.blockId&&item.text);
+  const remoteByBlock=new Map(allRemoteItems.map(item=>[item.blockId,item]));
+  const firstMixedSync=fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
+  const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(allRemoteItems):null;
+  const remoteItems=bootstrapIds?allRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):allRemoteItems;
+  const baselineItems=bootstrapIds?allRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
   let imported=0;
   let removed=0;
   let updated=0;
+  let baselined=0;
+
   await store.updateState(state=>{
     state.inboxAcks=normalizeInboxAcks(state.inboxAcks);
     const ackByBlock=new Map(state.inboxAcks.map(item=>[item.blockId,item]));
     const localByBlock=new Map(
       state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item])
     );
+
+    for(const remote of baselineItems){
+      const contentHash=inboxContentHash(remote.text);
+      const priorAck=ackByBlock.get(remote.blockId);
+      if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
+      else{
+        const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
+        state.inboxAcks.push(ack);
+        ackByBlock.set(remote.blockId,ack);
+      }
+      baselined+=1;
+    }
 
     for(const remote of remoteItems){
       const contentHash=inboxContentHash(remote.text);
@@ -71,6 +108,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
           updated+=1;
         }
         if(remote.captureId&&!local.captureId)local.captureId=remote.captureId;
+        applyRemoteMetadata(local,remote,fetched.mode);
         if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
         else{
           const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
@@ -86,6 +124,10 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         text:remote.text,
         source:'feishu_doc',
         feishuBlockId:remote.blockId,
+        feishuMode:fetched.mode||'inbox_section',
+        ...(Array.isArray(remote.headingPath)&&remote.headingPath.length?{feishuHeadingPath:[...remote.headingPath]}:{}),
+        ...(remote.tag?{feishuTag:remote.tag}:{}),
+        feishuExplicitInbox:remote.explicitInbox===true,
         ...(remote.captureId?{captureId:remote.captureId}:{}),
         createdAt:nowIso()
       };
@@ -97,21 +139,26 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         ackByBlock.set(remote.blockId,ack);
       }
       imported+=1;
-      addActivity(state,{type:'inbox_synced',inboxId:item.id,text:'从飞书收件箱同步一条新事项。'});
+      addActivity(state,{
+        type:'inbox_synced',
+        inboxId:item.id,
+        text:fetched.mode==='mixed_diary'?'从飞书日记同步一条新增/变化内容。':'从飞书收件箱同步一条新事项。'
+      });
     }
 
     for(const local of state.inbox.filter(item=>item.source==='feishu_doc'&&item.feishuBlockId)){
       if(remoteByBlock.has(local.feishuBlockId))continue;
       state.inbox=state.inbox.filter(item=>item.id!==local.id);
-      state.inboxAcks=state.inboxAcks.filter(ack=>ack.blockId!==local.feishuBlockId);
       state.confirmations=state.confirmations.filter(confirmation=>confirmation.inboxId!==local.id);
       removed+=1;
       addActivity(state,{
         type:'inbox_removed_remote',
         inboxId:local.id,
-        text:'飞书收件箱已删除一个未处理事项。'
+        text:'飞书日记中对应内容已删除，未处理事项已从工作台撤下。'
       });
     }
+
+    state.inboxAcks=state.inboxAcks.filter(ack=>remoteByBlock.has(ack.blockId));
   });
 
   await store.updateConfig(current=>{
@@ -120,7 +167,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
       current.dataSource.lastSyncAt=nowIso();
       current.dataSource.lastSyncStatus='ok';
       current.dataSource.lastSyncError=null;
-      current.dataSource.lastImportedCount=remoteItems.length;
+      current.dataSource.lastImportedCount=allRemoteItems.length;
     }
     return structuredClone(current);
   });
@@ -129,8 +176,11 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     imported,
     removed,
     updated,
-    remoteCount:remoteItems.length,
-    sectionFound:fetched.sectionFound
+    remoteCount:allRemoteItems.length,
+    sectionFound:fetched.sectionFound,
+    mode:fetched.mode||'inbox_section',
+    baselined,
+    firstMixedSync
   });
 }
 
@@ -161,6 +211,10 @@ export async function addInbox({
     source:resolvedSource,
     createdAt:nowIso(),
     ...(remote?.item?.blockId?{feishuBlockId:remote.item.blockId}:{}),
+    ...(remote?.mode?{feishuMode:remote.mode}:{}),
+    ...(Array.isArray(remote?.item?.headingPath)&&remote.item.headingPath.length?{feishuHeadingPath:[...remote.item.headingPath]}:{}),
+    ...(remote?.item?.tag?{feishuTag:remote.item.tag}:{}),
+    ...(remote?.item?{feishuExplicitInbox:remote.item.explicitInbox===true}:{}),
     ...(resolvedCaptureId?{captureId:resolvedCaptureId}:{})
   };
   await store.updateState(state=>{
