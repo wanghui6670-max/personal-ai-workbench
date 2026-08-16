@@ -15,7 +15,7 @@ async function fixture(t){
 test('raw mixed diary block is replaced by atomic todo candidates without creating Todo or Today',async t=>{
   const store=await fixture(t);
   await store.updateState(state=>{
-    state.projects.push({id:'p-1',name:'常金米业',archived:false,completed:false});
+    state.projects.push({id:'p-1',name:'常金米业',endDate:'2026-08-31',archived:false,completed:false});
     state.inbox.push({id:'in-raw',text:'很长的复盘背景，然后补发报价单，并联系常金米业确认采购截图。',source:'feishu_doc',feishuBlockId:'blk-1',feishuMode:'mixed_diary',feishuHeadingPath:['8月16日'],createdAt:'2026-08-16T01:00:00.000Z'});
     state.inboxAcks.push({blockId:'blk-1',acknowledgedAt:'2026-08-16T01:00:00.000Z'});
   });
