@@ -14,68 +14,57 @@ async function fixture(t){
   return{root,store,registry:createWorkbenchRegistry({appRoot:root,store})};
 }
 
-test('MCP exposes GetNote v2 pipeline, explicit timezone, optional Feishu sink, and retires Feishu inbox source',async t=>{
+test('MCP exposes Feishu inbox and GetNote self-media content, not legacy GetNote task tools',async t=>{
   const {registry}=await fixture(t);
   const tools=registry.list();
   const names=tools.map(tool=>tool.name);
-  assert.equal(names.includes('external_task_integration_read'),true);
-  assert.equal(names.includes('external_task_integration_update'),true);
-  assert.equal(names.includes('external_tasks_sync'),true);
-  assert.equal(names.includes('daily_summary_publish'),true);
-  assert.equal(names.includes('feishu_inbox_sync'),false);
 
-  const update=tools.find(tool=>tool.name==='external_task_integration_update');
-  assert.ok(update);
-  assert.equal(update.inputSchema.properties.timeZone.type,'string');
-  assert.equal(update.inputSchema.properties.journalDocumentUrl.type,'string');
-  assert.match(update.description,/可选飞书日记 sink/);
+  assert.equal(names.includes('feishu_inbox_sync'),true,'Feishu inbox is the primary personal intake surface');
+  assert.equal(names.includes('getnote_content_status'),true);
+  assert.equal(names.includes('getnote_content_sync'),true);
 
-  const sync=tools.find(tool=>tool.name==='external_tasks_sync');
-  assert.match(sync.description,/先原子提交 Workbench/);
-  assert.match(sync.description,/旧笔记/);
-  assert.match(sync.description,/不自动加入 Today/);
+  for(const retired of ['external_task_integration_read','external_task_integration_update','external_tasks_sync','daily_summary_publish']){
+    assert.equal(names.includes(retired),false,`${retired} must stay out of the interactive AI/MCP surface`);
+  }
 
-  const current=await registry.call('external_task_integration_read',{});
-  assert.equal(current.result.enabled,false);
-  assert.equal(current.result.provider,'getnote_cli');
-  assert.equal(current.result.timeZone,'Asia/Shanghai');
+  const feishu=tools.find(tool=>tool.name==='feishu_inbox_sync');
+  assert.equal(feishu.requiresConfirmation,true);
+  const content=tools.find(tool=>tool.name==='getnote_content_sync');
+  assert.equal(content.requiresConfirmation,true);
+  assert.match(content.description,/不会创建待办/);
+  assert.match(content.description,/不会加入 Today/);
 
   await assert.rejects(
-    registry.call('external_task_integration_update',{enabled:false,noteLimit:100,timeZone:'Asia/Shanghai'}),
+    registry.call('getnote_content_sync',{limit:50}),
     error=>error.code==='MCP_CONFIRMATION_REQUIRED'
+  );
+  await assert.rejects(
+    registry.call('external_tasks_sync',{}, {confirmed:true}),
+    error=>error.code==='MCP_TOOL_NOT_FOUND'
   );
 });
 
-test('confirmed MCP update accepts timezone without requiring Feishu journal URL',async t=>{
+test('local planner makes Feishu primary and routes GetNote only to self-media content',async t=>{
   const {registry}=await fixture(t);
-  const updated=await registry.call('external_task_integration_update',{
-    enabled:false,noteLimit:120,timeZone:'Asia/Shanghai',journalDocumentUrl:'',calendarEnabled:false,calendarName:'工作台'
-  },{confirmed:true});
-  assert.equal(updated.result.noteLimit,120);
-  assert.equal(updated.result.timeZone,'Asia/Shanghai');
-  assert.equal(updated.result.journalDocumentUrl,'');
-  assert.equal(updated.result.calendarEnabled,false);
-});
 
-test('local planner maps explicit GetNote sync and daily summary commands without auto-executing',async t=>{
-  const {registry}=await fixture(t);
-  const sync=await registry.plan('同步得到大脑待办');
-  assert.equal(sync.toolName,'external_tasks_sync');
-  assert.equal(sync.confirmationRequired,true);
-  assert.match(sync.reason,/先提交 Workbench/);
+  const feishu=await registry.plan('同步飞书收件箱');
+  assert.equal(feishu.toolName,'feishu_inbox_sync');
+  assert.equal(feishu.confirmationRequired,true);
+  assert.match(feishu.reason,/飞书收件箱/);
 
-  const alias=await registry.plan('从 Get笔记 拉取会议待办');
-  assert.equal(alias.toolName,'external_tasks_sync');
+  const content=await registry.plan('同步得到大脑内容到自媒体，最近 20 篇');
+  assert.equal(content.toolName,'getnote_content_sync');
+  assert.equal(content.args.limit,20);
+  assert.equal(content.confirmationRequired,true);
+  assert.match(content.reason,/自媒体/);
 
-  const settings=await registry.plan('设置得到大脑任务时区');
-  assert.equal(settings.toolName,'panel_navigate');
-  assert.match(settings.reason,/任务时区/);
+  const status=await registry.plan('查看得到大脑内容同步到哪里');
+  assert.equal(status.toolName,'getnote_content_status');
+  assert.equal(status.confirmationRequired,false);
 
-  const summary=await registry.plan('把今日总结沉淀到飞书日记');
-  assert.equal(summary.toolName,'daily_summary_publish');
-  assert.equal(summary.confirmationRequired,true);
-
-  const legacy=await registry.plan('同步飞书收件箱');
-  assert.equal(legacy.kind,'clarification');
-  assert.match(legacy.message,/待办事实来源是得到大脑只读管线/);
+  const retired=await registry.plan('同步得到大脑待办');
+  assert.equal(retired.kind,'clarification');
+  assert.equal(retired.toolName,null);
+  assert.match(retired.message,/只用于“自媒体”内容采集/);
+  assert.match(retired.message,/飞书收件箱/);
 });
