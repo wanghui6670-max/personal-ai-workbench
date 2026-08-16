@@ -11,7 +11,7 @@ test('desktop center work surface is independently scrollable',async()=>{
   assert.match(css,/\.sidebar\{height:100vh;min-height:0;overflow-y:auto;/);
 });
 
-test('classification pool keeps todos active and automatically removes non-todo Feishu items from the local queue',async()=>{
+test('classification pool keeps todos active and privacy-safely removes non-todo Feishu items from the local queue',async()=>{
   const [index,script,css,migration]=await Promise.all([
     fsp.readFile('public/index.html','utf8'),
     fsp.readFile('public/workbench-v3-auto-classify.js','utf8'),
@@ -25,11 +25,13 @@ test('classification pool keeps todos active and automatically removes non-todo 
   assert.match(script,/v3AutoFilter='active'/);
   assert.match(script,/category==='todo'\|\|category==='pending'/);
   assert.match(script,/fetch\('\/api\/inbox\/command'/);
-  assert.match(script,/command:'删除'/);
+  assert.match(script,/不进入待办：\$\{category\}/);
+  assert.doesNotMatch(script,/command:'删除'/);
   assert.match(script,/已过滤非待办/);
   assert.match(script,/observe\(main,\{childList:true\}\)/);
   assert.doesNotMatch(script,/observe\(main,\{childList:true,subtree:true\}\)/);
   assert.match(css,/\.v3-pool-filters/);
   assert.match(css,/\.v3-category-pill/);
+  assert.match(migration,/const schema='3'/);
   assert.match(migration,/removeItem\('workbench-v3-inbox-reviews-v1'\)/);
 });
