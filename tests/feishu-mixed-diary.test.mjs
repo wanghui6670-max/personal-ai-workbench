@@ -64,7 +64,7 @@ test('journal client falls back to mixed diary instead of returning format 502',
   assert.equal(result.items.length,4);
 });
 
-test('first mixed sync baselines middle history and later imports a changed old block',async t=>{
+test('first mixed sync baselines middle history and later ignores edits to every already-seen block',async t=>{
   const store=await fixture(t);
   let revision=1;
   let items=Array.from({length:70},(_,index)=>({
@@ -90,9 +90,35 @@ test('first mixed sync baselines middle history and later imports a changed old 
   items=items.map(item=>item.blockId==='b35'?{...item,text:'日记内容 35 已修改'}:item);
   const second=await syncFeishuInbox({store,client});
   assert.equal(second.firstMixedSync,false);
-  assert.equal(second.imported,1);
+  assert.equal(second.imported,0);
+  assert.equal(second.updated,0);
   state=await store.readState();
-  assert.equal(state.inbox.some(item=>item.feishuBlockId==='b35'&&item.text==='日记内容 35 已修改'),true);
+  assert.equal(state.inbox.some(item=>item.feishuBlockId==='b35'),false);
+});
+
+test('after an initial sync only a newly appended block enters the next Workbench sync',async t=>{
+  const store=await fixture(t);
+  let revision=1;
+  let items=[
+    {blockId:'old-1',text:'旧记录一',tag:'p',headingPath:['今天'],explicitInbox:false,order:0},
+    {blockId:'old-2',text:'旧记录二',tag:'p',headingPath:['今天'],explicitInbox:false,order:1}
+  ];
+  const client={fetch:async()=>({mode:'mixed_diary',sectionFound:false,revisionId:revision,items})};
+  const first=await syncFeishuInbox({store,client});
+  assert.equal(first.imported,2);
+  await store.updateState(state=>{state.inbox=[];});
+
+  revision=2;
+  items=[
+    {...items[0],text:'旧记录一被编辑'},
+    items[1],
+    {blockId:'new-3',text:'这才是新增加的记录',tag:'checkbox',headingPath:['今天'],explicitInbox:false,order:2}
+  ];
+  const second=await syncFeishuInbox({store,client});
+  assert.equal(second.imported,1);
+  assert.equal(second.updated,0);
+  const state=await store.readState();
+  assert.deepEqual(state.inbox.map(item=>item.feishuBlockId),['new-3']);
 });
 
 test('mixed diary capture auto-creates a Workbench 收件箱 section for writes',async()=>{
