@@ -4,87 +4,76 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('normative docs keep GetNote as source, Workbench as state truth, Feishu as optional sink, and ICS as mirror',async()=>{
-  const [readme,product,architecture,api,deployment,pipeline]=await Promise.all([
-    read('README.md'),
-    read('docs/PRODUCT_SPEC.md'),
-    read('docs/ARCHITECTURE.md'),
-    read('docs/API.md'),
-    read('docs/DEPLOYMENT.md'),
-    read('docs/TASK_SOURCE_PIPELINE.md')
-  ]);
-  for(const document of [readme,product,architecture,api,deployment,pipeline]){
-    assert.match(document,/得到大脑/);
-    assert.match(document,/getnote/);
-    assert.match(document,/getnote note todos/);
-    assert.match(document,/personal-ai-workbench\.ics/);
-    assert.doesNotMatch(document,/ticktick|dida365\.com|滴答清单 CLI/);
-  }
-  assert.match(product,/飞书《每日工作日记》.*沉淀目标/);
-  assert.match(architecture,/飞书每日工作日记\s+── 个人任务快照与每日总结 sink/);
-  assert.match(api,/飞书不再是个人待办来源/);
-  assert.match(pipeline,/不反向.*得到大脑|不反向修改得到大脑/);
-  assert.match(pipeline,/没有明确待办章节.*空列表|空列表.*不使用模型猜测/);
+test('v3 normative source contract makes Feishu primary, Workbench state truth, and AI confirm-before-execute',async()=>{
+  const contract=await read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md');
+  assert.match(contract,/Normative \/ 当前有效/);
+  assert.match(contract,/飞书云文档 → Workbench Inbox → AI 自动分析 → 用户确认 → Workbench 执行/);
+  assert.match(contract,/\/api\/inbox\/sync/);
+  assert.match(contract,/\/api\/ai\/plan/);
+  assert.match(contract,/\/api\/ai\/execute \{ confirmed: true \}/);
+  assert.match(contract,/Workbench 本地 `state\.json`.*真相源/);
+  assert.match(contract,/不得自动加入 Today/);
+  assert.match(contract,/不得自动新建项目/);
+  assert.match(contract,/不得仅凭猜测删除来源事项/);
+  assert.match(contract,/今日与收件箱/);
+  assert.match(contract,/最近工作现场.*项目进度/);
+  assert.match(contract,/覆盖并取代[\s\S]*GetNote Task Sync v2/);
 });
 
-test('normative GetNote v2 docs make Workbench commit first, keep Feishu optional, and document current fingerprint identity honestly',async()=>{
-  const documents=await Promise.all([
-    read('README.md'),read('docs/PRODUCT_SPEC.md'),read('docs/ARCHITECTURE.md'),read('docs/API.md'),read('docs/TASK_SOURCE_PIPELINE.md')
+test('v3 normative source contract keeps GetNote only as confirmed self-media content ingestion',async()=>{
+  const [contract,contentSync,contentTools]=await Promise.all([
+    read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md'),
+    read('src/getnote-content-sync.mjs'),
+    read('src/mcp/content-tools.mjs')
   ]);
-  for(const document of documents){
-    assert.match(document,/Workbench state 原子提交[\s\S]{0,700}飞书/);
-    assert.match(document,/createdAt[\s\S]{0,180}updatedAt/);
-    assert.match(document,/text_fingerprint|文本 fingerprint|规范化待办文本/);
-    assert.match(document,/没有 per-todo 稳定 ID|没有.*稳定.*ID|只.*text.*completed/i);
-    assert.match(document,/Asia\/Shanghai|IANA 时区/);
-    assert.doesNotMatch(document,/todo_id\s*\/\s*todoId\s*\/\s*task_id/);
-    assert.doesNotMatch(document,/待办文案编辑不会改变身份/);
-    assert.doesNotMatch(document,/启用时必须提供官方 Feishu\/Lark HTTPS 文档 URL/);
-    assert.doesNotMatch(document,/飞书写入并读回[\s\S]{0,180}Workbench (?:待办\/收件箱状态提交|state)/);
-  }
-  const api=documents[3];
-  assert.match(api,/journalDocumentUrl` 可为空/);
-  assert.match(api,/ok_with_sink_errors/);
-  assert.match(api,/FEISHU_DAILY_JOURNAL_NOT_CONFIGURED/);
+  assert.match(contract,/得到大脑不再进入个人待办主链路/);
+  assert.match(contract,/getnote_content_status/);
+  assert.match(contract,/getnote_content_sync/);
+  assert.match(contract,/得到大脑内容/);
+  assert.match(contract,/不会创建 Todo|不会创建待办/);
+  assert.match(contract,/不会进入 Inbox/);
+  assert.match(contract,/不会加入 Today/);
+  assert.match(contract,/不会写回 GetNote/);
+  assert.match(contract,/fail closed/);
+  assert.match(contentSync,/CONTENT_FOLDER='得到大脑内容'/);
+  assert.match(contentSync,/safeAtomicWrite/);
+  assert.match(contentSync,/createGetnoteNoteClient/);
+  assert.match(contentTools,/name:'getnote_content_sync'/);
+  assert.match(contentTools,/requiresConfirmation:true/);
 });
 
-test('external task API documents exact MCP tools, confirmation boundary, and fixed GetNote runtime commands',async()=>{
-  const [api,pipeline,registry,toolModule,taskCli,runtime]=await Promise.all([
-    read('docs/API.md'),
-    read('docs/TASK_SOURCE_PIPELINE.md'),
+test('interactive registry exposes Feishu and content tools while legacy GetNote task tools stay compatibility-only',async()=>{
+  const [contract,registry,legacyTools,taskCli,runtime]=await Promise.all([
+    read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md'),
     read('src/mcp/registry.mjs'),
     read('src/mcp/external-task-tools.mjs'),
     read('src/task-cli.mjs'),
     read('src/getnote-runtime.mjs')
   ]);
-  for(const name of [
-    'external_task_integration_read',
-    'external_task_integration_update',
-    'external_tasks_sync',
-    'daily_summary_publish'
-  ]){
-    assert.match(api,new RegExp(name));
-    assert.match(toolModule,new RegExp(name));
+  assert.match(registry,/const workbenchTools=createWorkbenchTools\(\)/);
+  assert.match(registry,/createContentTools/);
+  assert.doesNotMatch(registry,/createExternalTaskTools/);
+  assert.doesNotMatch(registry,/planExternalTaskMessage/);
+  assert.match(contract,/`feishu_inbox_sync` \| 是 \| 是/);
+  assert.match(contract,/`getnote_content_sync` \| 是 \| 是/);
+  assert.match(contract,/`external_tasks_sync` \| 否/);
+  assert.match(contract,/“同步得到大脑待办” → clarification/);
+
+  for(const name of ['external_task_integration_read','external_task_integration_update','external_tasks_sync','daily_summary_publish']){
+    assert.match(legacyTools,new RegExp(name));
   }
-  assert.match(registry,/createExternalTaskTools/);
-  assert.match(registry,/filter\(tool=>tool\.name!=='feishu_inbox_sync'\)/);
-  assert.match(api,/EXTERNAL_TASK_PIPELINE_BUSY/);
-  assert.match(api,/FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT/);
-  assert.match(pipeline,/旧的 `feishu_inbox_sync` 已从 AI\/MCP 白名单移除/);
+  assert.match(contract,/旧模块可暂时留在代码库用于迁移、历史数据兼容和回归/);
 
   assert.match(taskCli,/createGetnoteReader/);
   assert.match(taskCli,/reader\.listNotes/);
   assert.match(taskCli,/runtime\.fetchTodos/);
   assert.match(taskCli,/meeting_todos/);
-  assert.match(taskCli,/externalIdentityKind:'text_fingerprint'/);
-  assert.doesNotMatch(taskCli,/sourceTodoId|todo_id|task_id/);
   assert.doesNotMatch(taskCli,/node:child_process|execFile\(/);
 
   assert.match(runtime,/const CLI='getnote'/);
   assert.match(runtime,/\['notes','--limit'/);
   assert.match(runtime,/\['note','todos',normalizeGetnoteNoteId\(noteId\),'-o','json'\]/);
   assert.match(runtime,/\['note',normalizeGetnoteNoteId\(noteId\),'-o','json'\]/);
-  assert.doesNotMatch(runtime,/TICKTICK_HOST|CLI_PROFILES|ticktick/);
   assert.doesNotMatch(runtime,/save|delete|update[^A-Za-z]/i);
 });
 
