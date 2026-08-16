@@ -11,7 +11,7 @@ test('desktop center work surface is independently scrollable',async()=>{
   assert.match(css,/\.sidebar\{height:100vh;min-height:0;overflow-y:auto;/);
 });
 
-test('classification pool keeps todos active and privacy-safely removes non-todo Feishu items from the local queue',async()=>{
+test('todo extraction pool is presentation-only and never performs a second classification mutation',async()=>{
   const [index,script,css,migration]=await Promise.all([
     fsp.readFile('public/index.html','utf8'),
     fsp.readFile('public/workbench-v3-auto-classify.js','utf8'),
@@ -20,17 +20,12 @@ test('classification pool keeps todos active and privacy-safely removes non-todo
   ]);
   assert.match(index,/workbench-v3-auto-classify\.js/);
   assert.ok(index.indexOf('workbench-v3-review-migration.js')<index.indexOf('workbench-v3.js'));
-  for(const label of ['待办候选','项目进展','分析思考','日常记录','需要决定','分析中'])assert.match(script,new RegExp(label));
-  assert.match(script,/AUTO_FILTER_NON_TODO=new Set\(\['project','analysis','daily'\]\)/);
+  for(const label of ['待办候选','提取中','需要决定'])assert.match(script,new RegExp(label));
+  for(const removed of ['项目进展','分析思考','日常记录','已过滤非待办'])assert.doesNotMatch(script,new RegExp(removed));
   assert.match(script,/v3AutoFilter='active'/);
   assert.match(script,/category==='todo'\|\|category==='pending'/);
-  assert.match(script,/fetch\('\/api\/inbox\/command'/);
-  assert.match(script,/不进入待办：\$\{category\}/);
-  assert.match(script,/飞书\(\?:同步\|日记\)/,'filtering must survive visible source label polish from 飞书同步 to 飞书日记');
-  assert.match(script,/data\.filtered!==true/,'frontend must require a backend acknowledgement before treating an item as filtered');
-  assert.match(script,/\[id\^="cmd-"\]/,'item identity must prefer the stable command host instead of an arbitrary action button');
-  assert.doesNotMatch(script,/command:'删除'/);
-  assert.match(script,/已过滤非待办/);
+  assert.doesNotMatch(script,/fetch\('/,'pool layer must not mutate backend state');
+  assert.doesNotMatch(script,/不进入待办/);
   assert.match(script,/observe\(main,\{childList:true\}\)/);
   assert.doesNotMatch(script,/observe\(main,\{childList:true,subtree:true\}\)/);
   assert.match(css,/\.v3-pool-filters/);

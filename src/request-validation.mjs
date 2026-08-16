@@ -63,6 +63,7 @@ export const requestSchemas={
   note:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false},
   aiPlan:{fields:{message:nonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
   aiExecute:{fields:{planId:nonEmptyString,confirmed:boolean},required:['planId','confirmed'],allowEmpty:false},
+  diaryExtractionApply:{fields:{planId:nonEmptyString},required:['planId'],allowEmpty:false},
   harnessNavigator:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
   joycrewActionPrepare:{fields:{type:nonEmptyString,payload:arbitraryObject,source:nonEmptyString},required:['type','payload'],allowEmpty:false},
   joycrewActionExecute:{fields:{confirmed:boolean},required:['confirmed'],allowEmpty:false},

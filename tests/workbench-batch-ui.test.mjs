@@ -21,11 +21,13 @@ test('Workbench pending queue exposes multi-select batch controls',async()=>{
   assert.match(css,/\.v3-batch-check/);
 });
 
-test('batch confirmation skips anything without an existing executable preview',async()=>{
+test('batch confirmation accepts either an existing safe plan or an extracted candidate with explicit due date',async()=>{
   const script=await fsp.readFile('public/workbench-v3-batch.js','utf8');
-  assert.match(script,/querySelector\('\[data-v3-action="confirm-plan"\]'\)/);
-  assert.match(script,/缺信息\/未分析，会跳过/);
-  assert.match(script,/仍缺信息的会继续保留/);
+  assert.match(script,/function confirmButton/);
+  assert.match(script,/confirm-plan/);
+  assert.match(script,/confirm-extracted-todo/);
+  assert.match(script,/缺截止日期\/仍在解析，会跳过/);
+  assert.match(script,/已经具备安全执行条件的待办/);
 });
 
 test('batch reanalysis stays bounded and batch deletion is one confirmed local-only transaction',async()=>{

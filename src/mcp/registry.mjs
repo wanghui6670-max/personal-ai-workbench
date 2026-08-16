@@ -9,6 +9,7 @@ import { createContentTools, planContentMessage } from './content-tools.mjs';
 import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 import { createFeishuInitializeTools } from './feishu-initialize-tools.mjs';
 import { createInboxBatchTools } from './inbox-batch-tools.mjs';
+import { createDiaryExtractionTools } from './diary-extraction-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -41,12 +42,9 @@ function planGuard(tool,args,state){
 
 export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycrewActions=null}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
-  // Feishu inbox/diary is the primary personal intake surface. Legacy GetNote
-  // task tools stay only for compatibility/migration and are not registered
-  // into the interactive AI/MCP capability surface anymore.
   const workbenchTools=createWorkbenchTools();
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
-  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
+  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createDiaryExtractionTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
