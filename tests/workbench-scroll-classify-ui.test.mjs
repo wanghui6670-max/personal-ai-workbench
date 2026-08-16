@@ -26,6 +26,9 @@ test('classification pool keeps todos active and privacy-safely removes non-todo
   assert.match(script,/category==='todo'\|\|category==='pending'/);
   assert.match(script,/fetch\('\/api\/inbox\/command'/);
   assert.match(script,/不进入待办：\$\{category\}/);
+  assert.match(script,/飞书\(\?:同步\|日记\)/,'filtering must survive visible source label polish from 飞书同步 to 飞书日记');
+  assert.match(script,/data\.filtered!==true/,'frontend must require a backend acknowledgement before treating an item as filtered');
+  assert.match(script,/\[id\^="cmd-"\]/,'item identity must prefer the stable command host instead of an arbitrary action button');
   assert.doesNotMatch(script,/command:'删除'/);
   assert.match(script,/已过滤非待办/);
   assert.match(script,/observe\(main,\{childList:true\}\)/);
