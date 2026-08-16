@@ -79,10 +79,11 @@ test('Feishu sync stores only a content hash and unchanged blocks do not re-impo
   await store.updateState(next=>{next.inbox=[];});
   result=await syncFeishuInbox({store,client});
   assert.equal(result.imported,0);
+  assert.equal(result.seenSkipped,1);
   assert.equal((await store.readState()).inbox.length,0);
 });
 
-test('editing an acknowledged Feishu block re-imports it for review and rotates the hash',async t=>{
+test('editing an acknowledged Feishu block never re-imports it and preserves the first-seen hash',async t=>{
   const store=await fixture(t);
   let current=xml([{id:'blk_edit',text:'原内容'}]);
   const client=clientFrom(()=>current);
@@ -91,15 +92,17 @@ test('editing an acknowledged Feishu block re-imports it for review and rotates 
 
   current=xml([{id:'blk_edit',text:'编辑后的内容'}]);
   const result=await syncFeishuInbox({store,client});
-  assert.equal(result.imported,1);
+  assert.equal(result.imported,0);
+  assert.equal(result.updated,0);
+  assert.equal(result.seenSkipped,1);
   const state=await store.readState();
-  assert.equal(state.inbox[0].text,'编辑后的内容');
-  assert.equal(state.inboxAcks[0].contentHash,inboxContentHash('编辑后的内容'));
+  assert.equal(state.inbox.length,0);
+  assert.equal(state.inboxAcks[0].contentHash,inboxContentHash('原内容'));
 });
 
-test('remote deletion removes the local item, its ack, and every linked confirmation without logging plaintext',async t=>{
+test('remote deletion never mutates local pending state and seen acknowledgements remain permanent',async t=>{
   const store=await fixture(t);
-  let current=xml([{id:'blk_delete',text:'删除后不应残留的敏感正文'}]);
+  let current=xml([{id:'blk_delete',text:'删除后仍由本地决定是否处理'}]);
   const client=clientFrom(()=>current);
   await syncFeishuInbox({store,client});
   const item=(await store.readState()).inbox[0];
@@ -115,12 +118,27 @@ test('remote deletion removes the local item, its ack, and every linked confirma
 
   current=xml([]);
   const result=await syncFeishuInbox({store,client});
-  assert.equal(result.removed,1);
+  assert.equal(result.removed,0);
   const state=await store.readState();
-  assert.equal(state.inbox.length,0);
-  assert.equal(state.inboxAcks.length,0);
-  assert.equal(state.confirmations.some(item=>item.inboxId===item.id),false);
-  assert.equal(JSON.stringify(state.activities).includes('删除后不应残留的敏感正文'),false);
+  assert.equal(state.inbox.length,1);
+  assert.equal(state.inboxAcks.length,1);
+  assert.equal(state.confirmations.some(entry=>entry.inboxId===item.id),true);
+});
+
+test('a deleted remote block that later reappears is still treated as already seen',async t=>{
+  const store=await fixture(t);
+  let current=xml([{id:'blk_reappear',text:'第一次出现'}]);
+  const client=clientFrom(()=>current);
+  await syncFeishuInbox({store,client});
+  await store.updateState(state=>{state.inbox=[];});
+
+  current=xml([]);
+  await syncFeishuInbox({store,client});
+  current=xml([{id:'blk_reappear',text:'重新出现但内容改了'}]);
+  const result=await syncFeishuInbox({store,client});
+  assert.equal(result.imported,0);
+  assert.equal(result.seenSkipped,1);
+  assert.equal((await store.readState()).inbox.length,0);
 });
 
 test('remote-first local capture stores a hash-only acknowledgement after readback',async t=>{
