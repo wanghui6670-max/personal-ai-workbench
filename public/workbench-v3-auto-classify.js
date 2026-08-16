@@ -30,11 +30,15 @@ function inferCategory(item){
 }
 
 function itemId(item){
-  return item.querySelector('[data-id]')?.dataset?.id||'';
+  return item.querySelector('[id^="cmd-"]')?.id?.slice(4)||item.querySelector('[data-id]')?.dataset?.id||'';
 }
 
 function isFeishuItem(item){
-  return /飞书同步/.test(item.querySelector('.v3-item-meta')?.textContent||'');
+  const sourceText=item.querySelector('.v3-item-meta')?.textContent||'';
+  // workbench-v3-focus.js deliberately polishes the visible source label from
+  // “飞书同步” to “飞书日记”. Source identity must survive that presentation
+  // change, otherwise classified non-todos stay in state.inbox forever.
+  return /飞书(?:同步|日记)/.test(sourceText);
 }
 
 async function dismissFilteredNonTodo(item,category){
@@ -51,6 +55,7 @@ async function dismissFilteredNonTodo(item,category){
     });
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
+    if(data.filtered!==true)throw new Error(data.question||data.message||'后端没有确认完成非待办过滤');
     v3AutoFilteredIds.add(id);
     v3AutoFilteredCount+=1;
     item.remove();
