@@ -158,24 +158,28 @@
   async function batchDelete(){
     const ids=[...selectedIds];
     if(!ids.length)return;
+    if(ids.length>500)return notify('单次批量删除最多 500 条，请分两次处理。',true);
     if(!confirm(`只从 Workbench 本地删除已选 ${ids.length} 条记录；飞书原文不会删除，而且这些已见来源以后不会重新导入。继续吗？`))return;
     busy=true;schedule();
-    let deleted=0;
-    let failed=0;
-    for(const id of ids){
-      try{
-        const response=await fetch('/api/inbox/command',{
-          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itemId:id,command:'删除'})
-        });
-        if(!response.ok)throw new Error(`HTTP ${response.status}`);
-        deleted+=1;
-        selectedIds.delete(id);
-      }catch{failed+=1;}
+    try{
+      const response=await fetch('/api/mcp',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          jsonrpc:'2.0',id:`inbox-batch-delete-${Date.now()}`,method:'tools/call',
+          params:{name:'inbox_batch_delete',arguments:{itemIds:ids},confirmed:true}
+        })
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||`批量删除请求失败 ${response.status}`);
+      if(data.error)throw new Error(data.error.message||'批量删除失败');
+      const result=data.result?.structuredContent?.result||{};
+      for(const id of result.deletedIds||[])selectedIds.delete(id);
+      busy=false;schedule();
+      const missing=Number(result.missing||0);
+      notify(`已一次性从 Workbench 本地删除 ${Number(result.deleted||0)} 条${missing?`，${missing} 条已不存在`:''}；飞书原文未改。`);
+      setTimeout(()=>location.reload(),120);
+    }catch(error){
+      busy=false;schedule();notify(error.message,true);
     }
-    busy=false;
-    if(failed)notify(`已删除本地 ${deleted} 条，${failed} 条失败，请刷新后再试。`,true);
-    else notify(`已从 Workbench 本地删除 ${deleted} 条；飞书原文未改。`);
-    setTimeout(()=>location.reload(),350);
   }
 
   document.addEventListener('change',event=>{
