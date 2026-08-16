@@ -6,7 +6,7 @@
 - 范围：仓内合同、GetNote v2 实现与测试、macOS 安装器、现网读回
 - 未做：不改产品行为、不读 `.env` / `state.json` / `config.json` 正文、不声称 live GetNote / 飞书 / Joycrew / iPhone 已验收
 - 现网（审查当时）：`http://127.0.0.1:8080/api/health` → `ok=true`，`version=2.0.0`；进程为 `nohup node src/server.mjs`，不是 LaunchAgent
-- 增补：独立运维审查已复核安装回滚、P0 与 `--preserve-runtime`、Joycrew health 探针和文档漂移；GetNote v2 红线仍以本文件 §3.1 为准
+- 增补：独立运维审查已复核安装回滚、P0 与 `--preserve-runtime`、Joycrew health 探针和文档漂移；独立 GetNote 审查已复核 Today / due / fingerprint / sink / CLI 隔离，并补上完成态翻回与雪花 ID 两条 Required
 
 ## 0. 总裁决
 
@@ -15,7 +15,7 @@
 | 门 | 裁决 |
 |---|---|
 | 03 合同层（`npm run test:files`） | **PASS** — 86/86 |
-| GetNote v2 红线（Today / 用户日期 / fingerprint / sink） | **PASS-WITH-GAPS** |
+| GetNote v2 红线（Today / 用户日期 / fingerprint / sink） | **PASS-WITH-GAPS** — 不构成回滚；完成态与雪花 ID 仍有合同缺口 |
 | 05 本机常驻上线 | **NO** — LaunchAgent 未 loaded |
 | 对外产品 / 06 增长 | **NO** — 现在不付钱 |
 | 允许声明 live GetNote / 飞书 / Joycrew / iPhone 已验收 | **NO** |
@@ -74,6 +74,7 @@
 - 同 note 多项同时改文案不自动合并。`ambiguous same-note text changes` 覆盖。
 - `dismissed` / `project_created` 会写入 `externalTaskDecisions`，后续同 `externalId` 被 `suppressed`。`tests/external-task-user-decisions.test.mjs` 覆盖。
 - Inbox → Todo 保持同一实体 ID，并切 `dueDateOwner=user`。同测试覆盖。
+- 只有来源 `completed=true` 才把 Todo 标完成并移出 Today。本轮缺失不推断完成（实现默证，缺正测）。
 - 核心事务先 `updateState`，飞书/ICS 在提交后跑；sink 失败只记 `ok_with_sink_errors`，不回滚。`src/task-sync-domain.mjs` `syncExternalTasks`。
 - `private_http` 拒绝公网 host、URL 凭证、query、fragment、redirect。`src/getnote-runtime.mjs` `runtimeBaseUrl`。
 - CLI 子进程环境是 allowlist，不含 `AI_PROVIDER_API_KEY` / `JOYCREW_*` / `SESSION_SECRET` / `WORKBENCH_PASSWORD`。`tests/external-cli-env.test.mjs` 覆盖。
@@ -99,13 +100,24 @@
    它现在未入库；一旦 `git add .` 会把错误进仓路由推到 GitHub。  
    **改法：** 重写后再跟踪，或删除，不要原样提交。
 
+4. **用户在 Workbench 把 GetNote Todo 标完成后，下次同步若来源仍 active，会被强制翻回未完成。**  
+   `applyGetnoteTaskSnapshot()` 对 `effectiveActive` 命中的已有 Todo 无条件写 `done:false`（`src/external-task-reconcile.mjs` 约 167 / 224 行）。`todoByExternalId()` 也不过滤已完成项。  
+   `docs/PRODUCT_SPEC.md` 写「Workbench 是个人 Todo 的状态真源」，但同步允许保留的用户字段只列了 `projectId` / priority / tags / Today，完成态没有对等保护。现有测试只覆盖来源 `completed=true` → 本地完成。  
+   **改法：** 已有 Todo 且 `done===true` 时，除非来源明确 `completed=true`，不要把 `done` 改回 `false`。补一条 `updateTodo({done:true})` 后再 sync 的行为测试。
+
+5. **noteId / cursor 仍可能先被 `JSON.parse` 收成 Number，再 `String()`，与「不经 JavaScript Number」合同不一致。**  
+   `src/getnote-runtime.mjs` `parseJsonText()` 直接 `JSON.parse`。`src/task-cli.mjs` `firstText()` 再 `String(value)`。超过 `Number.MAX_SAFE_INTEGER` 的雪花 ID（如 `1896830231705320746`）会先截断再进 fingerprint。  
+   `docs/TASK_SOURCE_PIPELINE.md` / `docs/ARCHITECTURE.md` 要求 note ID 和 cursor 按字符串处理。`tests/task-cli.test.mjs` 只用带引号的字符串字面量，没有覆盖 JSON 数字。  
+   **改法：** 解析时把超长整数保留成字符串，并补 `{"note_id": 1896830231705320746}` 回归。
+
 **Optional：**
 
-4. `externalTaskDecisions` 上限 `MAX_DECISIONS=2000`。超出后旧 tombstone 被丢掉，同 `externalId` 可能复活。无测试。个人用量暂可后补。
-5. `PRODUCT_SPEC.md` 标题仍是 v1.4 draft；CHANGELOG 停在 2.0.0，PR #28 未入版本记录。`product.mjs` 仍报 `2.0.0`，无法用版本号区分 `09877cc` 与 `c698133`。LaunchAgent 用 `WORKBENCH_BUILD_COMMIT` 补了这一点，文档没有。
-6. README / `docs/DEPLOYMENT.md` 只写 `npm start` + `:4173`，官方一键 / LaunchAgent / `:44173` 只活在 `MACOS_ONE_CLICK.md`。
-7. `MACOS_ONE_CLICK.md` §4 写「P0 前暂停已有 LaunchAgent」，代码和测试明确禁止预停。
-8. 公开文档含本机路径 `/Users/wanghui/AI-Work-OS`；`.env.example` / README 默认 `ws-dongjue` / `user-chris`（不是密钥，但是可关联身份）。
+6. `externalTaskDecisions` 上限 `MAX_DECISIONS=2000`。超出后旧 tombstone 被丢掉，同 `externalId` 可能复活。无测试。个人用量暂可后补。
+7. `PRODUCT_SPEC.md` 标题仍是 v1.4 draft；CHANGELOG 停在 2.0.0，PR #28 未入版本记录。`product.mjs` 仍报 `2.0.0`，无法用版本号区分 `09877cc` 与 `c698133`。LaunchAgent 用 `WORKBENCH_BUILD_COMMIT` 补了这一点，文档没有。
+8. README / `docs/DEPLOYMENT.md` 只写 `npm start` + `:4173`，官方一键 / LaunchAgent / `:44173` 只活在 `MACOS_ONE_CLICK.md`。
+9. `MACOS_ONE_CLICK.md` §4 写「P0 前暂停已有 LaunchAgent」，代码和测试明确禁止预停。
+10. 公开文档含本机路径 `/Users/wanghui/AI-Work-OS`；`.env.example` / README 默认 `ws-dongjue` / `user-chris`（不是密钥，但是可关联身份）。
+11. memo / project_note 两条终结路径没有独立回归；MCP `external_tasks_sync` 只测确认门，没跑 `confirmed:true` 后的提交/sink。
 
 ### 3.2 Readability
 
@@ -166,6 +178,10 @@
 测试缺口：
 
 - 安装器 `bootout → bootstrap 失败 → 恢复也失败` 无回归。
+- 用户本地 `done=true` 后来源仍 active：无行为测试。
+- JSON 数字字面量 noteId / cursor：无回归。
+- 本轮缺失 ≠ 完成：只有实现默证。
+- memo / project_note 抑制、MCP sync 执行、metadata 写入失败、ICS 0700 / 失败清 tmp：缺正测。
 - `MAX_DECISIONS` 淘汰无测试。
 - `CLAUDE.md` 不在 documentation-contract 覆盖里。
 - 没有真实 `getnote` / `lark-cli` / Joycrew `:4000` 现场门。
@@ -202,7 +218,8 @@
 3. 在图形会话 Terminal 重装 LaunchAgent，读回 `launchctl print` + health。现网 nohup 先保住，避免二次空窗。
 4. health 与文档对齐：`/api/health` 不要再露出恒假的 `joycrew.available`。
 5. 重写或删除未跟踪 `CLAUDE.md`；补 CHANGELOG / SPEC 标题；README/DEPLOYMENT 链到一键安装。
-6. Chris 拍板：是否建档 `projects/personal-ai-workbench/`；本仓是否继续当唯一入口；Joycrew `:4000` 现在要不要拉。
+6. GetNote 下一刀（不挡 05）：本地完成不被来源翻回；雪花 ID 不经 `JSON.parse` Number。
+7. Chris 拍板：是否建档 `projects/personal-ai-workbench/`；本仓是否继续当唯一入口；Joycrew `:4000` 现在要不要拉。
 
 不要做：06 SEO；在安装第二次失败未根治前再包一层安装器；把 `data/p0`、`.env`、`preview.html` 原样进仓。
 
