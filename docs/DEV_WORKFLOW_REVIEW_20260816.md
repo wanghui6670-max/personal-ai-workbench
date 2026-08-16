@@ -1,3 +1,5 @@
+> ⚠️ **历史审查提示（2026-08-16）**：本文件以 `c698133` / GetNote Task Sync v2 为基线，保留当时的仓库与本机现场审查证据。当前产品来源边界请以 [`WORKBENCH_V3_SOURCE_CONTRACT.md`](./WORKBENCH_V3_SOURCE_CONTRACT.md) 为准；当前工程优先级、已关闭项与遗漏项请以 [`UNIFIED_CLOSURE_REVIEW_20260816.md`](./UNIFIED_CLOSURE_REVIEW_20260816.md) 为准。本文件中的 `8080`、`nohup`、LaunchAgent loaded 状态、Joycrew `:4000` 等“现网”描述均为当时截面，不代表当前 Mac 已重新验证。
+
 # Personal AI Workbench 深审报告
 
 - 日期：2026-08-16
