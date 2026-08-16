@@ -19,12 +19,14 @@ test('workbench-core contains no project creation, classification, update or syn
   assert.doesNotMatch(core,/writeProjectMd|prepareProjectDir|prepareNewProjectDir|analyzeProject/);
 });
 
-test('production inbox surface uses hash-only permanent acknowledgements for append-only Feishu sync',async()=>{
+test('production inbox surface keeps hash-only permanent acknowledgements while allowing one explicit todo migration bypass',async()=>{
   const inbox=await fsp.readFile(path.join(root,'src','inbox-domain.mjs'),'utf8');
   assert.match(inbox,/inboxContentHash/);
   assert.match(inbox,/const priorAck=ackByBlock\.get\(remote\.blockId\)/);
-  assert.match(inbox,/if\(priorAck\)\{/);
+  assert.match(inbox,/const migrationReimport=legacyTodoReimportIds\.has\(remote\.blockId\)/);
+  assert.match(inbox,/if\(priorAck&&!migrationReimport\)\{/);
   assert.match(inbox,/seenSkipped\+=1/);
+  assert.match(inbox,/The ACK itself is never deleted or rewritten/);
   assert.doesNotMatch(inbox,/inboxAckMatches/);
   assert.doesNotMatch(inbox,/state\.inboxAcks=state\.inboxAcks\.filter/);
   assert.doesNotMatch(inbox,/inboxAcks\.push\(\{blockId:[^}]*text:/);

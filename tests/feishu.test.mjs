@@ -31,7 +31,7 @@ test('Feishu parser reads only the 收件箱 h1 section and deduplicates block i
   assert.deepEqual(parsed.items.map(item => [item.blockId, item.text]), [['blk_0', '第一条'], ['blk_1', '第二条']]);
 });
 
-test('Feishu sync imports a source block once and later remote disappearance does not mutate local routing', async t => {
+test('Feishu todo sync imports a source block once and later remote disappearance does not mutate local routing', async t => {
   const store = await fixture(t);
   let current = xml(['[INBOX] 从飞书来的事项']);
   const client = { fetch: async () => ({ content: current, revisionId: 7, documentId: 'doc', ...parseFeishuInboxXml(current) }) };
@@ -39,7 +39,9 @@ test('Feishu sync imports a source block once and later remote disappearance doe
   assert.equal(result.imported, 1);
   let state = await store.readState();
   assert.equal(state.inbox.length, 1);
-  assert.equal(state.inbox[0].source, 'feishu_doc');
+  assert.equal(state.inbox[0].source, 'feishu_todo');
+  assert.equal(state.inbox[0].feishuMode, 'todo_only');
+  assert.equal(state.inbox[0].feishuExplicitTodo, true);
   assert.equal(state.todos.length, 0);
   assert.deepEqual(state.todayPlan, []);
   result = await syncFeishuInbox({ store, client });
@@ -55,19 +57,21 @@ test('Feishu sync imports a source block once and later remote disappearance doe
   assert.equal(state.inboxAcks.length, 1);
 });
 
-test('new local inbox writes Feishu first and only commits local cache after readback', async t => {
+test('new local inbox writes explicit [INBOX] todo to Feishu first and only commits local cache after readback', async t => {
   const store = await fixture(t);
   const calls = [];
   const client = {
     appendAndFetch: async (config, text) => {
       calls.push({ config, text });
-      return { item: { blockId: 'blk_new', text }, revisionId: 8, items: [{ blockId: 'blk_new', text }] };
+      return { item: { blockId: 'blk_new', text, explicitInbox:true, explicitTodo:true, todoKind:'inbox_marker' }, mode:'todo_only', revisionId: 8, items: [{ blockId: 'blk_new', text }] };
     }
   };
   const item = await addInbox({ store, text: '先写飞书再缓存', source: 'manual', client });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].text, '先写飞书再缓存');
-  assert.equal(item.source, 'feishu_doc');
+  assert.equal(item.source, 'feishu_todo');
+  assert.equal(item.feishuMode, 'todo_only');
+  assert.equal(item.feishuExplicitTodo, true);
   assert.equal(item.feishuBlockId, 'blk_new');
   assert.equal((await store.readState()).inbox[0].feishuBlockId, 'blk_new');
 });
@@ -83,6 +87,7 @@ test('CLI adapter uses v2 fetch and inserts inside 收件箱 instead of appendin
   };
   const client = createFeishuJournalClient({ exec: fakeExec });
   const fetched = await client.fetch({ documentUrl: 'https://example.feishu.cn/wiki/test', inboxHeading: '收件箱', inboxPrefix: '[INBOX]' });
+  assert.equal(fetched.mode,'todo_only');
   assert.equal(fetched.items[0].text, '现有');
   await client.appendAndFetch({ documentUrl: 'https://example.feishu.cn/wiki/test', inboxHeading: '收件箱', inboxPrefix: '[INBOX]' }, '新增');
   const update = calls.find(call => call.args.includes('+update'));

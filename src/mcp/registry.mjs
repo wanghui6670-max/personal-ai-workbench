@@ -1,15 +1,13 @@
 import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
-import { enforceInboxReviewPlan, inboxReviewPlannerMessage, isInboxReviewRoute, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
-import { localDiaryReviewPlan, planDiaryReviewAI } from '../diary-review-planner.mjs';
+import { enforceInboxReviewPlan, inboxReviewPlannerMessage, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createContentTools, planContentMessage } from './content-tools.mjs';
 import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 import { createFeishuInitializeTools } from './feishu-initialize-tools.mjs';
 import { createInboxBatchTools } from './inbox-batch-tools.mjs';
-import { createDiaryExtractionTools } from './diary-extraction-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -44,7 +42,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
   const workbenchTools=createWorkbenchTools();
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
-  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createDiaryExtractionTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
+  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -82,7 +80,6 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     const modelState=scopedInboxReviewState(derived,route);
     const modelTools=scopedInboxReviewTools(list(),route);
     const plannerMessage=inboxReviewPlannerMessage(derived,route,message);
-    const diaryReview=isInboxReviewRoute(route)&&modelState.inbox?.[0]?.text?.startsWith('[飞书混合日记');
     let planned=null;
     let planner='local_fallback';
     let plannerModel=null;
@@ -90,13 +87,10 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       try{
         const runtime=aiRuntimeConfig();
         plannerModel=runtime.model||null;
-        planned=diaryReview
-          ?await planDiaryReviewAI({state:modelState,route})
-          :await planAIConsole({message:plannerMessage,state:modelState,tools:modelTools,route});
+        planned=await planAIConsole({message:plannerMessage,state:modelState,tools:modelTools,route});
         if(planned)planner='model';
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
-    if(!planned&&diaryReview)planned=localDiaryReviewPlan({state:modelState,route});
     if(!planned)planned=planJoycrewMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planContentMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planProjectRecordMessage({message:plannerMessage,state:modelState});
@@ -104,7 +98,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人工作事项主来源是飞书日记；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人待办同步只读取飞书云文档中的明确待办；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
     }
     let input=planned.args||{};
     if(tool){

@@ -113,6 +113,10 @@ async function updateDocument(documentUrl, { anchorBlockId, content }, { timeout
   ], '文档写入', { exec, timeoutMs });
 }
 
+function isCompletedTodoAttrs(attrs='') {
+  return /\b(?:checked|done|completed)(?:=["']?(?:true|1|checked|done|completed)["']?)?/i.test(String(attrs));
+}
+
 export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INBOX]' } = {}) {
   const source = String(xml ?? '');
   const headingPattern = new RegExp(`<h1\\b[^>]*>${escapeRegExp(heading)}<\\/h1\\s*>`, 'i');
@@ -122,17 +126,30 @@ export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INB
   const nextHeading = /<h1\b[^>]*>[^<]*<\/h1\s*>/i.exec(afterHeading);
   const section = nextHeading ? afterHeading.slice(0, nextHeading.index) : afterHeading;
   const items = [];
-  const blockPattern = /<(p|checkbox|li)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+  const blockPattern = /<(p|checkbox|task|todo|li)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
   let match;
   while ((match = blockPattern.exec(section))) {
+    const tag = match[1].toLowerCase();
+    const attrs = match[2];
+    if (['checkbox','task','todo'].includes(tag) && isCompletedTodoAttrs(attrs)) continue;
     const text = decodeXmlText(match[3]);
     if (!text.startsWith(prefix)) continue;
     const value = text.slice(prefix.length).trim();
     if (!value) continue;
-    const idMatch = match[2].match(/\bid=["']([^"']+)["']/i);
+    const idMatch = attrs.match(/\bid=["']([^"']+)["']/i);
     const blockId = idMatch?.[1] || null;
     if (!blockId) continue;
-    items.push({ blockId, text: value, rawText: text, tag: match[1].toLowerCase(), explicitInbox:true, headingPath:[heading] });
+    items.push({
+      blockId,
+      text:value,
+      rawText:text,
+      tag,
+      checked:false,
+      explicitInbox:true,
+      explicitTodo:true,
+      todoKind:'inbox_marker',
+      headingPath:[heading]
+    });
   }
   const unique = new Map();
   for (const item of items) unique.set(item.blockId, item);
@@ -166,7 +183,7 @@ export function parseFeishuDiaryXml(xml, { prefix = '[INBOX]' } = {}) {
       explicitInbox = true;
     }
     if (!text) continue;
-    const checked = tag === 'checkbox' && /\bchecked(?:=["']?(?:true|1|checked)["']?)?/i.test(attrs);
+    const checked = tag === 'checkbox' && isCompletedTodoAttrs(attrs);
     items.push({
       blockId,
       text,
@@ -181,6 +198,55 @@ export function parseFeishuDiaryXml(xml, { prefix = '[INBOX]' } = {}) {
   const unique = new Map();
   for (const item of items) unique.set(item.blockId, item);
   return { sectionFound:false, headingBlockId:null, items:[...unique.values()], mode:'mixed_diary' };
+}
+
+function parseNativeFeishuTodos(xml, { prefix='[INBOX]' } = {}) {
+  const source=String(xml??'');
+  const headings={h1:null,h2:null,h3:null};
+  const items=[];
+  const pattern=/<(h1|h2|h3|checkbox|task|todo)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+  let match;
+  let order=0;
+  while((match=pattern.exec(source))){
+    const tag=match[1].toLowerCase();
+    const attrs=match[2];
+    const rawText=decodeXmlText(match[3]);
+    if(tag==='h1'||tag==='h2'||tag==='h3'){
+      if(rawText)headings[tag]=rawText;
+      if(tag==='h1'){headings.h2=null;headings.h3=null;}
+      if(tag==='h2')headings.h3=null;
+      continue;
+    }
+    if(isCompletedTodoAttrs(attrs))continue;
+    const blockId=attrs.match(/\bid=["']([^"']+)["']/i)?.[1]||null;
+    if(!blockId||!rawText)continue;
+    const explicitInbox=rawText.startsWith(prefix);
+    const text=explicitInbox?rawText.slice(prefix.length).trim():rawText;
+    if(!text)continue;
+    items.push({
+      blockId,text,rawText,tag,checked:false,explicitInbox,explicitTodo:true,todoKind:'native_todo',
+      headingPath:[headings.h1,headings.h2,headings.h3].filter(Boolean),order:order++
+    });
+  }
+  return items;
+}
+
+export function parseFeishuTodoXml(xml, { heading='收件箱', prefix='[INBOX]' } = {}) {
+  const configured=parseFeishuInboxXml(xml,{heading,prefix});
+  const workbench=heading===WORKBENCH_INBOX_HEADING
+    ?{sectionFound:false,headingBlockId:null,items:[]}
+    :parseFeishuInboxXml(xml,{heading:WORKBENCH_INBOX_HEADING,prefix});
+  const nativeItems=parseNativeFeishuTodos(xml,{prefix});
+  const unique=new Map();
+  for(const item of nativeItems)unique.set(item.blockId,item);
+  for(const item of configured.items)unique.set(item.blockId,{...item,explicitTodo:true});
+  for(const item of workbench.items)unique.set(item.blockId,{...item,explicitTodo:true});
+  return {
+    sectionFound:configured.sectionFound||workbench.sectionFound,
+    headingBlockId:configured.headingBlockId||workbench.headingBlockId||null,
+    items:[...unique.values()],
+    mode:'todo_only'
+  };
 }
 
 export function parseFeishuProjectRecordsXml(xml, { heading = PROJECT_RECORD_HEADING } = {}) {
@@ -240,13 +306,11 @@ function escapeXml(value) {
 export function createFeishuJournalClient({ exec = execFileAsync, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   async function fetchSource(config) {
     const document = await fetchDocument(config?.documentUrl, { exec, timeoutMs });
-    const section = parseFeishuInboxXml(document.content, {
-      heading: config?.inboxHeading || '收件箱',
-      prefix: config?.inboxPrefix || '[INBOX]'
+    const todos=parseFeishuTodoXml(document.content,{
+      heading:config?.inboxHeading||'收件箱',
+      prefix:config?.inboxPrefix||'[INBOX]'
     });
-    if (section.sectionFound) return { ...document, ...section, mode:'inbox_section' };
-    const diary = parseFeishuDiaryXml(document.content, { prefix:config?.inboxPrefix || '[INBOX]' });
-    return { ...document, ...diary, mode:'mixed_diary' };
+    return {...document,...todos,mode:'todo_only'};
   }
 
   async function ensureWriteSection(config) {

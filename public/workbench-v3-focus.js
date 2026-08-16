@@ -18,41 +18,41 @@ function polishDashboard(){
   const grid=dashboard.querySelector(':scope > .v3-grid');
   const today=grid?.children?.[0],decisions=grid?.children?.[1];
   setText(queue?.querySelector('.v3-card-head h2'),'待处理工作流');
-  setText(queue?.querySelector('.v3-card-head p'),'飞书新增 → AI 提取真正待办 → 你确认 → Todo；背景、分析、复盘和日常记录继续留在飞书。');
+  setText(queue?.querySelector('.v3-card-head p'),'飞书明确待办 → AI 给处理建议 → 你确认 → Todo；普通日记不进入待办同步。');
   setText(today?.querySelector('.v3-card-head h2'),'今天已确认');
   setText(today?.querySelector('.v3-card-head p'),'这里只放你已经明确决定今天要做的事。');
   setText(decisions?.querySelector('.v3-card-head h2'),'需要你拍板');
-  setText(decisions?.querySelector('.v3-card-head p'),'AI 无法安全决定的事项集中在这里，不打断你。');
+  setText(decisions?.querySelector('.v3-card-head p'),'AI 无法安全决定的待办集中在这里，不打断你。');
   setText(projects?.querySelector('.v3-card-head h2'),'最近项目现场');
   setText(projects?.querySelector('.v3-card-head p'),'恢复最近做到哪里、进度和卡点；需要时再打开项目。');
   const labels=dashboard.querySelectorAll('.v3-hero .v3-metric span');
-  ['今天已确认','待处理输入','AI 待办提取中','需要你拍板'].forEach((label,index)=>setText(labels[index],label));
+  ['今天已确认','飞书待办','AI 待办建议中','需要你拍板'].forEach((label,index)=>setText(labels[index],label));
   const source=dashboard.querySelector('.v3-source');
   const sourcePill=source?.querySelector('.pill.blue');
-  if(sourcePill)setText(sourcePill,'飞书日记主来源');
+  if(sourcePill)setText(sourcePill,'飞书待办来源');
   const unbound=source?.querySelector('.pill.amber');
   if(unbound&&/飞书未绑定/.test(unbound.textContent||'')){
     const spans=[...source.querySelectorAll(':scope > span')];
     const description=spans.find(span=>span!==unbound);
-    setText(description,'绑定飞书工作日记后，可以继续混合记录待办、分析和日常内容；Workbench 只从你手动同步的新内容中提取真正待办。');
+    setText(description,'绑定飞书云文档后，待办同步只读取原生未完成待办/复选框和明确收件箱里的 [INBOX] 待办；普通日记正文不会进入。');
   }
 }
 
 function focusInfo(item){
   return{
     id:itemId(item),
-    text:item.querySelector('.v3-item-text')?.textContent?.trim()||'当前事项',
-    label:item.querySelector('.v3-ai-label')?.textContent?.trim()||'等待 AI 提取',
-    reason:item.querySelector('.v3-ai-reason')?.textContent?.trim()||'选中后可在这里查看待办提取结果并继续处理。',
+    text:item.querySelector('.v3-item-text')?.textContent?.trim()||'当前待办',
+    label:item.querySelector('.v3-ai-label')?.textContent?.trim()||'等待 AI 建议',
+    reason:item.querySelector('.v3-ai-reason')?.textContent?.trim()||'选中后可在这里查看这条明确待办的处理建议。',
     command:item.querySelector('.v3-ai-command')?.textContent?.trim()||'',
-    canConfirm:Boolean(item.querySelector('[data-v3-action="confirm-plan"],[data-v3-action="confirm-extracted-todo"]')),
+    canConfirm:Boolean(item.querySelector('[data-v3-action="confirm-plan"]')),
     canClarify:Boolean(item.querySelector('[data-action="open-command"]')),
     canAnalyze:Boolean(item.querySelector('[data-v3-action="analyze"]'))
   };
 }
 function focusPanelHtml(info){
-  if(!info)return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-empty">从中间“待处理工作流”选一条内容。原始日记会先提取真正待办；提取后的候选可在这里补信息或确认。</div>`;
-  return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-title"></div><div class="v3-focus-status"><span class="pill blue"></span></div><div class="v3-focus-reason"></div>${info.command?'<div class="v3-focus-command"></div>':''}<div class="v3-focus-actions">${info.canConfirm?'<button class="btn small primary" data-focus-forward="confirm">确认并处理</button>':''}${info.canClarify?'<button class="btn small" data-focus-forward="clarify">补充信息</button>':''}${info.canAnalyze?'<button class="btn small" data-focus-forward="analyze">重新提取</button>':''}</div>`;
+  if(!info)return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-empty">从中间“待处理工作流”选一条飞书待办。这里只处理已经明确是待办的内容，不会从普通日记里提取任务。</div>`;
+  return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-title"></div><div class="v3-focus-status"><span class="pill blue"></span></div><div class="v3-focus-reason"></div>${info.command?'<div class="v3-focus-command"></div>':''}<div class="v3-focus-actions">${info.canConfirm?'<button class="btn small primary" data-focus-forward="confirm">确认并处理</button>':''}${info.canClarify?'<button class="btn small" data-focus-forward="clarify">补充信息</button>':''}${info.canAnalyze?'<button class="btn small" data-focus-forward="analyze">重新分析</button>':''}</div>`;
 }
 function renderFocusPanel(){
   const panel=document.querySelector('.ai-panel');if(!panel)return;
@@ -73,7 +73,7 @@ function renderFocusPanel(){
   }
   panel.classList.toggle('v3-has-focus',Boolean(info));
   const title=panel.querySelector('.ai-title'),subtitle=panel.querySelector('.ai-subtitle');
-  if(info){setText(title,'当前事项助手');setText(subtitle,'围绕选中的待办候选补充信息或确认处理');}
+  if(info){setText(title,'当前事项助手');setText(subtitle,'只围绕选中的明确待办补充信息或确认处理');}
 }
 function attachMainObserver(){
   const main=document.querySelector('.main');
@@ -89,7 +89,7 @@ document.addEventListener('click',event=>{
   if(forward){
     event.preventDefault();event.stopPropagation();
     const item=[...document.querySelectorAll('.v3-inbox-item')].find(node=>itemId(node)===selectedInboxId);if(!item)return;
-    const selector={confirm:'[data-v3-action="confirm-plan"],[data-v3-action="confirm-extracted-todo"]',clarify:'[data-action="open-command"]',analyze:'[data-v3-action="analyze"]'}[forward.dataset.focusForward];
+    const selector={confirm:'[data-v3-action="confirm-plan"]',clarify:'[data-action="open-command"]',analyze:'[data-v3-action="analyze"]'}[forward.dataset.focusForward];
     item.querySelector(selector)?.click();return;
   }
   const item=event.target.closest?.('.v3-inbox-item');
