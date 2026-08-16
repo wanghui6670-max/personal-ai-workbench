@@ -1,15 +1,22 @@
 (()=>{
   const nativeFetch=window.fetch.bind(window);
   const IDLE_SOURCE='feishu_doc_idle';
+  const INIT_ANALYZE_ONCE='workbench-feishu-initialize-analyze-once';
   let syncPermit=false;
   let classificationRun=false;
   const manualAnalyzeIds=new Set();
   let enhanceScheduled=false;
   let statePromise=null;
 
-  // A page reload must never resume an old automatic diary-classification run.
-  try{sessionStorage.removeItem('workbench-v3-inbox-reviews-v1');}catch{}
-  window.__WORKBENCH_FEISHU_CLASSIFY_RUN__=false;
+  // A normal page reload must never resume an old automatic diary-classification run.
+  // The only exception is the single reload immediately following an explicit
+  // one-time initialization import.
+  try{
+    classificationRun=sessionStorage.getItem(INIT_ANALYZE_ONCE)==='1';
+    sessionStorage.removeItem(INIT_ANALYZE_ONCE);
+    sessionStorage.removeItem('workbench-v3-inbox-reviews-v1');
+  }catch{}
+  window.__WORKBENCH_FEISHU_CLASSIFY_RUN__=classificationRun;
 
   function requestUrl(input){
     try{return new URL(typeof input==='string'?input:input?.url||'',location.origin);}catch{return null;}
@@ -92,7 +99,7 @@
       if(!actions){actions=document.createElement('div');actions.className='v3-actions';node.appendChild(actions);}
       const button=document.createElement('button');
       button.type='button';button.className='btn small';button.dataset.manualDismiss=item.id;
-      button.textContent='删除本地';button.title=item.source==='feishu_doc'?'仅从 Workbench 撤下；飞书原文保留，同一未变化来源不会重复导入。':'从 Workbench 本地待处理区删除。';
+      button.textContent='删除本地';button.title=item.source==='feishu_doc'?'仅从 Workbench 撤下；飞书原文保留，这个来源以后不会重新导入。':'从 Workbench 本地待处理区删除。';
       actions.appendChild(button);
     });
   }
@@ -119,6 +126,9 @@
     }).catch(error=>{dismiss.disabled=false;dismiss.textContent='删除本地';alert(error.message);});
   },true);
 
+  window.__WORKBENCH_ARM_INITIAL_ANALYSIS__=()=>{
+    try{sessionStorage.setItem(INIT_ANALYZE_ONCE,'1');}catch{}
+  };
   window.addEventListener('workbench:feishu-sync-complete',scheduleEnhance);
   const app=document.querySelector('#app');if(app)new MutationObserver(scheduleEnhance).observe(app,{childList:true,subtree:true});
   requestAnimationFrame(enhance);
