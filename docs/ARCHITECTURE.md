@@ -157,7 +157,9 @@ P0 gate
 
 `restart` 虽不改 plist，也必须在失败时恢复此前已 loaded 的服务。
 
-## 9. 数据、备份与恢复
+## 9. 数据、Capture、备份与恢复
+
+`POST /api/capture` 使用稳定 `captureId` 做幂等，同一次采集的网络重试必须复用同一个 `captureId`。
 
 backup v2 继续包含：
 
@@ -174,7 +176,8 @@ backup v2 继续包含：
 - `captureReceipts` 只保存 Capture 标识、正文 hash 和处理引用；
 - `projectRecordReceipts` 只保存 operationId、机器进度和飞书指针；
 - 项目正文、飞书正文、凭证、GetNote 登录态和 Joycrew token 不属于备份内容；
-- `data/p0/` 是运行时安装/备份目录，必须保持 Git ignored。
+- `data/p0/` 是运行时安装/备份目录，必须保持 Git ignored；
+- 恢复任一阶段失败必须尝试整体回滚，不能留下部分恢复状态。
 
 ## 10. 部署与门禁
 
