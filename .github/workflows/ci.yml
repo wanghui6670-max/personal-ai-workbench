@@ -48,6 +48,7 @@ jobs:
           node --check src/getnote-insight.mjs
           node --check src/getnote-insight-parser.mjs
           node --check src/getnote-insight-service.mjs
+          node --check src/getnote-content-sync.mjs
           node --check src/task-cli.mjs
           node --check src/local-calendar.mjs
           node --check src/task-sync-domain.mjs
@@ -63,6 +64,7 @@ jobs:
           node --check src/mcp/registry.mjs
           node --check src/mcp/tools.mjs
           node --check src/mcp/project-record-tools.mjs
+          node --check src/mcp/content-tools.mjs
           node --check src/mcp/external-task-tools.mjs
           node --check src/mcp/joycrew-tools.mjs
           node --check src/harness-auth.mjs
@@ -89,6 +91,7 @@ jobs:
           node --check public/project-records.js
           node --check public/ux-enhancements.js
           node --check public/getnote-integration.js
+          node --check public/workbench-v3.js
           node --check public/harness-navigator.js
           node --check public/joycrew-integration.js
       - name: Run all Workbench contract tests
@@ -163,5 +166,9 @@ jobs:
           node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-health.json','utf8')); if(value.ok!==true||value.version!=='2.0.0') throw new Error('unexpected health response');"
           curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'
           curl --fail --silent http://127.0.0.1:49173/joycrew-integration.js | grep '业务执行'
+          curl --fail --silent http://127.0.0.1:49173/workbench-v3.js | grep '今日与收件箱'
+          curl --fail --silent http://127.0.0.1:49173/getnote-integration.js | grep '自媒体'
+          curl --fail --silent http://127.0.0.1:49173/api/ai/tools >/tmp/workbench-tools.json
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-tools.json','utf8')); const names=(value.tools||[]).map(v=>v.name); for(const required of ['feishu_inbox_sync','inbox_process','getnote_content_status','getnote_content_sync']) if(!names.includes(required)) throw new Error('missing v3 tool '+required); for(const retired of ['external_tasks_sync','external_task_integration_update']) if(names.includes(retired)) throw new Error('retired tool exposed '+retired);"
           curl --fail --silent http://127.0.0.1:49173/api/joycrew/status >/tmp/joycrew-status.json
           node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/joycrew-status.json','utf8')); if(value.joycrew?.enabled!==false) throw new Error('Joycrew fail-isolation contract changed');"
