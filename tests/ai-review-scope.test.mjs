@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {enforceInboxReviewPlan,isInboxReviewRoute,scopedInboxReviewState,scopedInboxReviewTools} from '../src/ai-review-scope.mjs';
+import {enforceInboxReviewPlan,inboxReviewPlannerMessage,isInboxReviewRoute,scopedInboxReviewState,scopedInboxReviewTools} from '../src/ai-review-scope.mjs';
 
 test('inbox review scope sends only the target Inbox item and project directory summary',()=>{
   const state={
@@ -28,6 +28,25 @@ test('inbox review scope sends only the target Inbox item and project directory 
   assert.equal(serialized.includes('不相关的敏感收件箱原文'),false);
   assert.equal(serialized.includes('不相关待办正文'),false);
   assert.equal(serialized.includes('不应发送的项目长介绍'),false);
+});
+
+test('mixed diary review carries heading context and canonical classification rules',()=>{
+  const state={
+    inbox:[{
+      id:'in-diary',text:'今天把客户方案重新整理了一版',source:'feishu_doc',createdAt:'2026-08-16T02:00:00Z',
+      feishuMode:'mixed_diary',feishuHeadingPath:['2026-08-16','工作记录'],feishuTag:'p',feishuExplicitInbox:false
+    }],
+    projects:[],todos:[],todayPlan:[],confirmations:[]
+  };
+  const route={view:'inbox-review',id:'in-diary'};
+  const scoped=scopedInboxReviewState(state,route);
+  assert.match(scoped.inbox[0].text,/飞书混合日记/);
+  assert.match(scoped.inbox[0].text,/2026-08-16 \/ 工作记录/);
+  const prompt=inboxReviewPlannerMessage(state,route,'旧浏览器提示');
+  assert.match(prompt,/待办、项目进展、分析思考、日常记录、需要你决定/);
+  assert.match(prompt,/分析思考或日常记录：优先建议“只是备忘”/);
+  assert.match(prompt,/不得删除飞书原文/);
+  assert.equal(prompt.includes('旧浏览器提示'),false);
 });
 
 test('inbox review exposes only inbox_process and rejects cross-item plans',()=>{
