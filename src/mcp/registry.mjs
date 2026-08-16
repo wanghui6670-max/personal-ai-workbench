@@ -4,6 +4,7 @@ import { deriveState } from '../domain.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createExternalTaskTools, planExternalTaskMessage } from './external-task-tools.mjs';
+import { createContentTools, planContentMessage } from './content-tools.mjs';
 import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
@@ -39,7 +40,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
   const workbenchTools=createWorkbenchTools().filter(tool=>tool.name!=='feishu_inbox_sync');
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
-  const tools=[...workbenchTools,...createProjectRecordTools(),...createExternalTaskTools(),...joycrewTools];
+  const tools=[...workbenchTools,...createProjectRecordTools(),...createContentTools(),...createExternalTaskTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -86,12 +87,13 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
     if(!planned)planned=planJoycrewMessage({message,state:derived});
+    if(!planned)planned=planContentMessage({message,state:derived});
     if(!planned)planned=planExternalTaskMessage({message,state:derived});
     if(!planned)planned=planProjectRecordMessage({message,state:derived});
     if(!planned)planned=planWorkbenchMessage({message,state:derived});
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人待办事实来源是得到大脑只读管线；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人收件箱主来源是飞书云文档；得到大脑仅保留自媒体内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};
     }
     let input=planned.args||{};
     if(tool){
