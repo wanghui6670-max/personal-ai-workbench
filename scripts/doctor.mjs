@@ -77,7 +77,7 @@ try{
         check('GetNote 读取运行时',true,'local_cli：安装、会员、登录和 API 连通性检查通过；未执行写入');
       }else{
         await reader.listNotes({limit:1});
-        check('GetNote 读取运行时',true,`private_http：${runtime.origin} 只读连通性与鉴权检查通过`);
+        check('GetNote 读取运行时',true,`private_http:${runtime.origin} 只读连通性与鉴权检查通过`);
       }
     }catch(error){
       const mode=String(process.env.GETNOTE_RUNTIME_MODE||'local_cli').trim()||'local_cli';
