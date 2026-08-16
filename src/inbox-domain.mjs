@@ -1,7 +1,7 @@
 import { addActivity } from './store.mjs';
 import { createFeishuJournalClient, FeishuSourceError, sourceConfigured } from './feishu.mjs';
 import { newId, nowIso, compactText } from './utils.mjs';
-import { inboxContentHash, inboxAckMatches, normalizeInboxAcks } from './inbox-ack.mjs';
+import { inboxContentHash, normalizeInboxAcks } from './inbox-ack.mjs';
 import { normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
 
 const defaultFeishuJournalClient=createFeishuJournalClient();
@@ -69,7 +69,7 @@ function applyRemoteMetadata(local,remote,mode){
 export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
   const config=await store.readConfig();
   if(!sourceConfigured(config.dataSource)){
-    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,reason:'not_configured'});
+    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,reason:'not_configured'});
   }
 
   let fetched;
@@ -91,16 +91,14 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
 
   const allRemoteItems=(fetched.items||[]).map(normalizeRemoteItem).filter(item=>item.blockId&&item.text);
   const {unique:uniqueRemoteItems,duplicates:duplicateRemoteItems}=dedupeRemoteItems(allRemoteItems);
-  const remoteByBlock=new Map(allRemoteItems.map(item=>[item.blockId,item]));
   const firstMixedSync=fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
   const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(uniqueRemoteItems):null;
   const remoteItems=bootstrapIds?uniqueRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):uniqueRemoteItems;
   const baselineItems=bootstrapIds?uniqueRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
   let imported=0;
-  let removed=0;
-  let updated=0;
   let baselined=0;
   let deduped=duplicateRemoteItems.length;
+  let seenSkipped=0;
 
   await store.updateState(state=>{
     state.inboxAcks=normalizeInboxAcks(state.inboxAcks);
@@ -117,61 +115,56 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     }
     for(const note of state.notes||[])if(note?.text)knownDedupeHashes.add(inboxDedupeHash(note.text));
 
-    const upsertAck=remote=>{
+    const ensureAck=remote=>{
+      const prior=ackByBlock.get(remote.blockId);
+      if(prior)return prior.contentHash;
       const contentHash=inboxContentHash(remote.text);
-      const priorAck=ackByBlock.get(remote.blockId);
-      if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
-      else{
-        const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
-        state.inboxAcks.push(ack);
-        ackByBlock.set(remote.blockId,ack);
-      }
+      const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
+      state.inboxAcks.push(ack);
+      ackByBlock.set(remote.blockId,ack);
       return contentHash;
-    };
-    const removeLocal=local=>{
-      state.inbox=state.inbox.filter(item=>item.id!==local.id);
-      state.confirmations=state.confirmations.filter(confirmation=>confirmation.inboxId!==local.id);
-      localByBlock.delete(local.feishuBlockId);
     };
 
     for(const remote of baselineItems){
-      const contentHash=upsertAck(remote);
+      if(ackByBlock.has(remote.blockId)){
+        seenSkipped+=1;
+        continue;
+      }
+      const contentHash=ensureAck(remote);
       knownExactHashes.add(contentHash);
       knownDedupeHashes.add(inboxDedupeHash(remote.text));
       baselined+=1;
     }
 
-    for(const {item:remote,winner} of duplicateRemoteItems){
-      const local=localByBlock.get(remote.blockId);
-      const winnerLocal=winner?localByBlock.get(winner.blockId):null;
-      if(local&&winnerLocal)removeLocal(local);
-      upsertAck(remote);
+    for(const {item:remote} of duplicateRemoteItems){
+      if(ackByBlock.has(remote.blockId)){
+        seenSkipped+=1;
+        continue;
+      }
+      ensureAck(remote);
     }
 
     for(const remote of remoteItems){
+      const priorAck=ackByBlock.get(remote.blockId);
+      if(priorAck){
+        seenSkipped+=1;
+        continue;
+      }
+
       const contentHash=inboxContentHash(remote.text);
       const dedupeHash=inboxDedupeHash(remote.text);
       const local=localByBlock.get(remote.blockId);
-      const priorAck=ackByBlock.get(remote.blockId);
       if(local){
-        if(local.text!==remote.text){
-          local.text=remote.text;
-          updated+=1;
-        }
-        if(remote.captureId&&!local.captureId)local.captureId=remote.captureId;
         applyRemoteMetadata(local,remote,fetched.mode);
-        upsertAck(remote);
+        ensureAck(remote);
         knownExactHashes.add(contentHash);
         knownDedupeHashes.add(dedupeHash);
+        seenSkipped+=1;
         continue;
       }
-      if(priorAck&&inboxAckMatches(priorAck,remote.text)){
-        knownExactHashes.add(contentHash);
-        knownDedupeHashes.add(dedupeHash);
-        continue;
-      }
+
       if(knownExactHashes.has(contentHash)||knownDedupeHashes.has(dedupeHash)){
-        upsertAck(remote);
+        ensureAck(remote);
         knownExactHashes.add(contentHash);
         knownDedupeHashes.add(dedupeHash);
         deduped+=1;
@@ -191,30 +184,20 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         createdAt:nowIso()
       };
       state.inbox.unshift(item);
-      upsertAck(remote);
+      ensureAck(remote);
       knownExactHashes.add(contentHash);
       knownDedupeHashes.add(dedupeHash);
       imported+=1;
       addActivity(state,{
         type:'inbox_synced',
         inboxId:item.id,
-        text:fetched.mode==='mixed_diary'?'从飞书日记同步一条新增/变化内容。':'从飞书收件箱同步一条新事项。'
+        text:fetched.mode==='mixed_diary'?'从飞书日记同步一条新增内容。':'从飞书收件箱同步一条新事项。'
       });
     }
 
-    for(const local of state.inbox.filter(item=>item.source==='feishu_doc'&&item.feishuBlockId)){
-      if(remoteByBlock.has(local.feishuBlockId))continue;
-      state.inbox=state.inbox.filter(item=>item.id!==local.id);
-      state.confirmations=state.confirmations.filter(confirmation=>confirmation.inboxId!==local.id);
-      removed+=1;
-      addActivity(state,{
-        type:'inbox_removed_remote',
-        inboxId:local.id,
-        text:'飞书日记中对应内容已删除，未处理事项已从工作台撤下。'
-      });
-    }
-
-    state.inboxAcks=state.inboxAcks.filter(ack=>remoteByBlock.has(ack.blockId));
+    // Append-only source contract: previously seen block IDs are permanent history.
+    // Remote edits/deletions never mutate or re-open Workbench state. Users can
+    // explicitly remove local pending items without touching the Feishu source.
   });
 
   await store.updateConfig(current=>{
@@ -230,9 +213,10 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
 
   return feishuSyncSummary(await store.readConfig(),{
     imported,
-    removed,
-    updated,
+    removed:0,
+    updated:0,
     deduped,
+    seenSkipped,
     remoteCount:allRemoteItems.length,
     uniqueRemoteCount:uniqueRemoteItems.length,
     sectionFound:fetched.sectionFound,
