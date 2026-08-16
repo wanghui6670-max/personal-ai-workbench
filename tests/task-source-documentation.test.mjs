@@ -28,8 +28,8 @@ test('v3 normative source contract makes explicit Feishu todos the only personal
   assert.match(contract,/source=feishu_doc \+ feishuMode=mixed_diary/);
   assert.match(contract,/不删除、不修改飞书原文/);
   assert.match(contract,/AI 不负责“从日记找任务”/);
-  assert.match(contract,/不得自动新建项目/);
-  assert.match(contract,/不得自动加入 Today/);
+  assert.match(contract,/不自动新建项目/);
+  assert.match(contract,/不自动加入 Today/);
   assert.match(contract,/Workbench 本地 `state\.json`.*真相源/);
   assert.match(contract,/\/api\/inbox\/sync/);
 });
