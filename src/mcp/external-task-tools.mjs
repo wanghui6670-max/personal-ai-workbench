@@ -33,19 +33,20 @@ export function createExternalTaskTools(){
   return[
     descriptor({
       name:'external_task_integration_read',
-      description:'读取得到大脑 CLI 待办来源、飞书每日工作日记和本机日历镜像设置；不返回任何凭证。',
+      description:'读取得到大脑只读任务来源、最近笔记扫描数量、任务时区、可选飞书每日工作日记 sink 和 ICS 镜像设置；不返回任何凭证。',
       inputSchema:{type:'object',additionalProperties:false,properties:{},required:[]},
       readOnly:true,
       execute:async context=>readExternalTaskIntegration({store:context.store})
     }),
     descriptor({
       name:'external_task_integration_update',
-      description:'配置得到大脑 CLI 单向来源、最近笔记扫描数量、飞书日记沉淀目标和本机 ICS 日历；不接受任意命令、凭证或文件路径。',
+      description:'配置得到大脑单向只读来源、最近笔记扫描数量、IANA 任务时区、可选飞书日记 sink 和 ICS 镜像；不接受任意命令、凭证或文件路径。',
       inputSchema:{
         type:'object',additionalProperties:false,
         properties:{
           enabled:{type:'boolean'},
           noteLimit:{type:'integer',minimum:20,maximum:500},
+          timeZone:{type:'string',minLength:1,maxLength:100},
           journalDocumentUrl:{type:'string'},
           journalHeading:{type:'string',minLength:1,maxLength:80},
           calendarEnabled:{type:'boolean'},
@@ -60,7 +61,7 @@ export function createExternalTaskTools(){
     }),
     descriptor({
       name:'external_tasks_sync',
-      description:'分页读取得到大脑最近笔记，并通过 getnote note todos 解析会议待办；先把快照写入飞书日记并读回，再更新本机 ICS 日历和工作台缓存。没有明确日期的事项只进入收件箱。',
+      description:'读取得到大脑最近笔记并继续追踪工作台仍未完成事项对应的旧笔记，只解析明确 meeting_todos；先原子提交 Workbench 任务状态，再尝试可选飞书任务快照与 ICS 派生输出。无明确日期的事项进入 Inbox，不自动加入 Today。',
       inputSchema:{type:'object',additionalProperties:false,properties:{},required:[]},
       requiresConfirmation:true,
       execute:async context=>withExternalTaskWriteLease(
@@ -70,7 +71,7 @@ export function createExternalTaskTools(){
     }),
     descriptor({
       name:'daily_summary_publish',
-      description:'把当天完成事项、到期待办和工作台关键动作沉淀到飞书每日工作日记。正文只保存到飞书。',
+      description:'把当天完成事项、到期待办和工作台关键动作沉淀到已配置的飞书每日工作日记。正文只保存到飞书；未配置飞书日记时该操作不可用，但不影响任务同步。',
       inputSchema:{type:'object',additionalProperties:false,properties:{notes:{type:'string',maxLength:4000}},required:[]},
       requiresConfirmation:true,
       execute:async(context,args)=>withExternalTaskWriteLease('沉淀每日总结',()=>{
@@ -85,14 +86,14 @@ export function planExternalTaskMessage({message}){
   const text=String(message||'').trim();
   if(!text)return null;
   if(/(?:同步|读取|拉取).*(?:得到大脑|Get笔记|getnote|外部待办)|(?:得到大脑|Get笔记|getnote|外部待办).*(?:同步|读取|拉取)/i.test(text)){
-    return{kind:'tool',toolName:'external_tasks_sync',args:{},reason:'按你的明确指令从得到大脑 CLI 读取笔记待办，并依次沉淀飞书日记与本机日历。'};
+    return{kind:'tool',toolName:'external_tasks_sync',args:{},reason:'按你的明确指令只读取得到大脑 meeting_todos，先提交 Workbench，再尝试可选飞书与 ICS 派生输出。'};
   }
   if(/(?:沉淀|发布|写入|保存).*(?:今日总结|每日总结|工作总结)|(?:今日总结|每日总结).*(?:飞书|日记)/.test(text)){
     const notes=text.replace(/(?:沉淀|发布|写入|保存|今日总结|每日总结|工作总结|到飞书|飞书|日记|请|帮我)/g,'').trim();
-    return{kind:'tool',toolName:'daily_summary_publish',args:notes?{notes}:{},reason:'把今天的任务状态与工作台关键动作写入飞书每日工作日记。'};
+    return{kind:'tool',toolName:'daily_summary_publish',args:notes?{notes}:{},reason:'把今天的任务状态与工作台关键动作写入已配置的飞书每日工作日记。'};
   }
-  if(/(?:配置|设置).*(?:得到大脑|Get笔记|getnote|本机日历|每日工作日记)/i.test(text)){
-    return{kind:'tool',toolName:'panel_navigate',args:{view:'today',id:null,modal:'settings'},reason:'打开设置，由你配置得到大脑 CLI、飞书日记和本机日历。'};
+  if(/(?:配置|设置).*(?:得到大脑|Get笔记|getnote|任务时区|本机日历|每日工作日记)/i.test(text)){
+    return{kind:'tool',toolName:'panel_navigate',args:{view:'today',id:null,modal:'settings'},reason:'打开设置，由你配置得到大脑来源、任务时区、可选飞书日记和 ICS 镜像。'};
   }
   return null;
 }

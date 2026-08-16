@@ -23,11 +23,11 @@ Personal AI Workbench 是唯一日常入口。它保留个人今日、收件箱�
 | 能力 | 权威系统 |
 |---|---|
 | 个人收件箱、个人待办、我的今日 | Personal AI Workbench |
-| GetNote 会议待办 | 得到大脑；Workbench 单向只读 |
+| GetNote 会议待办事实 | 得到大脑；Workbench 单向只读并保存本地任务状态 |
 | 本地项目成果 | 本地项目文件夹 |
 | 代码版本与变更证据 | Git / GitHub |
 | 项目分析、阶段总结、复盘与恢复叙事 | 飞书项目云文档 |
-| 个人任务快照与每日总结 | 飞书《每日工作日记》 |
+| 个人任务快照与每日总结 | 飞书《每日工作日记》可选 sink |
 | 客户、企业项目、业务任务 | Joycrew 当前 Workspace / 上游业务源 |
 | AI 员工、Run、Evidence、Approval、Deliverable | Joycrew |
 | 飞书、本机与服务器数据的按需查询 | DataWeave |
@@ -39,13 +39,16 @@ Personal AI Workbench 是唯一日常入口。它保留个人今日、收件箱�
 
 ### 个人工作台
 
-- 固定 `getnote` CLI 分页读取最近笔记及 `meeting_todos`；不从整篇笔记猜任务。
+- 通过统一只读 GetNoteReader 读取最近笔记和仍未完成任务对应的旧笔记，只认明确 `meeting_todos`，不从整篇笔记猜正式任务。
 - 有明确日期的事项进入正式待办；日期不明确的事项进入个人收件箱。
+- 当前 GetNote `meeting_todos.items` 只有 `text + completed`，没有 per-todo 稳定 ID；Workbench 使用 `noteId + 规范化待办文本 + 同文出现序号` 的 `text_fingerprint`，文案变化只在同一 note 一对一无歧义时继承旧 Workbench 实体。
+- 相对日期以会议/笔记创建时间优先解释，并显式携带 IANA 时区，不依赖 VPS 系统时区。
 - iPhone Shortcut `/api/capture` 使用 `captureId` 幂等，网络重试不会重复采集。
-- “我的今日”只包含用户明确加入的待办；AI 不自动安排。
+- “我的今日”只包含用户明确加入的待办；来源日期变化不会擅自撤销用户的 Today 决定；AI 不自动安排。
+- 用户手工修改过 GetNote Todo 的本地截止日期后，Workbench 用 `sourceDueDate` 与本地 `dueDate` 分离追踪；后续来源变化不覆盖用户日期。
 - 本地项目目录是真实成果源，Git 提供变更证据。
 - 飞书项目文档是项目分析、阶段总结、复盘和上下文恢复的唯一长期叙事真源。
-- 飞书每日工作日记承载任务快照与用户触发的每日总结。
+- 飞书每日工作日记是可选任务快照与用户触发每日总结 sink；飞书不可用不阻塞 GetNote → Workbench 核心同步。
 - 本机 ICS 固定生成到 `data/calendar/personal-ai-workbench.ics`，它是可重建日历镜像，不是任务真源。
 
 ### 统一业务执行
@@ -89,8 +92,8 @@ Harness 不拥有 Shell、终端、任意 Web、文件系统写入、Cron、Work
 
 - Node.js 24+
 - Git
-- `getnote`（启用得到大脑待办源时）
-- `lark-cli`（启用飞书项目记录或每日工作日记时）
+- GetNote 读取运行时：`local_cli` 时当前进程环境需要 `getnote`；`private_http` 时由受控 sidecar 提供读取，Workbench 容器不需要安装 getnote CLI
+- `lark-cli`：仅在启用飞书项目记录或飞书《每日工作日记》sink 时需要
 - 可选：独立运行的 Joycrew 服务
 
 ## 本地启动
@@ -154,33 +157,58 @@ JOYCREW_NETWORK_ZONE=private_http
 
 完整合同见 [`docs/JOYCREW_INTEGRATION.md`](docs/JOYCREW_INTEGRATION.md)。
 
-## 得到大脑 → 飞书日记 → 本机日历
+## 得到大脑 → Workbench → 飞书 / ICS
 
-固定只读命令：
+本地 CLI transport 的固定只读命令：
 
 ```text
 getnote notes --limit <20-500> [--cursor <cursor>] -o json
 getnote note todos <note_id> -o json
+getnote note <note_id> -o json
 getnote doctor -o json
 ```
 
-同步事务：
+VPS/Docker 推荐：
 
 ```text
-分页读取最近笔记
-→ 逐篇读取 meeting_todos
-→ 解析明确日期并生成稳定外部 ID
-→ 写飞书任务快照并按 operationId 读回
-→ 原子生成本机 ICS
-→ 提交 Workbench 待办/收件箱缓存
+VPS 宿主机 getnote CLI
+        ↓
+只读 GetNote Runtime sidecar
+        ↓ private_http
+Workbench Docker
+```
+
+一次用户触发同步：
+
+```text
+读取最近 N 篇笔记
++
+追踪 Workbench 中仍未完成事项对应的旧 noteId
+        ↓
+读取明确 meeting_todos
+        ↓
+text_fingerprint / 日期 / 时区 / 本地状态对账
+        ↓
+Workbench state 原子提交
+        │
+        ├─→ 飞书每日任务快照（可选、可失败）
+        └─→ ICS 原子重建（可选、可失败）
 ```
 
 规则：
 
-- 只接受得到大脑明确提供的待办，不让模型从笔记正文自行发明。
+- 只接受得到大脑明确提供的待办，不让模型从笔记正文自行发明正式 Todo。
+- 当前 `meeting_todos.items` 只有 `text` 和 `completed`，没有 per-todo 稳定 ID；身份固定为 `noteId + 规范化待办文本 + 同文出现序号` fingerprint。
+- 文案变化会改变原始 fingerprint；只在同一 note 去掉精确匹配后恰好一旧一新时继承旧 Workbench 实体，多个变化不做语义猜合并。
+- “今天/明天/后天”优先基于 note `createdAt`，而不是后来编辑的 `updatedAt`。
 - “下周”“稍后”“尽快”等模糊表达不自动变成日期。
 - 只有上游明确 `completed=true` 才同步完成，不根据事项消失推断完成。
+- Workbench 拥有用户的项目归属、优先级、tags、Today 和本地截止日期决定；来源同步不能擅自覆盖。
 - 不反向修改得到大脑，也不自动加入今日。
+- 飞书日记 URL 不是 Task Sync 的必填项；只有发布每日总结时才要求飞书 sink 已配置。
+- 飞书或 ICS 失败时返回独立 sink 状态，核心 Workbench 提交不回滚。
+
+详细合同见 [`docs/TASK_SOURCE_PIPELINE.md`](docs/TASK_SOURCE_PIPELINE.md) 和 [`docs/GETNOTE_RUNTIME_V1.md`](docs/GETNOTE_RUNTIME_V1.md)。
 
 ## 项目记录
 
@@ -267,6 +295,14 @@ TRUSTED_ORIGINS=https://workbench.example.com
 COOKIE_SECURE=1
 ```
 
+如果 Docker 通过 VPS 宿主机 sidecar 读取 GetNote：
+
+```dotenv
+GETNOTE_RUNTIME_MODE=private_http
+GETNOTE_RUNTIME_BASE_URL=http://host.docker.internal:4310
+GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
+```
+
 ## 验证
 
 ```bash
@@ -286,8 +322,3 @@ CI 覆盖：
 - Joycrew 未启用时的 Docker 主产品可用性。
 
 自动化通过不等于真实 GetNote、飞书、系统日历、模型 Provider、Joycrew、DataWeave、Hermes、Mac Local Bridge 或生产部署已经完成现场验证。外部服务不可用时必须明确报错，不使用旧缓存冒充实时结果，也不影响个人工作台继续运行。
-
-
-## 不确定结果保护
-
-Joycrew 写操作在网络中断、响应丢失或返回不可验证结果时会标记为“结果不确定”。同一个预览不会自动重试，避免重复创建 Run、交付或写回；用户应先刷新业务状态核对，再决定是否生成新的预览。

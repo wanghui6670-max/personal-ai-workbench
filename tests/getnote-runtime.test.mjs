@@ -30,6 +30,32 @@ test('local_cli reader exposes only fixed read commands',async()=>{
   assert.deepEqual(reader.status(),{mode:'local_cli',transport:'execFile',readOnly:true});
 });
 
+test('local_cli forwards only GetNote/network runtime env and strips unrelated Workbench secrets',async()=>{
+  let childEnv=null;
+  const exec=async(command,args,options)=>{
+    childEnv=options.env;
+    return{stdout:JSON.stringify({success:true,data:{notes:[],has_more:false}})};
+  };
+  const reader=createGetnoteReader({
+    mode:'local_cli',exec,
+    env:{
+      HOME:'/Users/test',PATH:'/opt/homebrew/bin:/usr/bin',LANG:'zh_CN.UTF-8',HTTPS_PROXY:'http://127.0.0.1:7897',
+      GETNOTE_API_KEY:'getnote-secret',GETNOTE_CLIENT_ID:'getnote-client',
+      AI_PROVIDER_API_KEY:'ai-secret',JOYCREW_TRUSTED_PROXY_TOKEN:'joycrew-secret',SESSION_SECRET:'session-secret',
+      GETNOTE_RUNTIME_SERVICE_TOKEN:'sidecar-secret'
+    }
+  });
+  await reader.listNotes({limit:20});
+  assert.equal(childEnv.HOME,'/Users/test');
+  assert.equal(childEnv.PATH,'/opt/homebrew/bin:/usr/bin');
+  assert.equal(childEnv.HTTPS_PROXY,'http://127.0.0.1:7897');
+  assert.equal(childEnv.GETNOTE_API_KEY,'getnote-secret');
+  assert.equal(childEnv.GETNOTE_CLIENT_ID,'getnote-client');
+  for(const key of ['AI_PROVIDER_API_KEY','JOYCREW_TRUSTED_PROXY_TOKEN','SESSION_SECRET','GETNOTE_RUNTIME_SERVICE_TOKEN']){
+    assert.equal(Object.hasOwn(childEnv,key),false,`${key} must not be exposed to getnote CLI`);
+  }
+});
+
 test('private_http reader uses fixed routes, bearer auth and rejects public origins',async()=>{
   const calls=[];
   const fetchImpl=async(url,options)=>{

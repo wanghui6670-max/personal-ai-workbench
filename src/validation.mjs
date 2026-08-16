@@ -7,6 +7,10 @@ const STATE_ENTITY_FIELDS = STATE_ARRAY_FIELDS.filter(field=>field!=='todayPlan'
 const STATE_ID_ENTITY_FIELDS = STATE_ENTITY_FIELDS.filter(field=>field!=='activities');
 const SAFE_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const SHA256_PATTERN=/^[a-f0-9]{64}$/;
+const GETNOTE_SOURCE_DECISIONS=new Set(['dismissed','memo','project_note','project_created']);
+const GETNOTE_DUE_DATE_OWNERS=new Set(['source','user']);
+const GETNOTE_DECISION_FIELDS=new Set(['id','source','externalId','sourceNoteId','disposition','decidedAt']);
+const MAX_EXTERNAL_TASK_DECISIONS=2000;
 
 function invalid(scope, message) {
   const error = new Error(`${scope}：${message}`);
@@ -83,6 +87,32 @@ function validateDataSource(value,scope='无效工作台配置'){
   if(Object.hasOwn(value,'lastImportedCount')&&(!Number.isInteger(value.lastImportedCount)||value.lastImportedCount<0))throw invalid(scope,'dataSource.lastImportedCount 必须是非负整数');
 }
 
+function validateExternalTaskDecisions(value,scope){
+  if(value===undefined)return;
+  if(!Array.isArray(value))throw invalid(scope,'externalTaskDecisions 必须是数组');
+  if(value.length>MAX_EXTERNAL_TASK_DECISIONS)throw invalid(scope,`externalTaskDecisions 最多 ${MAX_EXTERNAL_TASK_DECISIONS} 条`);
+  const ids=new Set();
+  const externalIds=new Set();
+  for(const [index,decision] of value.entries()){
+    const field=`externalTaskDecisions[${index}]`;
+    if(!isRecord(decision))throw invalid(scope,`${field} 必须是对象`);
+    for(const key of Object.keys(decision)){
+      if(!GETNOTE_DECISION_FIELDS.has(key))throw invalid(scope,`${field}.${key} 不是允许的来源决策字段`);
+    }
+    requireSafeId(decision.id,scope,`${field}.id`);
+    if(ids.has(decision.id))throw invalid(scope,`${field}.id 不能重复`);
+    ids.add(decision.id);
+    if(decision.source!=='getnote_cli')throw invalid(scope,`${field}.source 目前只支持 getnote_cli`);
+    requireNonEmptyString(decision.externalId,scope,`${field}.externalId`);
+    if(decision.externalId.length>512)throw invalid(scope,`${field}.externalId 过长`);
+    if(externalIds.has(decision.externalId))throw invalid(scope,`${field}.externalId 不能重复`);
+    externalIds.add(decision.externalId);
+    validateOptionalString(decision.sourceNoteId,scope,`${field}.sourceNoteId`,{nullable:true,nonEmpty:true});
+    if(!GETNOTE_SOURCE_DECISIONS.has(decision.disposition))throw invalid(scope,`${field}.disposition 不受支持`);
+    requireNonEmptyString(decision.decidedAt,scope,`${field}.decidedAt`);
+  }
+}
+
 export function isValidDateOnly(value) {
   if (typeof value !== 'string' || !DATE_ONLY_PATTERN.test(value)) return false;
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
@@ -100,6 +130,7 @@ export function validateStateInput(state, {restore = false} = {}) {
     }
   }
   if(Object.hasOwn(state,'inboxAcks')&&!Array.isArray(state.inboxAcks))throw invalid('无效工作台状态','inboxAcks 必须是数组');
+  validateExternalTaskDecisions(state.externalTaskDecisions,'无效工作台状态');
   if (restore && (!Array.isArray(state.todos) || !Array.isArray(state.projects))) {
     throw invalid('无效工作台状态', '恢复数据必须包含 todos 和 projects 数组');
   }
@@ -116,6 +147,7 @@ export function validateState(state) {
     if(!Array.isArray(state[field]))throw invalid(scope,`${field} 必须是数组`);
   }
   if(!Array.isArray(state.inboxAcks))throw invalid(scope,'inboxAcks 必须是数组');
+  validateExternalTaskDecisions(state.externalTaskDecisions,scope);
   for(const field of STATE_ENTITY_FIELDS){
     for(const [index,entity] of state[field].entries()){
       if(!isRecord(entity))throw invalid(scope,`${field}[${index}] 必须是对象`);
@@ -145,6 +177,9 @@ export function validateState(state) {
     validateOptionalString(todo.createdAt,scope,`todos[${index}].createdAt`);
     validateOptionalBoolean(todo.done,scope,`todos[${index}].done`);
     validateOptionalId(todo.projectId,scope,`todos[${index}].projectId`,{nullable:true});
+    if(todo.dueDateOwner!==undefined&&!GETNOTE_DUE_DATE_OWNERS.has(todo.dueDateOwner)){
+      throw invalid(scope,`todos[${index}].dueDateOwner 必须是 source 或 user`);
+    }
   }
 
   for (const [index, project] of state.projects.entries()) {

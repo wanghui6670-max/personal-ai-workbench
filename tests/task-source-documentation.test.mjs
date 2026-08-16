@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('normative docs keep GetNote CLI as source, Feishu as journal sink, and ICS as a mirror',async()=>{
+test('normative docs keep GetNote as source, Workbench as state truth, Feishu as optional sink, and ICS as mirror',async()=>{
   const [readme,product,architecture,api,deployment,pipeline]=await Promise.all([
     read('README.md'),
     read('docs/PRODUCT_SPEC.md'),
@@ -25,6 +25,27 @@ test('normative docs keep GetNote CLI as source, Feishu as journal sink, and ICS
   assert.match(api,/飞书不再是个人待办来源/);
   assert.match(pipeline,/不反向.*得到大脑|不反向修改得到大脑/);
   assert.match(pipeline,/没有明确待办章节.*空列表|空列表.*不使用模型猜测/);
+});
+
+test('normative GetNote v2 docs make Workbench commit first, keep Feishu optional, and document current fingerprint identity honestly',async()=>{
+  const documents=await Promise.all([
+    read('README.md'),read('docs/PRODUCT_SPEC.md'),read('docs/ARCHITECTURE.md'),read('docs/API.md'),read('docs/TASK_SOURCE_PIPELINE.md')
+  ]);
+  for(const document of documents){
+    assert.match(document,/Workbench state 原子提交[\s\S]{0,700}飞书/);
+    assert.match(document,/createdAt[\s\S]{0,180}updatedAt/);
+    assert.match(document,/text_fingerprint|文本 fingerprint|规范化待办文本/);
+    assert.match(document,/没有 per-todo 稳定 ID|没有.*稳定.*ID|只.*text.*completed/i);
+    assert.match(document,/Asia\/Shanghai|IANA 时区/);
+    assert.doesNotMatch(document,/todo_id\s*\/\s*todoId\s*\/\s*task_id/);
+    assert.doesNotMatch(document,/待办文案编辑不会改变身份/);
+    assert.doesNotMatch(document,/启用时必须提供官方 Feishu\/Lark HTTPS 文档 URL/);
+    assert.doesNotMatch(document,/飞书写入并读回[\s\S]{0,180}Workbench (?:待办\/收件箱状态提交|state)/);
+  }
+  const api=documents[3];
+  assert.match(api,/journalDocumentUrl` 可为空/);
+  assert.match(api,/ok_with_sink_errors/);
+  assert.match(api,/FEISHU_DAILY_JOURNAL_NOT_CONFIGURED/);
 });
 
 test('external task API documents exact MCP tools, confirmation boundary, and fixed GetNote runtime commands',async()=>{
@@ -55,6 +76,8 @@ test('external task API documents exact MCP tools, confirmation boundary, and fi
   assert.match(taskCli,/reader\.listNotes/);
   assert.match(taskCli,/runtime\.fetchTodos/);
   assert.match(taskCli,/meeting_todos/);
+  assert.match(taskCli,/externalIdentityKind:'text_fingerprint'/);
+  assert.doesNotMatch(taskCli,/sourceTodoId|todo_id|task_id/);
   assert.doesNotMatch(taskCli,/node:child_process|execFile\(/);
 
   assert.match(runtime,/const CLI='getnote'/);

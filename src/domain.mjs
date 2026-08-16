@@ -16,6 +16,7 @@ import { machineProgress, narrativeFromProgress } from './project-record-policy.
 import { rewriteProjectIdentity } from './project-identity.mjs';
 import { newId, nowIso, todayIso, compactText } from './utils.mjs';
 import { isValidDateOnly } from './validation.mjs';
+import { recordGetnoteSourceDecision } from './external-task-decisions.mjs';
 import {
   normalizeFeishuProjectDocumentUrl,
   normalizeProjectRecordText,
@@ -206,6 +207,7 @@ export async function createProject({appRoot,store,description,endDate,businessI
       if(sourceItem.text.trim()!==normalizedDescription){
         throw Object.assign(new Error('项目描述必须与来源收件箱事项一致。'),{statusCode:409});
       }
+      recordGetnoteSourceDecision(state,sourceItem,'project_created');
       project.folder=await uniqueProjectFolder({
         appRoot,
         config,

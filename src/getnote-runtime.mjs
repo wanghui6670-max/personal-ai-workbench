@@ -1,6 +1,7 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import net from 'node:net';
+import {getnoteCliEnv} from './external-cli-env.mjs';
 
 const execFileAsync=promisify(execFile);
 const CLI='getnote';
@@ -56,9 +57,10 @@ function localCliError(error,action){
 
 export function createLocalGetnoteReader({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
   const timeout=integer(timeoutMs,DEFAULT_TIMEOUT_MS,1_000,120_000,'GetNote timeout');
+  const childEnv=getnoteCliEnv(processEnv);
   async function run(args,action){
     try{
-      const result=await exec(CLI,args,{timeout,maxBuffer:MAX_BUFFER,windowsHide:true,env:{...processEnv}});
+      const result=await exec(CLI,args,{timeout,maxBuffer:MAX_BUFFER,windowsHide:true,env:childEnv});
       return parseJsonText(result.stdout,'得到大脑 CLI');
     }catch(error){throw localCliError(error,action);}
   }

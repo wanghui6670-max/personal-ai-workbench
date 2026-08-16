@@ -10,6 +10,7 @@ import {
   projectRecordOperationId,
   projectRecordMarker
 } from './project-record-contract.mjs';
+import {larkCliEnv} from './external-cli-env.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -80,7 +81,12 @@ function cliError(error, action) {
 
 async function runCli(args, action, { timeoutMs = DEFAULT_TIMEOUT_MS, exec = execFileAsync } = {}) {
   try {
-    const result = await exec('lark-cli', args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+    const result = await exec('lark-cli', args, {
+      timeout: timeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
+      env:larkCliEnv(process.env)
+    });
     return extractJson(result.stdout);
   } catch (error) {
     throw cliError(error, action);

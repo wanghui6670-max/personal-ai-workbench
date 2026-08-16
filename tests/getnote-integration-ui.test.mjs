@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 
-test('browser loads the GetNote source, Feishu journal and local calendar integration layer',async()=>{
+test('browser exposes Workbench-first GetNote sync with optional Feishu sink and explicit timezone',async()=>{
   const [index,script,styles]=await Promise.all([
     fsp.readFile('public/index.html','utf8'),
     fsp.readFile('public/getnote-integration.js','utf8'),
@@ -14,13 +14,23 @@ test('browser loads the GetNote source, Feishu journal and local calendar integr
   assert.match(script,/external_tasks_sync/);
   assert.match(script,/daily_summary_publish/);
   assert.match(script,/external_task_integration_update/);
-  assert.match(script,/getnote notes/);
-  assert.match(script,/getnote note todos/);
-  assert.match(script,/只有待办文字中能确定日期的事项才进入本机日历/);
+  assert.match(script,/meeting_todos/);
+  assert.match(script,/未完成旧笔记/);
+  assert.match(script,/Workbench 状态先原子提交/);
+  assert.match(script,/飞书每日工作日记 URL（可选）/);
+  assert.match(script,/getnote-time-zone/);
+  assert.match(script,/Asia\/Shanghai/);
   assert.match(script,/最近笔记扫描数量必须是 20-500/);
   assert.match(script,/raw\?\.provider==='dida_cli'/);
   assert.match(script,/lastSyncStatus:'needs_reconfiguration'/);
-  assert.match(script,/enabled:false,provider:'getnote_cli'/);
+  assert.match(script,/ok_with_sink_errors/);
+  assert.match(script,/result\.metadata\?\.status==='error'/);
+  assert.match(script,/核心已提交，状态元数据异常/);
+  assert.match(script,/核心已提交，派生输出异常/);
+  assert.match(script,/状态元数据失败/);
+  assert.match(script,/target\.disabled=false;target\.textContent='同步得到大脑待办';getnoteBusy=false/);
+  assert.match(script,/['"]&quot;['"]/,'double quotes remain strictly escaped for injected settings HTML');
+  assert.doesNotMatch(script,/启用同步时必须填写飞书每日工作日记 URL/);
   assert.doesNotMatch(script,/TICKTICK_HOST|ticktick\.com|dida365\.com/);
   assert.doesNotMatch(script,/localStorage|sessionStorage|indexedDB/);
   assert.match(styles,/\.getnote-settings/);

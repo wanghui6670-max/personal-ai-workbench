@@ -1,82 +1,100 @@
-# 得到大脑 CLI → 飞书工作日记 → 本机日历
+# 得到大脑 → Workbench Task Sync v2 → 飞书 / ICS
 
 ## 1. 数据边界
 
-个人工作台不再把飞书云文档同时作为待办来源和记录目标。
+个人工作台不把飞书同时当作任务来源和任务状态真源。
 
-- **得到大脑 CLI（`getnote`）**：个人笔记与会议待办的单向来源。
-- **Personal AI Workbench**：分页读取、待办解析、稳定去重、日期识别、人工确认和项目上下文控制。
-- **飞书云文档《每日工作日记》**：待办快照和每日总结的长期沉淀目标。
-- **本机 ICS 文件**：能够确定日期或时刻的待办日历镜像。
+- **得到大脑（`getnote`）**：个人笔记与明确 `meeting_todos` 的单向外部来源。
+- **Personal AI Workbench**：个人任务状态、Inbox、Today 选择和用户项目归属的真源。
+- **飞书云文档《每日工作日记》**：可选的待办快照和每日总结沉淀 sink。
+- **ICS 文件**：可选的、可重建的日历镜像 sink。
 
-项目分析、阶段总结、复盘和恢复摘要仍然只保存到各项目绑定的飞书项目文档；本页描述的是个人层面的待办和每日工作日记。
+Task Sync 不反向修改得到大脑。飞书和 ICS 失败都不能回滚已经提交的 Workbench 任务状态。
 
-## 2. 得到大脑 CLI 合同
+## 2. GetNote Reader 合同
 
-工作台只执行一个固定二进制：
+业务层只依赖统一只读 `GetNoteReader`：
 
 ```text
-getnote
+listNotes
+fetchTodos
+fetchNote
+status
 ```
 
-不会从设置中执行任意 shell 命令，也不会接受二进制路径、命令模板、认证 token 或 CLI 密码。
-
-同步使用的受控只读命令：
+本地 CLI transport 固定执行：
 
 ```text
 getnote notes --limit <20-500> [--cursor <cursor>] -o json
 getnote note todos <note_id> -o json
+getnote note <note_id> -o json
 getnote doctor -o json
 ```
 
-`getnote notes` 分页读取最近笔记。每个 note ID 按字符串保存和传递，避免雪花 ID 被 JavaScript 数字截断。
+不会从设置中接收任意 shell、argv 模板或外部命令。VPS/Docker 也可以通过受控私网 Runtime sidecar 使用同一 Reader 合同。
 
-`getnote note todos` 返回：
+当前官方 GetNote CLI 推荐使用 `data.cursor` 翻页；`next_cursor` / `nextCursor` 只作为兼容 fallback。所有 note ID 和 cursor 都按字符串处理，不经 JavaScript Number。
 
-```json
-{
-  "meeting_todos": {
-    "source": "summary_section",
-    "items": [
-      {"text": "8月20日下午3点前提交方案", "completed": false}
-    ]
-  }
-}
-```
+`getnote` 子进程不会继承整个 Workbench 环境，只得到运行/网络必需项和 GetNote 自身认证覆盖。AI Provider、Joycrew、Workbench Session、private Runtime service token 等无关秘密不会下放给第三方 CLI。
 
-如果笔记没有明确待办章节，得到大脑返回空列表；Workbench 接受空列表，**不使用模型猜测**、不从整篇正文自行生成任务。
+如果笔记没有明确待办章节，得到大脑返回空列表；Workbench 接受空列表，**不使用模型猜测**、不从整篇正文自行生成正式任务。正文 AI 解析属于独立的 GetNote Insight 链路。
 
-## 3. 稳定身份
+## 3. 扫描窗口与旧任务追踪
 
-每条得到大脑待办的稳定外部 ID 基于：
+每次手动同步读取两组笔记：
 
 ```text
-来源 note ID
-+ 规范化待办文本
-+ 同一笔记内相同文本的出现序号
+A. 最近 N 篇笔记
++
+B. Workbench 中仍未完成的 GetNote Todo / Inbox 对应 sourceNoteId
 ```
 
-然后使用 SHA-256 派生安全 ID。
+两组按 `noteId` 去重后再读取 `meeting_todos`。
 
-因此：
+因此旧会议即使已经离开“最近 N 篇”，只要其中仍有 Workbench 未完成外部事项，就会继续追踪来源状态。只有上游明确返回 `completed=true` 才确认完成；某条任务本轮没有出现，绝不据此猜测完成。
 
-- 同一句话出现在不同笔记中，不会被误合并；
-- 同一笔记中重复出现相同待办，仍能分别保留；
-- 待办顺序变化不会改变 ID；
-- 不按标题跨笔记去重。
+该策略仍然是有界、按需的，不做得到大脑全量镜像或后台扫描。
 
-同时保留：
+## 4. 当前任务身份合同
 
-- 来源 note ID；
-- 来源笔记标题；
-- 来源笔记 URL；
-- 来源笔记类型；
-- `meeting_todos.source`；
-- 上游 `completed` 状态。
+当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只暴露：
 
-## 4. 日期和时刻解析
+```text
+text
+completed
+```
 
-Workbench 只从待办文字中识别可确定的表达：
+**当前没有 per-todo 稳定 ID。** Workbench 因此固定使用历史兼容 fingerprint：
+
+```text
+noteId
++ 规范化待办文本
++ 同文案出现序号
+```
+
+并标记：
+
+```text
+externalIdentityKind = text_fingerprint
+```
+
+同一 note、同一文案、同一出现序号会保持同一个外部 ID。文案被编辑后，原始 fingerprint 会变化。
+
+为了避免文案微调制造明显重复，Reconcile 只做一个保守规则：
+
+```text
+去掉所有精确 externalId 匹配后
+同一 note 恰好只剩 1 个旧实体 + 1 个新 item
+→ 新 fingerprint 继承旧 Workbench 实体
+```
+
+如果同一 note 同时有多个旧实体和多个新 item，属于歧义，**不自动猜测合并**。不使用语义相似度批量配对。
+
+即使未来 GetNote 响应中出现未文档化的 `id` 字段，当前 v2 也不会偷偷改变身份算法；只有官方合同明确提供稳定 per-todo ID 后，才能通过新的受测版本升级身份模型。
+
+## 5. 日期、相对时间和时区
+
+Workbench 只从待办文字中识别可确定表达：
 
 ```text
 2026-08-20
@@ -87,24 +105,32 @@ Workbench 只从待办文字中识别可确定的表达：
 下午3点 / 下午3点半
 ```
 
-参照日期优先使用来源笔记的更新时间，其次使用创建时间。
+相对日期锚点顺序固定为：
 
-### 有明确日期
+```text
+note.createdAt
+→ note.updatedAt
+→ 当前日期 fallback
+```
 
-进入正式待办，保留：
+**updatedAt 不再优先**，避免旧会议后来编辑后把“今天/明天”整体漂移。
 
-- 稳定外部 ID；
-- 原始待办文本；
-- 截止日期；
-- 明确截止时刻；
-- 来源笔记引用；
-- 完成状态。
+任务配置必须携带显式 IANA 时区，例如：
 
-同步不会自动把待办加入“今日工作台”。工作台不反向修改得到大脑内容。
+```text
+Asia/Shanghai
+```
 
-### 没有明确日期
+该时区不仅用于 ICS `TZID`，也用于：
 
-以下表达不会被自动解释：
+- 把带 offset 的 `note.createdAt / updatedAt` 解释成来源当地日期；
+- “当前日期 fallback”；
+- 每次同步的当日快照日期和逾期边界；
+- 每日总结默认日期。
+
+因此 VPS 运行在 UTC 或其他系统时区时，上海午夜附近也不会把“今天”或工作日日界线算错一天。
+
+以下模糊表达仍然不自动转成正式日期：
 
 ```text
 下周
@@ -114,52 +140,130 @@ Workbench 只从待办文字中识别可确定的表达：
 有空时
 ```
 
-它们进入工作台收件箱，来源标记为 `getnote_cli`，等待用户明确日期或处理方式。系统不会生成猜测日期。
+## 6. Workbench 状态与用户所有权
+
+### 来源首次给出明确日期
+
+进入正式 Todo。新建任务不会自动加入 Today。
+
+来源同步可以更新：
+
+- 标题；
+- 来源明确日期 / 时刻；
+- 来源笔记引用；
+- 上游明确完成状态。
+
+Workbench 另外保存：
+
+```text
+sourceDueDate
+```
+
+用于区分“来源计划”和“用户本地截止日期”。
+
+### 用户自己修改过截止日期
+
+如果 Workbench 当前 `dueDate` 与此前 `sourceDueDate` 不一致，视为用户本地覆盖：
+
+```text
+sourceDueDate = 得到大脑最新来源日期
+dueDate       = 用户本地日期
+```
+
+后续来源日期变化只更新 `sourceDueDate`，**不覆盖用户的 `dueDate`**。
+
+旧版本 GetNote Todo 没有 `sourceDueDate` 时，第一次 v2 同步如果现有 `dueDate` 与新来源日期不一致，保守按“用户已经改过日期”处理，宁可保留用户决定，也不在升级时静默覆盖。
+
+### 来源变成无明确日期
+
+默认情况下，来源无明确日期的未完成事项进入 Inbox。
+
+如果某个已存在 Todo 的来源日期后来被移除：
+
+- **没有本地截止日期覆盖，且未被用户选入 Today**：转回 Inbox；
+- **已经被用户选入 Today**：保留现有 Todo 与 Today 选择，`sourceDueDate=null`；
+- **用户已经手工覆盖本地截止日期**：即使不在 Today，也保留 Todo 和本地 `dueDate`，只把 `sourceDueDate` 设为 `null`。
+
+Todo ↔ Inbox 因来源日期出现/消失迁移时，继续保留同一个 Workbench 实体 ID 和用户拥有的：
+
+- `projectId`；
+- 本地 priority / priorityLabel；
+- 本地 tags；
+- `createdAt`；
+- Today 选择。
+
+来源变化不能擅自撤销这些用户决定。
 
 ### 明确完成
 
-只有 `getnote note todos` 明确返回 `completed=true` 时，工作台才会：
+只有 `getnote note todos` 明确返回 `completed=true` 时：
 
-- 把已有对应待办标记完成；
-- 从“今日工作台”移除；
-- 从下一版本机 ICS 日历中移除。
+- 对应 Todo 标记完成；
+- 从 Today 移除；
+- 下一版 ICS 自然移除。
 
-如果本轮扫描没有出现某条旧待办，系统不会据此判定完成，因为最近笔记扫描窗口不等于完整历史任务数据库。
+某条来源事项本轮没有出现，不据此猜测完成。
 
-## 5. 飞书每日工作日记
+## 7. 核心事务边界
 
-固定章节：
-
-```text
-每日工作日记
-```
-
-固定记录类型：
+一次同步的强事务只包含：
 
 ```text
-[WORKBENCH_DAILY_TODOS]
-[WORKBENCH_DAILY_SUMMARY]
+读取 GetNote
+→ Normalize / Reconcile
+→ Workbench state 原子提交
 ```
 
-每条记录带稳定的：
+只有这三步失败，`external_tasks_sync` 才视为核心同步失败。
+
+状态提交成功后才执行派生 sink：
 
 ```text
-[WORKBENCH_OP:<operationId>]
+Workbench committed
+       │
+       ├─→ 飞书每日任务快照
+       └─→ ICS 原子重建
 ```
 
-写入采用：
+**两个 sink 都从已经提交的 Workbench 状态派生**，不直接使用原始 `source.active`。因此用户本地覆盖的 `dueDate`、保留在 Today 的无来源日期 Todo，以及其他 Workbench 所有权决定不会被派生输出重新换回旧来源值。
+
+飞书或 ICS 失败时：
+
+- 不回滚 Workbench；
+- 返回各自 `status=error` 和短错误信息；
+- `lastSyncStatus=ok_with_sink_errors`；
+- 本地留下不含任务正文的 `external_task_sink_failed` 审计事件；
+- 允许之后重试派生输出。
+
+如果核心与 sink 已完成、但最后的同步状态元数据写入失败，返回 `metadata.status=error`；前端必须明确展示“核心已提交，状态元数据异常”，不能把它说成核心失败，也不能伪装全绿。
+
+因此不会再出现“飞书临时不可用 → 得到大脑任务也无法进入 Workbench”。
+
+## 8. 飞书每日工作日记
+
+飞书 URL **不是启用 Task Sync 的必填项**。
+
+配置后，任务同步会尝试沉淀当日快照；未配置时返回：
+
+```text
+journal.status = not_configured
+```
+
+飞书写入仍使用稳定 operationId：
 
 ```text
 读取 → 查重 → 写入 → 按 operationId 读回确认
 ```
 
-同一 operationId 若已经对应不同正文，系统返回 `FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT` 并停止，不把它误判为安全重放。
+同一 operationId 若已经对应不同正文，返回 `FEISHU_DAILY_JOURNAL_OPERATION_CONFLICT`。
 
-任务同步会沉淀一份当日待办快照。每日总结由用户点击“沉淀今日总结”或明确要求 AI 执行后写入；不会后台自动发布。
+`lark-cli` 可能把单一段落内部换行在读回时折叠。幂等比较只把这种**换行边界**视为等价，不忽略普通空格或其他正文差异；真实不同正文仍 fail closed。
 
-飞书日记正文只保存到飞书。本地 activity 只写不含正文的审计事件。
+`lark-cli` 子进程只得到基础运行/网络环境和 `LARK_* / FEISHU_*` 配置，不继承 Workbench、AI、Joycrew 或 GetNote 的无关环境变量。
 
-## 6. 本机日历
+每日总结是显式用户动作，仍然要求已经配置飞书每日工作日记 URL；未配置时返回 `FEISHU_DAILY_JOURNAL_NOT_CONFIGURED`。不会后台自动发布。
+
+## 9. ICS 日历镜像
 
 工作台在私有数据目录中原子生成：
 
@@ -169,43 +273,20 @@ data/calendar/personal-ai-workbench.ics
 
 规则：
 
-- 文件权限为 `0600`，目录权限为 `0700`；
-- 只包含未完成且已确定日期的得到大脑待办；
-- 有明确开始和结束时间且不是全天任务时，生成定时事件；
-- 只有明确截止时刻、没有开始时刻时，生成只含 `DTSTART` 的瞬时事件；
-- 只有日期时，生成全天事件；
-- 不会猜测持续时长或替用户排期；
-- 每次同步重写完整日历，因此完成任务会自然移除；
-- UID 由稳定外部 ID 哈希生成；
-- DESCRIPTION 包含来源笔记 ID、标题与链接；
-- 写入采用临时文件加原子替换，失败时清理临时文件。
+- 文件 `0600`，目录 `0700`；
+- 只镜像未完成且有 Workbench 明确日期的任务；
+- 全天事项使用 `VALUE=DATE`；
+- 明确本地时刻使用 `TZID=<配置时区>`；
+- 已带 offset 的时间可以规范成 UTC；
+- 不猜持续时长；
+- UID 由稳定的当前 externalId 派生；
+- 每次完整重建，因此来源明确完成后自然消失。
 
-该 ICS 文件可由 macOS Calendar、Windows 日历或其他支持 iCalendar 的本机软件导入或订阅。工作台不调用系统日历 API。
+当用户已经覆盖本地 `dueDate` 时，ICS 镜像 Workbench 的本地任务日期，而不是强行恢复来源 `sourceDueDate`。
 
-## 7. 事务顺序
+ICS 是派生镜像，不是 Workbench 的任务真源。
 
-一次同步按以下顺序执行：
-
-```text
-分页读取最近笔记
-→ 逐篇读取 meeting_todos
-→ 解析日期并生成稳定外部 ID
-→ 生成稳定任务快照 operationId
-→ 飞书写入与读回
-→ 本机 ICS 原子写入
-→ 工作台待办/收件箱状态提交
-→ 保存不含正文的同步审计事件
-```
-
-如果飞书写入成功但后续步骤失败，重试会先按同一 operationId 查重，不盲目追加第二份任务快照。
-
-设置更新、任务同步和每日总结共用一把 mutation lease；并发冲突返回：
-
-```text
-EXTERNAL_TASK_PIPELINE_BUSY
-```
-
-## 8. MCP 工具
+## 10. MCP 与人工控制
 
 ```text
 external_task_integration_read
@@ -214,60 +295,36 @@ external_tasks_sync
 daily_summary_publish
 ```
 
-后三个写操作都需要用户确认。旧的 `feishu_inbox_sync` 已从 AI/MCP 白名单移除。
+后三个写操作需要用户确认。旧的 `feishu_inbox_sync` 已从 AI/MCP 白名单移除。
 
-确定性 planner 支持：
+同步仍然是用户主动触发；不增加定时后台扫描。
 
-```text
-同步得到大脑待办
-从 Get笔记 拉取会议待办
-沉淀今日总结
-```
+## 11. 部署前置条件
 
-## 9. 错误来源纠正
+### 核心 GetNote Task Sync
 
-此前若错误配置了：
+只要求目标运行环境能通过 `GetNoteReader` 读到真实得到大脑数据。
+
+VPS 推荐：
 
 ```text
-provider = dida_cli
-cliFlavor = ...
+VPS 宿主机 getnote CLI
+→ 只读 GetNote Runtime sidecar
+→ Workbench Docker private_http reader
 ```
 
-规范化层会：
+### 可选飞书 sink
 
-1. 把管线停用；
-2. 设置 `lastSyncStatus=needs_reconfiguration`；
-3. 要求用户重新确认得到大脑、飞书日记与本机日历设置。
+只有启用飞书每日任务快照或每日总结时，宿主环境才需要有效的 `lark-cli` 登录和目标文档权限。
 
-用户确认保存新设置后，只删除 `source=dida_cli` 的机器导入待办和收件箱项，不删除手工事项、Capture、项目或其他来源数据。
+### 验证
 
-## 10. 部署机器前置条件
-
-启用管线的机器必须同时具备：
+真实环境至少分别验证：
 
 ```text
-getnote CLI
-lark-cli
+getnote doctor -o json
+getnote notes --limit 20 -o json
+getnote note todos <note_id> -o json
 ```
 
-得到大脑 CLI 可通过以下命令安装或更新：
-
-```bash
-npx -y @getnote/cli@latest setup
-```
-
-并分别完成本机登录。`npm run doctor` 会执行只读的 `getnote doctor -o json`，检查安装、会员、登录、API 连通性、飞书日记配置和本机 ICS 路径，但不会执行真实外部写入。
-
-Docker 只有在容器内同时安装 CLI、挂载其登录状态并持久化 `DATA_DIR` 时才能使用该管线；默认镜像不应被理解为已经包含个人 CLI 凭证。
-
-## 11. 验证边界
-
-仓库合同测试使用 fake CLI、fake 飞书和临时本地目录，不接触真实凭证。
-
-代码合并前仍需要在部署机器上分别确认：
-
-- `getnote doctor -o json` 成功；
-- `getnote notes --limit 20 -o json` 返回真实笔记；
-- 任选一篇会议笔记执行 `getnote note todos <note_id> -o json`，输出与实际账户一致；
-- `lark-cli` 已登录且有目标飞书文档读写权限；
-- 本机日历软件能够导入或订阅生成的 ICS 文件。
+仓库合同测试继续使用 fake reader、fake 飞书和临时目录，不接触真实凭证。外部 CLI 环境隔离、canonical cursor、时区跨日、Workbench-owned sink 快照和飞书换行折叠都必须有自动化合同覆盖。
