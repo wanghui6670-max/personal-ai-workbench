@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('one-time Feishu initialization is explicit, confirmed, and hands off to a single analysis reload',async()=>{
+test('Feishu initialization stays explicit and remains available as reinitialize after the first import',async()=>{
   const [index,initializer,manual,registry,tool]=await Promise.all([
     read('public/index.html'),
     read('public/workbench-v3-initialize.js'),
@@ -14,12 +14,14 @@ test('one-time Feishu initialization is explicit, confirmed, and hands off to a 
   ]);
   assert.match(index,/workbench-v3-initialize\.js/);
   assert.match(initializer,/初始化导入并分析/);
-  assert.match(initializer,/initialImportAt/);
+  assert.match(initializer,/重新初始化/);
+  assert.match(initializer,/Boolean\(source\.initialImportAt\)/);
+  assert.doesNotMatch(initializer,/source\.initialImportAt\)\{existing\?\.remove\(\);return;/);
   assert.match(initializer,/feishu_initial_import/);
   assert.match(initializer,/confirmed:true/);
   assert.match(initializer,/__WORKBENCH_ARM_INITIAL_ANALYSIS__/);
   assert.match(initializer,/location\.reload\(\)/);
-  assert.match(initializer,/这是一次性操作/);
+  assert.match(initializer,/飞书原文不会被删除或改写/);
   assert.match(manual,/INIT_ANALYZE_ONCE/);
   assert.match(manual,/classificationRun=sessionStorage\.getItem\(INIT_ANALYZE_ONCE\)==='1'/);
   assert.match(manual,/sessionStorage\.removeItem\(INIT_ANALYZE_ONCE\)/);
