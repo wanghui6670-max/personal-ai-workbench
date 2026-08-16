@@ -29,6 +29,12 @@ function polishDashboard(){
   const source=dashboard.querySelector('.v3-source');
   const sourcePill=source?.querySelector('.pill.blue');
   if(sourcePill)setText(sourcePill,'飞书日记主来源');
+  const unbound=source?.querySelector('.pill.amber');
+  if(unbound&&/飞书未绑定/.test(unbound.textContent||'')){
+    const spans=[...source.querySelectorAll(':scope > span')];
+    const description=spans.find(span=>span!==unbound);
+    setText(description,'绑定飞书工作日记后，待办、分析、项目思考和日常记录可以混合存在；Workbench 只把新增/变化内容送入 AI 待处理流。');
+  }
   for(const item of dashboard.querySelectorAll('.v3-inbox-item')){
     const pills=[...item.querySelectorAll('.v3-item-meta .pill')];
     const sourceLabel=pills.find(pill=>/飞书/.test(pill.textContent||''));
