@@ -27,14 +27,28 @@ test('analysis and daily records receive an automatic memo destination',()=>{
   }
 });
 
-test('uniquely matched project progress receives project-note preview',()=>{
+test('uniquely matched project progress receives project-note preview with project identity',()=>{
+  const projects=[{id:'p-1',name:'常金米业',archived:false}];
   const plan=normalizeDiaryReviewDecision({
     category:'project_progress',destination:'project_note',targetProjectId:'p-1',dueDate:null,confidence:.9,
     reason:'明确描述现有项目进展。',message:'建议归入项目记录。'
-  },{evidence:[],conflicts:[],gaps:[]},{id:'in-project'});
+  },{evidence:[],conflicts:[],gaps:[]},{id:'in-project'},{projects});
   assert.equal(plan.kind,'tool');
   assert.equal(plan.args.targetProjectId,'p-1');
+  assert.match(plan.args.command,/常金米业/);
   assert.match(plan.args.command,/项目记录/);
+});
+
+test('project todo preview includes both verified project name and id',()=>{
+  const projects=[{id:'p-1',name:'常金米业',archived:false}];
+  const plan=normalizeDiaryReviewDecision({
+    category:'todo',destination:'todo',targetProjectId:'p-1',dueDate:'2026-08-20',confidence:.88,
+    reason:'明确属于常金米业项目，且原文给出了截止日期。',message:'建议创建项目待办。'
+  },{evidence:[],conflicts:[],gaps:[]},{id:'in-project-todo'},{projects});
+  assert.equal(plan.kind,'tool');
+  assert.equal(plan.args.targetProjectId,'p-1');
+  assert.match(plan.args.command,/常金米业/);
+  assert.match(plan.args.command,/2026-08-20/);
 });
 
 test('local fallback still distributes actionable and reflective diary blocks',()=>{
@@ -58,4 +72,5 @@ test('local fallback still distributes actionable and reflective diary blocks',(
   });
   assert.equal(project.category,'project_progress');
   assert.equal(project.args.targetProjectId,'p-1');
+  assert.match(project.args.command,/常金米业/);
 });
