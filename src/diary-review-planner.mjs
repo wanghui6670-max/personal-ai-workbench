@@ -1,13 +1,4 @@
 import { askStructured } from './ai.mjs';
-import { isValidDateOnly } from './validation.mjs';
-
-const CATEGORY_LABELS=Object.freeze({
-  todo:'待办候选',
-  project_progress:'项目进展',
-  analysis:'分析思考',
-  daily_record:'日常记录',
-  needs_decision:'需要你决定'
-});
 
 const boundedText=max=>({type:'string',pattern:`^[\\s\\S]{1,${max}}$`});
 
@@ -30,69 +21,46 @@ function analysisSchema(decisionSchema,evidenceIds){
   };
 }
 
-function categoryLabel(category){return CATEGORY_LABELS[category]||CATEGORY_LABELS.needs_decision;}
-
-function clarification(decision,analysis,override){
-  const label=categoryLabel(decision.category);
-  const message=override||decision.message||'需要你补充信息后再处理。';
+function extractionPlan({route,candidates=[],reason='',analysis=[]}){
+  if(!route?.id)return null;
+  const safe=Array.isArray(candidates)?candidates.slice(0,5):[];
   return{
-    kind:'clarification',toolName:null,args:{},
-    category:decision.category,destination:decision.destination,
-    confidence:decision.confidence,
-    reason:`分类：${label}。${decision.reason}`,
-    message,messageReply:message,analysis
+    kind:'diary_extraction',
+    toolName:null,
+    args:{itemId:route.id,candidates:safe},
+    category:safe.length?'todo':'non_todo',
+    destination:'todo_candidate',
+    confidence:safe.length?Math.max(...safe.map(item=>Number(item.confidence)||0)):1,
+    reason:reason||safe.length?`从当前日记内容提取到 ${safe.length} 个可独立执行的待办。`:'当前日记内容没有可独立执行的待办。',
+    message:safe.length?`提取到 ${safe.length} 个待办候选；背景、分析和日常记录不进入待办。`:'没有提取到待办；这条日记只保留在飞书。',
+    messageReply:safe.length?`提取到 ${safe.length} 个待办候选。`:'没有提取到待办。',
+    analysis
   };
 }
 
-function filteredClassification(decision,analysis){
-  const label=categoryLabel(decision.category);
-  const message=`已自动分类为${label}；按当前规则不进入待办，飞书原文继续保留。`;
-  return{
-    kind:'clarification',toolName:null,args:{},
-    category:decision.category,destination:decision.destination,
-    confidence:decision.confidence,
-    reason:`分类：${label}。${decision.reason}；非待办内容不进入 Workbench 待办链。`,
-    message,messageReply:message,analysis,
-    filteredNonTodo:true
-  };
-}
-
-function toolPlan(decision,analysis,args){
-  const label=categoryLabel(decision.category);
-  return{
-    kind:'tool',toolName:'inbox_process',args,
-    category:decision.category,destination:decision.destination,
-    confidence:decision.confidence,
-    reason:`分类：${label}。${decision.reason}`,
-    message:decision.message,messageReply:decision.message,analysis
-  };
-}
-
-function targetProject(projects,id){return id?projects.find(project=>project.id===id)||null:null;}
-
-export function normalizeDiaryReviewDecision(decision={},analysis={},route={},options={}){
-  if(!route?.id||!CATEGORY_LABELS[decision.category])return null;
+export function normalizeDiaryTodoExtraction(decision={},analysis={},route={},options={}){
+  if(!route?.id||!Array.isArray(decision.todoCandidates))return null;
   const projects=Array.isArray(options.projects)?options.projects:[];
-  const project=targetProject(projects,decision.targetProjectId);
-
-  if(['project_progress','analysis','daily_record'].includes(decision.category)){
-    return filteredClassification(decision,analysis);
+  const projectIds=new Set(projects.map(project=>project.id));
+  const seen=new Set();
+  const candidates=[];
+  for(const raw of decision.todoCandidates.slice(0,5)){
+    const text=String(raw?.text||'').replace(/\s+/g,' ').trim();
+    if(!text||text.length>240)continue;
+    const key=text.toLocaleLowerCase('zh-CN');
+    if(seen.has(key))continue;
+    seen.add(key);
+    const dueDate=typeof raw.dueDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate)?raw.dueDate:null;
+    const targetProjectId=typeof raw.targetProjectId==='string'&&projectIds.has(raw.targetProjectId)?raw.targetProjectId:null;
+    candidates.push({
+      text,
+      dueDate,
+      targetProjectId,
+      confidence:Number.isFinite(raw.confidence)?Math.max(0,Math.min(1,raw.confidence)):0,
+      reason:String(raw.reason||'').replace(/\s+/g,' ').trim().slice(0,260)
+    });
   }
-  if(decision.category==='needs_decision'){
-    return clarification(decision,analysis,decision.message||'这条内容无法可靠判断是不是待办，需要你决定。');
-  }
-  if(decision.category!=='todo'||decision.destination!=='todo'){
-    return clarification(decision,analysis,'分类结果不一致，我没有把它放进待办。');
-  }
-  if(!decision.dueDate)return clarification(decision,analysis,'已经识别为待办候选；还缺一个明确截止日期。');
-  if(!isValidDateOnly(decision.dueDate))return clarification(decision,analysis,'已经识别为待办候选，但截止日期无效，请重新确认日期。');
-  if(decision.targetProjectId&&!project)return clarification(decision,analysis,'已经识别为待办候选，但目标项目无法确认。');
-  const args={itemId:route.id,command:`创建独立待办，截止 ${decision.dueDate}`};
-  if(project){
-    args.targetProjectId=project.id;
-    args.command=`放到「${project.name}」项目做成待办，截止 ${decision.dueDate}`;
-  }
-  return toolPlan(decision,analysis,args);
+  return extractionPlan({route,candidates,reason:String(decision.reason||''),analysis});
 }
 
 export async function planDiaryReviewAI({state={},route={},env=process.env,fetchImpl=globalThis.fetch}={}){
@@ -104,64 +72,67 @@ export async function planDiaryReviewAI({state={},route={},env=process.env,fetch
   const targetProjectId=projectIds.length
     ?{anyOf:[{type:'string',enum:projectIds},{type:'null'}]}
     :{type:'null'};
+  const candidateSchema={
+    type:'object',additionalProperties:false,
+    properties:{
+      text:boundedText(240),
+      dueDate:{anyOf:[{type:'string',pattern:'^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$'},{type:'null'}]},
+      targetProjectId,
+      confidence:{type:'number',minimum:0,maximum:1},
+      reason:boundedText(260)
+    },
+    required:['text','dueDate','targetProjectId','confidence','reason']
+  };
   const decisionSchema={
     type:'object',additionalProperties:false,
     properties:{
-      category:{type:'string',enum:Object.keys(CATEGORY_LABELS)},
-      destination:{type:'string',enum:['todo','project_note','memo','clarification']},
-      targetProjectId,
-      dueDate:{anyOf:[{type:'string',pattern:'^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$'},{type:'null'}]},
-      confidence:{type:'number',minimum:0,maximum:1},
-      reason:boundedText(420),
-      message:boundedText(520)
+      todoCandidates:{type:'array',maxItems:5,items:candidateSchema},
+      reason:boundedText(420)
     },
-    required:['category','destination','targetProjectId','dueDate','confidence','reason','message']
+    required:['todoCandidates','reason']
   };
   const schema=analysisSchema(decisionSchema,evidenceIds);
   const projectText=projects.map((project,index)=>`[project_${index+1}] ${project.id} | ${project.name} | 计划结束 ${project.endDate||'未知'}`).join('\n')||'（当前没有可匹配项目）';
   const result=await askStructured({
-    name:'mixed_diary_review',
-    description:'Classify one Feishu mixed-diary block; only todo items may continue into the Workbench task-processing chain.',
+    name:'mixed_diary_todo_extraction',
+    description:'Extract zero to five atomic actionable todos from one Feishu mixed-diary block; leave narrative and analysis in Feishu.',
     schema,
     instructions:[
-      '你是个人工作台的飞书混合日记分流器。先分类；只有真正的待办才能继续进入 Workbench 待办处理链。',
-      '无论信息是否足够执行，都必须先给出 category 和 destination；不能因为缺截止日期就把明确待办改成“需要决定”。',
-      'category 只能是 todo、project_progress、analysis、daily_record、needs_decision。',
-      '明确行动、跟进、拍摄、补完、准备、联系、提交、选择后要执行的事项归 todo。即使没有截止日期，仍然 category=todo、destination=todo、dueDate=null。',
-      '描述既有项目已经发生的进展、结果、卡点或状态归 project_progress；它不进入待办，destination 使用 project_note 仅表达分类语义，不代表要写项目记录。',
-      '方法、观点、结论、复盘、创意、文案、策略判断归 analysis；它不进入待办，destination=memo 仅表达分类语义。',
-      '生活/工作流水、经历、日记式事实记录归 daily_record；它不进入待办，destination=memo 仅表达分类语义。',
-      '只有真正无法判断是不是待办、必须新建项目、或存在多个互斥处理方向时才使用 needs_decision / clarification。',
-      '待办只有原文明确给出截止日期时才能填写 dueDate；绝不能猜日期。',
-      '不得自动加入 Today，不得自动创建项目，不得删除飞书原文。非待办分类只用于过滤本地待办入口，来源仍在飞书。',
+      '你是个人工作台的飞书日记待办提取器。不要给整段日记贴一个标签；要从当前这一段里提取 0 到 5 个真正可以独立执行的下一步动作。',
+      '一段可以同时包含背景、复盘、观点和多个动作。背景、分析、已经发生的事情全部留在飞书，不得复制成待办；只输出动作本身。',
+      '待办 text 必须是简洁、独立、可执行的动作，忠实于原文。可以删掉背景铺垫，但不能发明对象、范围、数量、日期、交付物或结论。',
+      '“建议/结论/价值/原则/复盘/感受/已经完成/今天发生了什么”本身不是待办。只有泛泛的“以后注意”“要重视”“记住这一点”而没有具体可执行动作时，也不要提取。',
+      '明确出现补完、跟进、联系、确认、准备、提交、发送、拍摄、修改、整理、采购、发布、选择后执行等下一步行动时，可以提取。一个段落有两个独立动作就输出两个候选。',
+      'checkbox 或明确 [INBOX] 只是强提示，不代表整段都要进入待办；仍然只提取实际动作。',
+      'dueDate 只有原文明示了可可靠转换为 YYYY-MM-DD 的截止日期时才填写，否则必须为 null；绝不能猜日期。',
+      'targetProjectId 只有原文与一个现有项目能够唯一、明确对应时才填写，否则必须为 null；绝不能新建项目。',
+      '不要自动加入 Today，不要创建 Todo，不要删除或改写飞书原文。你的输出只用于生成 Workbench 的待办候选。',
       'analysis.evidence 只引用给定 evidence ID，输出可审计摘要，不输出隐藏思维链。'
     ].join('\n'),
     input:`[diary_item] ${item.text||''}\n\n可匹配项目：\n${projectText}`,
     env,fetchImpl
   });
   if(!result?.decision)return null;
-  return normalizeDiaryReviewDecision(result.decision,result.analysis,route,{projects});
+  return normalizeDiaryTodoExtraction(result.decision,result.analysis,route,{projects});
+}
+
+function stripDiaryPrefix(text){return String(text||'').replace(/^\[飞书混合日记[^\]]*\]\s*/,'').trim();}
+function localActionSentences(text){
+  const source=stripDiaryPrefix(text);
+  const parts=source.split(/[。！？!?；;\n]+/).map(part=>part.trim()).filter(Boolean);
+  const action=/待办|记得|需要(?:去|做|补|改|跟|联|确|准|提|发|拍|整|采|更|处)|要(?:去|做|补|改|跟|联|确|准|提|发|拍|整|采|更|处)|补完|补充|跟进|联系|确认|准备|提交|发送|拍摄|再拍|修改|整理|采购|发布|更新|处理|完成|选一个|试\s*\d+个/i;
+  const vague=/^(?:以后|后续)?(?:要|需要)?(?:注意|重视|记住|提醒自己)(?:这|那|这一|这一点|一下)?$/;
+  return parts.filter(part=>action.test(part)&&!vague.test(part)).slice(0,3);
 }
 
 export function localDiaryReviewPlan({state={},route={}}={}){
   const item=(state.inbox||[]).find(candidate=>candidate.id===route?.id)||(state.inbox||[])[0];
   if(!item)return null;
-  const text=String(item.text||'');
   const projects=(state.projects||[]).filter(project=>!project.archived);
-  const matched=projects.filter(project=>project.name&&text.includes(project.name));
-  const todoSignal=/复选框记录|待办|提醒|记得|补完|补充|准备|跟进|联系|提交|发送|拍摄|后再拍|要做|需要做|选一个|试\s*\d+个/i.test(text);
-  const progressSignal=/进展|已完成|完成了|做到|目前|当前|卡点|结果|交付|上线|更新到|推进到/i.test(text);
-  const analysisSignal=/分析|复盘|建议|结论|策略|价值|方法|原则|思考|应该|核心是|不是.*而是/i.test(text);
-  if(matched.length===1&&progressSignal){
-    return filteredClassification({category:'project_progress',destination:'project_note',confidence:.66,reason:'本地回退识别到唯一项目名称和进展表达。',message:'已自动归为项目进展。'},[]);
-  }
-  if(todoSignal){
-    return clarification({category:'todo',destination:'todo',confidence:.58,reason:'本地回退识别到明确行动表达，但没有可靠截止日期。',message:'已经自动归为待办候选；补一个截止日期即可。'},[],'已经自动归为待办候选；补一个截止日期即可。');
-  }
-  if(analysisSignal){
-    return filteredClassification({category:'analysis',destination:'memo',confidence:.57,reason:'本地回退识别到分析/方法/结论表达。',message:'已自动归为分析思考。'},[]);
-  }
-  return filteredClassification({category:'daily_record',destination:'memo',confidence:.51,reason:'本地回退未识别到明确行动或项目进展，按日常记录处理。',message:'已自动归为日常记录。'},[]);
+  const sentences=localActionSentences(item.text);
+  const candidates=sentences.map(text=>{
+    const matched=projects.filter(project=>project.name&&text.includes(project.name));
+    return{text,dueDate:null,targetProjectId:matched.length===1?matched[0].id:null,confidence:.55,reason:'本地回退检测到明确行动表达；未推测截止日期。'};
+  });
+  return extractionPlan({route,candidates,reason:candidates.length?'本地回退从当前日记段落中提取明确行动。':'本地回退未检测到足够明确的下一步行动。',analysis:[]});
 }
-
-export { CATEGORY_LABELS };
