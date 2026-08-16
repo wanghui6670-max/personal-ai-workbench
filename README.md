@@ -130,6 +130,10 @@ npm run harness:employee:e2e
 
 右侧 Harness Copilot 只使用固定白名单工具；外部改变必须经过现有确认门。
 
+## iPhone Capture
+
+`POST /api/capture` 使用稳定 `captureId` 做幂等；同一次采集的所有网络重试必须复用同一个 `captureId`。Capture 只进入 Inbox，不自动创建 Todo 或 Today。
+
 ## 数据、备份与恢复
 
 Workbench 本地状态和配置使用原子 JSON；运行时备份目录 `data/p0/` 已被 Git 忽略。
