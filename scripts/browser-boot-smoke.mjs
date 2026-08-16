@@ -47,6 +47,21 @@ async function findChrome(){
   throw new Error('No Chrome/Chromium executable found on runner');
 }
 
+async function closeBrowserSafely(browser){
+  if(!browser)return;
+  let closed=false;
+  try{
+    await Promise.race([
+      browser.close().then(()=>{closed=true;}),
+      sleep(2_000).then(()=>{throw new Error('browser close timeout');})
+    ]);
+  }catch{}
+  if(!closed){
+    try{browser.process()?.kill('SIGKILL');}catch{}
+    await sleep(100);
+  }
+}
+
 const server=spawn(process.execPath,['src/server.mjs'],{cwd:root,env,stdio:['ignore','pipe','pipe']});
 const serverErr=[];server.stderr.on('data',c=>serverErr.push(c));
 let browser=null;
@@ -54,7 +69,7 @@ try{
   await waitForHealth();
   const executablePath=await findChrome();
   browser=await puppeteer.launch({
-    executablePath,headless:true,
+    executablePath,headless:true,timeout:15_000,
     args:['--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check']
   });
   const page=await browser.newPage();
@@ -75,7 +90,7 @@ try{
   if(pageErrors.length)throw new Error(`Workbench rendered but emitted page errors: ${JSON.stringify(pageErrors).slice(0,8000)}`);
   console.log('browser-boot-smoke: ok');
 }finally{
-  if(browser)await browser.close().catch(()=>undefined);
+  await closeBrowserSafely(browser);
   server.kill('SIGTERM');await sleep(150);if(server.exitCode===null)server.kill('SIGKILL');
   if(serverErr.length)process.stderr.write(Buffer.concat(serverErr));
   await fsp.rm(tmp,{recursive:true,force:true});
