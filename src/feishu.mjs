@@ -15,6 +15,7 @@ import {larkCliEnv} from './external-cli-env.mjs';
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
 const SAFE_TOKEN = /^[A-Za-z0-9_-]{1,256}$/;
+const WORKBENCH_INBOX_HEADING = 'Workbench 收件箱';
 
 export class FeishuSourceError extends Error {
   constructor(message, { cause, code = 'FEISHU_SOURCE_UNAVAILABLE', statusCode = 502 } = {}) {
@@ -116,7 +117,7 @@ export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INB
   const source = String(xml ?? '');
   const headingPattern = new RegExp(`<h1\\b[^>]*>${escapeRegExp(heading)}<\\/h1\\s*>`, 'i');
   const headingMatch = headingPattern.exec(source);
-  if (!headingMatch) return { sectionFound: false, items: [] };
+  if (!headingMatch) return { sectionFound: false, headingBlockId: null, items: [], mode: 'inbox_section' };
   const afterHeading = source.slice(headingMatch.index + headingMatch[0].length);
   const nextHeading = /<h1\b[^>]*>[^<]*<\/h1\s*>/i.exec(afterHeading);
   const section = nextHeading ? afterHeading.slice(0, nextHeading.index) : afterHeading;
@@ -131,12 +132,55 @@ export function parseFeishuInboxXml(xml, { heading = '收件箱', prefix = '[INB
     const idMatch = match[2].match(/\bid=["']([^"']+)["']/i);
     const blockId = idMatch?.[1] || null;
     if (!blockId) continue;
-    items.push({ blockId, text: value, rawText: text, tag: match[1].toLowerCase() });
+    items.push({ blockId, text: value, rawText: text, tag: match[1].toLowerCase(), explicitInbox:true, headingPath:[heading] });
   }
   const unique = new Map();
   for (const item of items) unique.set(item.blockId, item);
   const headingId = headingMatch[0].match(/\bid=["']([^"']+)["']/i)?.[1] || null;
-  return { sectionFound: true, headingBlockId: headingId, items: [...unique.values()] };
+  return { sectionFound: true, headingBlockId: headingId, items: [...unique.values()], mode:'inbox_section' };
+}
+
+export function parseFeishuDiaryXml(xml, { prefix = '[INBOX]' } = {}) {
+  const source = String(xml ?? '');
+  const headings = { h1:null, h2:null, h3:null };
+  const items = [];
+  const pattern = /<(h1|h2|h3|p|checkbox|li)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+  let match;
+  let order = 0;
+  while ((match = pattern.exec(source))) {
+    const tag = match[1].toLowerCase();
+    const attrs = match[2];
+    const rawText = decodeXmlText(match[3]);
+    const blockId = attrs.match(/\bid=["']([^"']+)["']/i)?.[1] || null;
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+      if (rawText) headings[tag] = rawText;
+      if (tag === 'h1') { headings.h2 = null; headings.h3 = null; }
+      if (tag === 'h2') headings.h3 = null;
+      continue;
+    }
+    if (!blockId || !rawText) continue;
+    let text = rawText;
+    let explicitInbox = false;
+    if (text.startsWith(prefix)) {
+      text = text.slice(prefix.length).trim();
+      explicitInbox = true;
+    }
+    if (!text) continue;
+    const checked = tag === 'checkbox' && /\bchecked(?:=["']?(?:true|1|checked)["']?)?/i.test(attrs);
+    items.push({
+      blockId,
+      text,
+      rawText,
+      tag,
+      checked,
+      explicitInbox,
+      headingPath:[headings.h1,headings.h2,headings.h3].filter(Boolean),
+      order:order++
+    });
+  }
+  const unique = new Map();
+  for (const item of items) unique.set(item.blockId, item);
+  return { sectionFound:false, headingBlockId:null, items:[...unique.values()], mode:'mixed_diary' };
 }
 
 export function parseFeishuProjectRecordsXml(xml, { heading = PROJECT_RECORD_HEADING } = {}) {
@@ -194,30 +238,58 @@ function escapeXml(value) {
 }
 
 export function createFeishuJournalClient({ exec = execFileAsync, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  async function fetchSource(config) {
+    const document = await fetchDocument(config?.documentUrl, { exec, timeoutMs });
+    const section = parseFeishuInboxXml(document.content, {
+      heading: config?.inboxHeading || '收件箱',
+      prefix: config?.inboxPrefix || '[INBOX]'
+    });
+    if (section.sectionFound) return { ...document, ...section, mode:'inbox_section' };
+    const diary = parseFeishuDiaryXml(document.content, { prefix:config?.inboxPrefix || '[INBOX]' });
+    return { ...document, ...diary, mode:'mixed_diary' };
+  }
+
+  async function ensureWriteSection(config) {
+    const documentUrl = validateDocumentUrl(config?.documentUrl);
+    const prefix = config?.inboxPrefix || '[INBOX]';
+    let document = await fetchDocument(documentUrl, { exec, timeoutMs });
+    let section = parseFeishuInboxXml(document.content, {
+      heading:config?.inboxHeading || '收件箱', prefix
+    });
+    if (section.sectionFound) return { document, section };
+    section = parseFeishuInboxXml(document.content, { heading:WORKBENCH_INBOX_HEADING, prefix });
+    if (section.sectionFound) return { document, section };
+    const anchor = lastDocumentBlockId(document.content);
+    if (!anchor) throw new FeishuSourceError('飞书日记缺少可创建 Workbench 收件箱的锚点。', { code:'FEISHU_SOURCE_FORMAT' });
+    await updateDocument(documentUrl, {
+      anchorBlockId:anchor,
+      content:`<h1>${escapeXml(WORKBENCH_INBOX_HEADING)}</h1>`
+    }, { exec, timeoutMs });
+    document = await fetchDocument(documentUrl, { exec, timeoutMs });
+    section = parseFeishuInboxXml(document.content, { heading:WORKBENCH_INBOX_HEADING, prefix });
+    if (!section.sectionFound || !section.headingBlockId) {
+      throw new FeishuSourceError('Workbench 收件箱自动创建后读回失败。', { code:'FEISHU_SOURCE_READBACK_FAILED' });
+    }
+    return { document, section };
+  }
+
   return {
-    async fetch(config) {
-      const document = await fetchDocument(config?.documentUrl, { exec, timeoutMs });
-      const parsed = parseFeishuInboxXml(document.content, {
-        heading: config?.inboxHeading || '收件箱',
-        prefix: config?.inboxPrefix || '[INBOX]'
-      });
-      if (!parsed.sectionFound) throw new FeishuSourceError(`文档中没有找到“${config?.inboxHeading || '收件箱'}”章节。`, { code: 'FEISHU_SOURCE_FORMAT' });
-      return { ...document, ...parsed };
-    },
+    fetch:fetchSource,
     async appendAndFetch(config, text) {
       const documentUrl = validateDocumentUrl(config?.documentUrl);
       const prefix = config?.inboxPrefix || '[INBOX]';
-      const current = await this.fetch(config);
-      const beforeIds = new Set(current.items.map(item => item.blockId));
-      const anchor = current.items.at(-1)?.blockId || current.headingBlockId;
-      if (!anchor) throw new FeishuSourceError('飞书文档收件箱章节缺少可写入锚点。', { code: 'FEISHU_SOURCE_FORMAT' });
+      const before = await fetchSource(config);
+      const beforeIds = new Set(before.items.map(item => item.blockId));
+      const { section } = await ensureWriteSection(config);
+      const anchor = section.items.at(-1)?.blockId || section.headingBlockId;
+      if (!anchor) throw new FeishuSourceError('飞书日记 Workbench 收件箱缺少可写入锚点。', { code: 'FEISHU_SOURCE_FORMAT' });
       await updateDocument(documentUrl, {
         anchorBlockId: anchor,
         content: `<p>${escapeXml(`${prefix} ${text}`)}</p>`
       }, { exec, timeoutMs });
-      const fetched = await this.fetch(config);
+      const fetched = await fetchSource(config);
       const added = fetched.items.filter(item => !beforeIds.has(item.blockId) && item.text === text);
-      if (added.length !== 1) throw new FeishuSourceError('飞书写入命令已返回，但文档读回无法唯一确认新增收件箱事项。', { code: 'FEISHU_SOURCE_READBACK_FAILED' });
+      if (added.length !== 1) throw new FeishuSourceError('飞书写入命令已返回，但文档读回无法唯一确认新增事项。', { code: 'FEISHU_SOURCE_READBACK_FAILED' });
       return { ...fetched, item: added[0] };
     }
   };
@@ -291,6 +363,7 @@ export function projectRecordConfigured(project) {
 export {
   escapeXml,
   validateDocumentUrl,
+  WORKBENCH_INBOX_HEADING,
   PROJECT_RECORD_HEADING,
   PROJECT_ANALYSIS_PREFIX,
   PROJECT_SUMMARY_PREFIX
