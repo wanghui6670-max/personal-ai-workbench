@@ -38,6 +38,31 @@
 .main>.capture{margin-bottom:10px}
 .main>.capture input{background:#fff}
 
+/* Automatic diary classification pools */
+.v3-pool-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 10px;padding:6px 2px;background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(8px)}
+.v3-pool-filter{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:5px 8px;font:inherit;font-size:10px;font-weight:650;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.v3-pool-filter span{min-width:16px;text-align:center;border-radius:999px;padding:1px 4px;background:var(--soft);font-size:9px}
+.v3-pool-filter:hover{border-color:var(--line-strong);color:var(--ink)}
+.v3-pool-filter.active{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:var(--accent-soft);color:color-mix(in srgb,var(--accent) 82%,var(--ink))}
+.v3-category-pill.purple{background:#f4efff;color:#7652b8}
+.v3-category-pill.muted{background:#f1f3f5;color:#7b8491}
+.v3-category-pill.amber{background:#fff6e8;color:#a46100}
+.v3-category-pill.green{background:#edf8f3;color:#1f7650}
+.v3-category-pill.red{background:#fff0f0;color:#ad3434}
+.v3-category-pill.blue{background:var(--accent-soft);color:color-mix(in srgb,var(--accent) 82%,var(--ink))}
+
+/* Desktop behaves like a real three-pane workbench: each pane scrolls independently. */
+@media(min-width:901px){
+  html,body,#app{height:100%;overflow:hidden}
+  .layout{height:100vh;min-height:0;overflow:hidden}
+  .human-side{height:100vh;min-height:0;overflow:hidden}
+  .sidebar{height:100vh;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .content{height:100vh;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+  .topbar{position:sticky;top:0}
+  .v3-pool-filters{position:sticky;top:72px;z-index:4}
+  .ai-panel.harness-primary{height:100vh;min-height:0}
+}
+
 /* Current item assistant in the right control plane */
 #v3-focus-assistant{margin:4px 0 10px;padding:12px;border:1px solid #dfe6f2;border-radius:12px;background:#fff;color:#20242c}
 .ai-panel #v3-focus-assistant{border-color:rgba(126,145,177,.28);background:rgba(255,255,255,.055);color:inherit}
@@ -53,4 +78,4 @@
 .ai-panel.v3-has-focus .ai-context{margin-bottom:8px}
 
 @media(max-width:1180px){.v3-project-live{grid-template-columns:repeat(2,minmax(0,1fr))}.v3-dashboard>.v3-grid{grid-template-columns:1fr}}
-@media(max-width:900px){.v3-dashboard>.v3-hero{grid-template-columns:repeat(2,minmax(0,1fr))}.v3-dashboard>.v3-hero .v3-metric:nth-child(2){border-right:0}.v3-dashboard>.v3-hero .v3-metric:nth-child(-n+2){border-bottom:1px solid var(--line)}.v3-project-live{grid-template-columns:1fr}}
+@media(max-width:900px){.v3-dashboard>.v3-hero{grid-template-columns:repeat(2,minmax(0,1fr))}.v3-dashboard>.v3-hero .v3-metric:nth-child(2){border-right:0}.v3-dashboard>.v3-hero .v3-metric:nth-child(-n+2){border-bottom:1px solid var(--line)}.v3-project-live{grid-template-columns:1fr}.v3-pool-filters{position:static}}
