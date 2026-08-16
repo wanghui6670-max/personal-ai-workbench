@@ -12,7 +12,7 @@ const AUTO_ANALYZE_QUEUE_LIMIT=100;
 const REVIEW_CACHE_KEY='workbench-v3-inbox-reviews-v1';
 const REVIEW_CACHE_MAX_AGE_MS=9*60*1000;
 
-const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const attr=esc;
 const routePart=value=>encodeURIComponent(String(value??''));
 const fmtDate=value=>value?new Date(`${value}T00:00:00`).toLocaleDateString('zh-CN',{month:'short',day:'numeric'}):'—';
