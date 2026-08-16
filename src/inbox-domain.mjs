@@ -18,6 +18,7 @@ function feishuSyncSummary(config,extra={}){
     syncedAt:source?.lastSyncAt??null,
     status:source?.lastSyncStatus||'not_configured',
     importedCount:Number.isInteger(source?.lastImportedCount)?source.lastImportedCount:0,
+    initializedAt:source?.initialImportAt??null,
     ...extra
   };
 }
@@ -66,10 +67,10 @@ function applyRemoteMetadata(local,remote,mode){
   local.feishuExplicitInbox=remote.explicitInbox===true;
 }
 
-export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
+export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,initialize=false}={}){
   const config=await store.readConfig();
   if(!sourceConfigured(config.dataSource)){
-    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,reason:'not_configured'});
+    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,initialized:Boolean(initialize),reason:'not_configured'});
   }
 
   let fetched;
@@ -91,7 +92,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
 
   const allRemoteItems=(fetched.items||[]).map(normalizeRemoteItem).filter(item=>item.blockId&&item.text);
   const {unique:uniqueRemoteItems,duplicates:duplicateRemoteItems}=dedupeRemoteItems(allRemoteItems);
-  const firstMixedSync=fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
+  const firstMixedSync=!initialize&&fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
   const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(uniqueRemoteItems):null;
   const remoteItems=bootstrapIds?uniqueRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):uniqueRemoteItems;
   const baselineItems=bootstrapIds?uniqueRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
@@ -101,7 +102,7 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
   let seenSkipped=0;
 
   await store.updateState(state=>{
-    state.inboxAcks=normalizeInboxAcks(state.inboxAcks);
+    state.inboxAcks=initialize?[]:normalizeInboxAcks(state.inboxAcks);
     const ackByBlock=new Map(state.inboxAcks.map(item=>[item.blockId,item]));
     const localByBlock=new Map(
       state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item])
@@ -189,24 +190,26 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
       knownDedupeHashes.add(dedupeHash);
       imported+=1;
       addActivity(state,{
-        type:'inbox_synced',
+        type:initialize?'inbox_initialized':'inbox_synced',
         inboxId:item.id,
-        text:fetched.mode==='mixed_diary'?'从飞书日记同步一条新增内容。':'从飞书收件箱同步一条新事项。'
+        text:initialize?'初始化导入一条飞书日记内容。':fetched.mode==='mixed_diary'?'从飞书日记同步一条新增内容。':'从飞书收件箱同步一条新事项。'
       });
     }
 
     // Append-only source contract: previously seen block IDs are permanent history.
-    // Remote edits/deletions never mutate or re-open Workbench state. Users can
-    // explicitly remove local pending items without touching the Feishu source.
+    // Remote edits/deletions never mutate or re-open Workbench state. The explicit
+    // initialize mode is the only path allowed to rebuild the source acknowledgement baseline.
   });
 
+  const completedAt=nowIso();
   await store.updateConfig(current=>{
     if(current.dataSource){
       current.dataSource.lastRevisionId=fetched.revisionId===null?null:String(fetched.revisionId);
-      current.dataSource.lastSyncAt=nowIso();
+      current.dataSource.lastSyncAt=completedAt;
       current.dataSource.lastSyncStatus='ok';
       current.dataSource.lastSyncError=null;
       current.dataSource.lastImportedCount=allRemoteItems.length;
+      if(initialize)current.dataSource.initialImportAt=completedAt;
     }
     return structuredClone(current);
   });
@@ -222,7 +225,8 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     sectionFound:fetched.sectionFound,
     mode:fetched.mode||'inbox_section',
     baselined,
-    firstMixedSync
+    firstMixedSync,
+    initialized:Boolean(initialize)
   });
 }
 
