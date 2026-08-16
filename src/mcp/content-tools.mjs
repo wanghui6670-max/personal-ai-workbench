@@ -32,8 +32,16 @@ export function createContentTools(){
 }
 
 export function planContentMessage({message}={}){
-  const text=String(message||'');
-  if(!/(得到大脑|GetNote)/i.test(text)||!/(内容|素材|笔记|自媒体)/.test(text))return null;
+  const text=String(message||'').trim();
+  if(!/(得到大脑|GetNote|Get笔记)/i.test(text))return null;
+  if(/(待办|任务|meeting_todos)/i.test(text)){
+    return{
+      kind:'clarification',toolName:null,args:{},
+      reason:'得到大脑已退出个人待办主链路；个人收件箱主来源改为飞书云文档。',
+      message:'得到大脑现在只用于“自媒体”内容采集，不再同步成个人待办。要处理工作事项，请先同步飞书收件箱；要采集得到大脑内容，可以说“同步得到大脑内容到自媒体”。'
+    };
+  }
+  if(!/(内容|素材|笔记|自媒体)/.test(text))return null;
   if(/(同步|拉取|导入|采集|保存到本地)/.test(text)){
     const match=text.match(/(?:最近|前)?\s*(\d{1,3})\s*(?:篇|条)/);
     const parsed=match?Number(match[1]):50;
