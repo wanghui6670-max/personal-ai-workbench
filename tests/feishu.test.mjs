@@ -31,7 +31,7 @@ test('Feishu parser reads only the 收件箱 h1 section and deduplicates block i
   assert.deepEqual(parsed.items.map(item => [item.blockId, item.text]), [['blk_0', '第一条'], ['blk_1', '第二条']]);
 });
 
-test('Feishu sync imports once, preserves explicit local routing, and does not create today tasks', async t => {
+test('Feishu sync imports a source block once and later remote disappearance does not mutate local routing', async t => {
   const store = await fixture(t);
   let current = xml(['[INBOX] 从飞书来的事项']);
   const client = { fetch: async () => ({ content: current, revisionId: 7, documentId: 'doc', ...parseFeishuInboxXml(current) }) };
@@ -44,12 +44,15 @@ test('Feishu sync imports once, preserves explicit local routing, and does not c
   assert.deepEqual(state.todayPlan, []);
   result = await syncFeishuInbox({ store, client });
   assert.equal(result.imported, 0);
+  assert.equal(result.seenSkipped, 1);
   assert.equal((await store.readState()).inbox.length, 1);
 
   current = xml([]);
   result = await syncFeishuInbox({ store, client });
-  assert.equal(result.removed, 1);
-  assert.equal((await store.readState()).inbox.length, 0);
+  assert.equal(result.removed, 0);
+  state = await store.readState();
+  assert.equal(state.inbox.length, 1);
+  assert.equal(state.inboxAcks.length, 1);
 });
 
 test('new local inbox writes Feishu first and only commits local cache after readback', async t => {
