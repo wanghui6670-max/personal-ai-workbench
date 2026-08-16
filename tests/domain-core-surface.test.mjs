@@ -19,9 +19,13 @@ test('workbench-core contains no project creation, classification, update or syn
   assert.doesNotMatch(core,/writeProjectMd|prepareProjectDir|prepareNewProjectDir|analyzeProject/);
 });
 
-test('production inbox surface uses content hashes and never persists ack plaintext',async()=>{
+test('production inbox surface uses hash-only permanent acknowledgements for append-only Feishu sync',async()=>{
   const inbox=await fsp.readFile(path.join(root,'src','inbox-domain.mjs'),'utf8');
   assert.match(inbox,/inboxContentHash/);
-  assert.match(inbox,/inboxAckMatches/);
+  assert.match(inbox,/const priorAck=ackByBlock\.get\(remote\.blockId\)/);
+  assert.match(inbox,/if\(priorAck\)\{/);
+  assert.match(inbox,/seenSkipped\+=1/);
+  assert.doesNotMatch(inbox,/inboxAckMatches/);
+  assert.doesNotMatch(inbox,/state\.inboxAcks=state\.inboxAcks\.filter/);
   assert.doesNotMatch(inbox,/inboxAcks\.push\(\{blockId:[^}]*text:/);
 });
