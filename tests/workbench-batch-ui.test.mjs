@@ -28,12 +28,22 @@ test('batch confirmation skips anything without an existing executable preview',
   assert.match(script,/仍缺信息的会继续保留/);
 });
 
-test('batch reanalysis stays bounded and batch deletion is local-only',async()=>{
-  const script=await fsp.readFile('public/workbench-v3-batch.js','utf8');
+test('batch reanalysis stays bounded and batch deletion is one confirmed local-only transaction',async()=>{
+  const [script,registry,tool]=await Promise.all([
+    fsp.readFile('public/workbench-v3-batch.js','utf8'),
+    fsp.readFile('src/mcp/registry.mjs','utf8'),
+    fsp.readFile('src/mcp/inbox-batch-tools.mjs','utf8')
+  ]);
   assert.match(script,/Math\.min\(2,queue\.length\)/);
-  assert.match(script,/fetch\('\/api\/inbox\/command'/);
-  assert.match(script,/command:'删除'/);
+  assert.match(script,/fetch\('\/api\/mcp'/);
+  assert.match(script,/name:'inbox_batch_delete'/);
+  assert.match(script,/itemIds:ids/);
+  assert.match(script,/confirmed:true/);
+  assert.doesNotMatch(script,/for\(const id of ids\)\{[\s\S]*?fetch\('\/api\/inbox\/command'/);
   assert.match(script,/飞书原文不会删除/);
   assert.doesNotMatch(script,/\/api\/inbox\/sync/);
   assert.doesNotMatch(script,/lark-cli|block_delete|documentUrl/);
+  assert.match(registry,/createInboxBatchTools/);
+  assert.match(tool,/requiresConfirmation:true/);
+  assert.match(tool,/maxItems:500/);
 });
