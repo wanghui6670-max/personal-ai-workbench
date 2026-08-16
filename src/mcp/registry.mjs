@@ -8,6 +8,7 @@ import { createProjectRecordTools, planProjectRecordMessage } from './project-re
 import { createContentTools, planContentMessage } from './content-tools.mjs';
 import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 import { createFeishuInitializeTools } from './feishu-initialize-tools.mjs';
+import { createInboxBatchTools } from './inbox-batch-tools.mjs';
 
 function mcpError(message,code='MCP_INVALID_REQUEST',statusCode=400){
   return Object.assign(new Error(message),{code,statusCode});
@@ -45,7 +46,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   // into the interactive AI/MCP capability surface anymore.
   const workbenchTools=createWorkbenchTools();
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
-  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
+  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
