@@ -41,6 +41,11 @@ function inboxIntent(command){
 }
 
 const ROUTING_CONFIRMATION_TYPES=new Set(['inbox_intent_unclear','inbox_project_ambiguous']);
+const FEISHU_FILTER_CATEGORIES=Object.freeze({
+  project:'项目进展',
+  analysis:'分析思考',
+  daily:'日常记录'
+});
 
 function clearRoutingConfirmations(state,inboxId){
   state.confirmations=state.confirmations.filter(entry=>!(entry.inboxId===inboxId&&ROUTING_CONFIRMATION_TYPES.has(entry.type)));
@@ -56,6 +61,27 @@ function setRoutingConfirmation(state,{inboxId,type,text}){
   const confirmation={id:newId('cf'),type,inboxId,text,createdAt:nowIso()};
   state.confirmations.unshift(confirmation);
   return confirmation;
+}
+
+function parseFeishuFilterCommand(command){
+  const match=String(command||'').trim().match(/^不进入待办：(project|analysis|daily)$/);
+  return match?match[1]:null;
+}
+
+async function filterFeishuNonTodo({store,itemId,category}){
+  let response;
+  await store.updateState(state=>{
+    const item=state.inbox.find(candidate=>candidate.id===itemId);
+    if(!item)throw new Error('收件箱事项不存在');
+    if(item.source!=='feishu_doc')throw Object.assign(new Error('只有飞书日记来源可以使用自动非待办过滤。'),{statusCode:409});
+    const label=FEISHU_FILTER_CATEGORIES[category];
+    if(!label)throw badRequest('飞书非待办分类无效。');
+    state.inbox=state.inbox.filter(candidate=>candidate.id!==itemId);
+    clearRoutingConfirmations(state,itemId);
+    addActivity(state,{type:'feishu_non_todo_filtered',text:`飞书日记内容已分类为「${label}」，未进入待办；飞书原文保留。`});
+    response={message:`已分类为${label}并从待办入口过滤；飞书原文保留。`,classification:category,filtered:true};
+  });
+  return response;
 }
 
 function getnoteTitle(item){
@@ -185,6 +211,8 @@ export async function processInbox({store,itemId,command,targetProjectId=null}){
   const snapshot=await store.readState();
   const item=snapshot.inbox.find(candidate=>candidate.id===itemId);
   if(!item)throw new Error('收件箱事项不存在');
+  const feishuFilter=parseFeishuFilterCommand(command);
+  if(feishuFilter)return filterFeishuNonTodo({store,itemId,category:feishuFilter});
   if(!isGetnoteInboxItem(item))return baseProcessInbox({store,itemId,command,targetProjectId});
   return processGetnoteInbox({store,itemId,command,targetProjectId});
 }
