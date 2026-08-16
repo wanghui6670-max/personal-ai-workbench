@@ -1,79 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localDiaryReviewPlan, normalizeDiaryReviewDecision } from '../src/diary-review-planner.mjs';
+import { localDiaryReviewPlan, normalizeDiaryTodoExtraction } from '../src/diary-review-planner.mjs';
 
-test('clear todo stays classified as todo even when due date is missing',()=>{
-  const plan=normalizeDiaryReviewDecision({
-    category:'todo',destination:'todo',targetProjectId:null,dueDate:null,confidence:.91,
-    reason:'这是明确的后续行动，但原文没有截止日期。',message:'补充截止日期后即可创建待办。'
-  },{evidence:[],conflicts:[],gaps:[]},{id:'in-1'});
-  assert.equal(plan.kind,'clarification');
-  assert.equal(plan.category,'todo');
-  assert.equal(plan.destination,'todo');
-  assert.match(plan.reason,/分类：待办候选/);
-  assert.match(plan.messageReply,/待办候选|截止日期/);
-});
-
-test('analysis and daily records are classified but do not create Workbench write previews',()=>{
-  for(const category of ['analysis','daily_record']){
-    const plan=normalizeDiaryReviewDecision({
-      category,destination:'memo',targetProjectId:null,dueDate:null,confidence:.86,
-      reason:'属于记录或思考，不需要任务化。',message:'不进入待办。'
-    },{evidence:[],conflicts:[],gaps:[]},{id:`in-${category}`});
-    assert.equal(plan.kind,'clarification');
-    assert.equal(plan.toolName,null);
-    assert.equal(plan.filteredNonTodo,true);
-    assert.equal(plan.category,category);
-    assert.match(plan.reason,/非待办内容不进入 Workbench 待办链/);
-  }
-});
-
-test('project progress is classified only and never becomes a project-note write preview',()=>{
+test('one diary paragraph can produce multiple atomic todo candidates',()=>{
   const projects=[{id:'p-1',name:'常金米业',archived:false}];
-  const plan=normalizeDiaryReviewDecision({
-    category:'project_progress',destination:'project_note',targetProjectId:'p-1',dueDate:null,confidence:.9,
-    reason:'明确描述现有项目进展。',message:'不进入待办。'
-  },{evidence:[],conflicts:[],gaps:[]},{id:'in-project'},{projects});
-  assert.equal(plan.kind,'clarification');
-  assert.equal(plan.toolName,null);
-  assert.equal(plan.filteredNonTodo,true);
-  assert.equal(plan.category,'project_progress');
-  assert.match(plan.messageReply,/不进入待办/);
-});
-
-test('project todo preview includes both verified project name and id',()=>{
-  const projects=[{id:'p-1',name:'常金米业',archived:false}];
-  const plan=normalizeDiaryReviewDecision({
-    category:'todo',destination:'todo',targetProjectId:'p-1',dueDate:'2026-08-20',confidence:.88,
-    reason:'明确属于常金米业项目，且原文给出了截止日期。',message:'建议创建项目待办。'
-  },{evidence:[],conflicts:[],gaps:[]},{id:'in-project-todo'},{projects});
+  const plan=normalizeDiaryTodoExtraction({
+    todoCandidates:[
+      {text:'补完固定开场 slogan 三个版本',dueDate:null,targetProjectId:null,confidence:.91,reason:'明确的后续制作动作。'},
+      {text:'联系常金米业确认采购截图需求',dueDate:'2026-08-20',targetProjectId:'p-1',confidence:.9,reason:'原文明示了联系动作、项目和日期。'}
+    ],
+    reason:'同一段里包含两个独立下一步动作。'
+  },{evidence:[],conflicts:[],gaps:[]},{id:'in-1'},{projects});
   assert.equal(plan.kind,'tool');
-  assert.equal(plan.args.targetProjectId,'p-1');
-  assert.match(plan.args.command,/常金米业/);
-  assert.match(plan.args.command,/2026-08-20/);
+  assert.equal(plan.toolName,'diary_extract_todos');
+  assert.equal(plan.args.itemId,'in-1');
+  assert.equal(plan.args.candidates.length,2);
+  assert.equal(plan.args.candidates[0].dueDate,null);
+  assert.equal(plan.args.candidates[1].targetProjectId,'p-1');
 });
 
-test('local fallback keeps only actionable diary blocks in the todo path',()=>{
+test('analysis-only diary paragraph produces zero todo candidates instead of a memo/task',()=>{
+  const plan=normalizeDiaryTodoExtraction({
+    todoCandidates:[],
+    reason:'这是对采集库价值的分析，没有独立下一步动作。'
+  },{evidence:[],conflicts:[],gaps:[]},{id:'in-analysis'},{projects:[]});
+  assert.equal(plan.toolName,'diary_extract_todos');
+  assert.deepEqual(plan.args.candidates,[]);
+  assert.equal(plan.category,'non_todo');
+  assert.match(plan.messageReply,/没有提取到待办/);
+});
+
+test('candidate normalization deduplicates repeated actions and drops unknown project ids',()=>{
+  const plan=normalizeDiaryTodoExtraction({
+    todoCandidates:[
+      {text:'  补完视频后再拍  ',dueDate:null,targetProjectId:'unknown',confidence:.8,reason:'动作'},
+      {text:'补完视频后再拍',dueDate:null,targetProjectId:null,confidence:.7,reason:'重复动作'}
+    ],reason:'重复'
+  },{}, {id:'in-dedupe'}, {projects:[]});
+  assert.equal(plan.args.candidates.length,1);
+  assert.equal(plan.args.candidates[0].text,'补完视频后再拍');
+  assert.equal(plan.args.candidates[0].targetProjectId,null);
+});
+
+test('local fallback extracts only obvious action sentences and does not taskify pure analysis',()=>{
   const todo=localDiaryReviewPlan({
-    route:{id:'in-todo'},state:{inbox:[{id:'in-todo',text:'[飞书混合日记｜块类型：复选框记录] 补完固定开场 slogan 三个版本'}],projects:[]}
+    route:{id:'in-todo'},state:{inbox:[{id:'in-todo',text:'前面是复盘。补完固定开场 slogan 三个版本；然后再拍成片。'}],projects:[]}
   });
-  assert.equal(todo.category,'todo');
-  assert.equal(todo.kind,'clarification');
+  assert.equal(todo.toolName,'diary_extract_todos');
+  assert.ok(todo.args.candidates.length>=1);
+  assert.ok(todo.args.candidates.every(item=>item.dueDate===null));
 
   const analysis=localDiaryReviewPlan({
     route:{id:'in-analysis'},state:{inbox:[{id:'in-analysis',text:'采集库的价值是选题和结构，不是再整理成更多文件。'}],projects:[]}
   });
-  assert.equal(analysis.category,'analysis');
-  assert.equal(analysis.filteredNonTodo,true);
-  assert.equal(analysis.toolName,null);
-
-  const project=localDiaryReviewPlan({
-    route:{id:'in-project'},state:{
-      inbox:[{id:'in-project',text:'常金米业项目目前已完成第一轮需求访谈，进入方案整理阶段'}],
-      projects:[{id:'p-1',name:'常金米业',archived:false}]
-    }
-  });
-  assert.equal(project.category,'project_progress');
-  assert.equal(project.filteredNonTodo,true);
-  assert.equal(project.toolName,null);
+  assert.equal(analysis.args.candidates.length,0);
 });
