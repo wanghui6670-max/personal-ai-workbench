@@ -14,29 +14,31 @@ test('clear todo stays classified as todo even when due date is missing',()=>{
   assert.match(plan.messageReply,/待办候选|截止日期/);
 });
 
-test('analysis and daily records receive an automatic memo destination',()=>{
+test('analysis and daily records are classified but do not create Workbench write previews',()=>{
   for(const category of ['analysis','daily_record']){
     const plan=normalizeDiaryReviewDecision({
       category,destination:'memo',targetProjectId:null,dueDate:null,confidence:.86,
-      reason:'属于记录或思考，不需要任务化。',message:'建议保存为备忘。'
+      reason:'属于记录或思考，不需要任务化。',message:'不进入待办。'
     },{evidence:[],conflicts:[],gaps:[]},{id:`in-${category}`});
-    assert.equal(plan.kind,'tool');
-    assert.equal(plan.toolName,'inbox_process');
-    assert.equal(plan.args.command,'只是备忘');
+    assert.equal(plan.kind,'clarification');
+    assert.equal(plan.toolName,null);
+    assert.equal(plan.filteredNonTodo,true);
     assert.equal(plan.category,category);
+    assert.match(plan.reason,/非待办内容不进入 Workbench 待办链/);
   }
 });
 
-test('uniquely matched project progress receives project-note preview with project identity',()=>{
+test('project progress is classified only and never becomes a project-note write preview',()=>{
   const projects=[{id:'p-1',name:'常金米业',archived:false}];
   const plan=normalizeDiaryReviewDecision({
     category:'project_progress',destination:'project_note',targetProjectId:'p-1',dueDate:null,confidence:.9,
-    reason:'明确描述现有项目进展。',message:'建议归入项目记录。'
+    reason:'明确描述现有项目进展。',message:'不进入待办。'
   },{evidence:[],conflicts:[],gaps:[]},{id:'in-project'},{projects});
-  assert.equal(plan.kind,'tool');
-  assert.equal(plan.args.targetProjectId,'p-1');
-  assert.match(plan.args.command,/常金米业/);
-  assert.match(plan.args.command,/项目记录/);
+  assert.equal(plan.kind,'clarification');
+  assert.equal(plan.toolName,null);
+  assert.equal(plan.filteredNonTodo,true);
+  assert.equal(plan.category,'project_progress');
+  assert.match(plan.messageReply,/不进入待办/);
 });
 
 test('project todo preview includes both verified project name and id',()=>{
@@ -51,7 +53,7 @@ test('project todo preview includes both verified project name and id',()=>{
   assert.match(plan.args.command,/2026-08-20/);
 });
 
-test('local fallback still distributes actionable and reflective diary blocks',()=>{
+test('local fallback keeps only actionable diary blocks in the todo path',()=>{
   const todo=localDiaryReviewPlan({
     route:{id:'in-todo'},state:{inbox:[{id:'in-todo',text:'[飞书混合日记｜块类型：复选框记录] 补完固定开场 slogan 三个版本'}],projects:[]}
   });
@@ -62,7 +64,8 @@ test('local fallback still distributes actionable and reflective diary blocks',(
     route:{id:'in-analysis'},state:{inbox:[{id:'in-analysis',text:'采集库的价值是选题和结构，不是再整理成更多文件。'}],projects:[]}
   });
   assert.equal(analysis.category,'analysis');
-  assert.equal(analysis.args.command,'只是备忘');
+  assert.equal(analysis.filteredNonTodo,true);
+  assert.equal(analysis.toolName,null);
 
   const project=localDiaryReviewPlan({
     route:{id:'in-project'},state:{
@@ -71,6 +74,6 @@ test('local fallback still distributes actionable and reflective diary blocks',(
     }
   });
   assert.equal(project.category,'project_progress');
-  assert.equal(project.args.targetProjectId,'p-1');
-  assert.match(project.args.command,/常金米业/);
+  assert.equal(project.filteredNonTodo,true);
+  assert.equal(project.toolName,null);
 });

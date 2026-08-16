@@ -28,6 +28,27 @@ function normalizeRemoteItem(item){
   return{...item,text:parsed.text,captureId:parsed.captureId};
 }
 
+function normalizeDedupeText(value){
+  return String(value??'').normalize('NFKC').replace(/\s+/g,' ').trim();
+}
+
+function inboxDedupeHash(value){
+  return inboxContentHash(normalizeDedupeText(value));
+}
+
+function dedupeRemoteItems(items){
+  const winnerByHash=new Map();
+  for(const item of items)winnerByHash.set(inboxDedupeHash(item.text),item);
+  const unique=[];
+  const duplicates=[];
+  for(const item of items){
+    const winner=winnerByHash.get(inboxDedupeHash(item.text));
+    if(winner===item)unique.push(item);
+    else duplicates.push({item,winner});
+  }
+  return{unique,duplicates};
+}
+
 function mixedDiaryBootstrapSelection(items){
   if(items.length<=MIXED_DIARY_BOOTSTRAP_HEAD+MIXED_DIARY_BOOTSTRAP_TAIL)return new Set(items.map(item=>item.blockId));
   const ids=new Set();
@@ -48,7 +69,7 @@ function applyRemoteMetadata(local,remote,mode){
 export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
   const config=await store.readConfig();
   if(!sourceConfigured(config.dataSource)){
-    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,reason:'not_configured'});
+    return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,reason:'not_configured'});
   }
 
   let fetched;
@@ -69,15 +90,17 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
   }
 
   const allRemoteItems=(fetched.items||[]).map(normalizeRemoteItem).filter(item=>item.blockId&&item.text);
+  const {unique:uniqueRemoteItems,duplicates:duplicateRemoteItems}=dedupeRemoteItems(allRemoteItems);
   const remoteByBlock=new Map(allRemoteItems.map(item=>[item.blockId,item]));
   const firstMixedSync=fetched.mode==='mixed_diary'&&config.dataSource?.lastRevisionId==null;
-  const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(allRemoteItems):null;
-  const remoteItems=bootstrapIds?allRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):allRemoteItems;
-  const baselineItems=bootstrapIds?allRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
+  const bootstrapIds=firstMixedSync?mixedDiaryBootstrapSelection(uniqueRemoteItems):null;
+  const remoteItems=bootstrapIds?uniqueRemoteItems.filter(item=>bootstrapIds.has(item.blockId)):uniqueRemoteItems;
+  const baselineItems=bootstrapIds?uniqueRemoteItems.filter(item=>!bootstrapIds.has(item.blockId)):[];
   let imported=0;
   let removed=0;
   let updated=0;
   let baselined=0;
+  let deduped=duplicateRemoteItems.length;
 
   await store.updateState(state=>{
     state.inboxAcks=normalizeInboxAcks(state.inboxAcks);
@@ -85,8 +108,16 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     const localByBlock=new Map(
       state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item])
     );
+    const knownExactHashes=new Set(state.inboxAcks.map(item=>item.contentHash).filter(Boolean));
+    const knownDedupeHashes=new Set();
+    for(const item of state.inbox)if(item?.text)knownDedupeHashes.add(inboxDedupeHash(item.text));
+    for(const todo of state.todos||[]){
+      if(todo?.context)knownDedupeHashes.add(inboxDedupeHash(todo.context));
+      if(todo?.title)knownDedupeHashes.add(inboxDedupeHash(todo.title));
+    }
+    for(const note of state.notes||[])if(note?.text)knownDedupeHashes.add(inboxDedupeHash(note.text));
 
-    for(const remote of baselineItems){
+    const upsertAck=remote=>{
       const contentHash=inboxContentHash(remote.text);
       const priorAck=ackByBlock.get(remote.blockId);
       if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
@@ -95,11 +126,31 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         state.inboxAcks.push(ack);
         ackByBlock.set(remote.blockId,ack);
       }
+      return contentHash;
+    };
+    const removeLocal=local=>{
+      state.inbox=state.inbox.filter(item=>item.id!==local.id);
+      state.confirmations=state.confirmations.filter(confirmation=>confirmation.inboxId!==local.id);
+      localByBlock.delete(local.feishuBlockId);
+    };
+
+    for(const remote of baselineItems){
+      const contentHash=upsertAck(remote);
+      knownExactHashes.add(contentHash);
+      knownDedupeHashes.add(inboxDedupeHash(remote.text));
       baselined+=1;
+    }
+
+    for(const {item:remote,winner} of duplicateRemoteItems){
+      const local=localByBlock.get(remote.blockId);
+      const winnerLocal=winner?localByBlock.get(winner.blockId):null;
+      if(local&&winnerLocal)removeLocal(local);
+      upsertAck(remote);
     }
 
     for(const remote of remoteItems){
       const contentHash=inboxContentHash(remote.text);
+      const dedupeHash=inboxDedupeHash(remote.text);
       const local=localByBlock.get(remote.blockId);
       const priorAck=ackByBlock.get(remote.blockId);
       if(local){
@@ -109,15 +160,23 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         }
         if(remote.captureId&&!local.captureId)local.captureId=remote.captureId;
         applyRemoteMetadata(local,remote,fetched.mode);
-        if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
-        else{
-          const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
-          state.inboxAcks.push(ack);
-          ackByBlock.set(remote.blockId,ack);
-        }
+        upsertAck(remote);
+        knownExactHashes.add(contentHash);
+        knownDedupeHashes.add(dedupeHash);
         continue;
       }
-      if(priorAck&&inboxAckMatches(priorAck,remote.text))continue;
+      if(priorAck&&inboxAckMatches(priorAck,remote.text)){
+        knownExactHashes.add(contentHash);
+        knownDedupeHashes.add(dedupeHash);
+        continue;
+      }
+      if(knownExactHashes.has(contentHash)||knownDedupeHashes.has(dedupeHash)){
+        upsertAck(remote);
+        knownExactHashes.add(contentHash);
+        knownDedupeHashes.add(dedupeHash);
+        deduped+=1;
+        continue;
+      }
 
       const item={
         id:newId('in'),
@@ -132,12 +191,9 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
         createdAt:nowIso()
       };
       state.inbox.unshift(item);
-      if(priorAck)Object.assign(priorAck,{contentHash,acknowledgedAt:nowIso()});
-      else{
-        const ack={blockId:remote.blockId,contentHash,acknowledgedAt:nowIso()};
-        state.inboxAcks.push(ack);
-        ackByBlock.set(remote.blockId,ack);
-      }
+      upsertAck(remote);
+      knownExactHashes.add(contentHash);
+      knownDedupeHashes.add(dedupeHash);
       imported+=1;
       addActivity(state,{
         type:'inbox_synced',
@@ -176,7 +232,9 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}=
     imported,
     removed,
     updated,
+    deduped,
     remoteCount:allRemoteItems.length,
+    uniqueRemoteCount:uniqueRemoteItems.length,
     sectionFound:fetched.sectionFound,
     mode:fetched.mode||'inbox_section',
     baselined,

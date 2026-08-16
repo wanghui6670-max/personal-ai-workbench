@@ -1,6 +1,10 @@
-let v3AutoFilter='all';
+let v3AutoFilter='active';
 let v3AutoScheduled=false;
 let v3AutoObserver=null;
+let v3AutoReloadScheduled=false;
+let v3AutoFilteredCount=0;
+const v3AutoFilteringIds=new Set();
+const v3AutoFilteredIds=new Set();
 
 const CATEGORY_META=Object.freeze({
   todo:{label:'待办候选',tone:'amber'},
@@ -10,6 +14,7 @@ const CATEGORY_META=Object.freeze({
   decision:{label:'需要决定',tone:'red'},
   pending:{label:'分析中',tone:'muted'}
 });
+const AUTO_FILTER_NON_TODO=new Set(['project','analysis','daily']);
 
 function inferCategory(item){
   const label=item.querySelector('.v3-ai-label')?.textContent||'';
@@ -22,6 +27,42 @@ function inferCategory(item){
   if(/分析思考|分类：分析思考/.test(text))return'analysis';
   if(/日常记录|分类：日常记录/.test(text))return'daily';
   return'decision';
+}
+
+function itemId(item){
+  return item.querySelector('[data-id]')?.dataset?.id||'';
+}
+
+function isFeishuItem(item){
+  return /飞书同步/.test(item.querySelector('.v3-item-meta')?.textContent||'');
+}
+
+async function dismissFilteredNonTodo(item,category){
+  if(!AUTO_FILTER_NON_TODO.has(category)||!isFeishuItem(item))return;
+  const id=itemId(item);
+  if(!id||v3AutoFilteringIds.has(id)||v3AutoFilteredIds.has(id))return;
+  v3AutoFilteringIds.add(id);
+  item.dataset.v3AutoFiltering='1';
+  try{
+    const response=await fetch('/api/inbox/command',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({itemId:id,command:`不进入待办：${category}`})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
+    v3AutoFilteredIds.add(id);
+    v3AutoFilteredCount+=1;
+    item.remove();
+  }catch(error){
+    item.dataset.v3AutoFilterError='1';
+    const reason=item.querySelector('.v3-ai-reason');
+    if(reason&&!reason.textContent.includes('自动过滤失败'))reason.textContent=`${reason.textContent||''} · 自动过滤失败：${error.message}`;
+  }finally{
+    v3AutoFilteringIds.delete(id);
+    delete item.dataset.v3AutoFiltering;
+    schedule();
+  }
 }
 
 function ensureCategoryPill(item,category){
@@ -37,20 +78,33 @@ function ensureCategoryPill(item,category){
   if(aiLabel&&category!=='pending'){
     const current=aiLabel.textContent||'';
     let suffix='';
-    if(/缺.*截止日期|需要你决定|需要补充/.test(`${current} ${item.querySelector('.v3-ai-reason')?.textContent||''}`))suffix=' · 待补充';
-    else if(item.querySelector('[data-v3-action="confirm-plan"]'))suffix=' · 等你确认';
+    if(category==='todo'&&/缺.*截止日期|需要补充/.test(`${current} ${item.querySelector('.v3-ai-reason')?.textContent||''}`))suffix=' · 待补日期';
+    else if(category==='todo'&&item.querySelector('[data-v3-action="confirm-plan"]'))suffix=' · 等你确认';
     const next=`${meta.label}${suffix}`;
     if(aiLabel.textContent!==next)aiLabel.textContent=next;
   }
 }
 
-function filterBarHtml(counts,total){
+function filterBarHtml(counts){
   const buttons=[
-    ['all','全部',total],['todo','待办',counts.todo||0],['project','项目进展',counts.project||0],
-    ['analysis','分析思考',counts.analysis||0],['daily','日常记录',counts.daily||0],
-    ['decision','需要决定',counts.decision||0],['pending','分析中',counts.pending||0]
+    ['active','待办流',(counts.todo||0)+(counts.pending||0)],
+    ['todo','待办',counts.todo||0],
+    ['pending','分析中',counts.pending||0],
+    ['decision','需要决定',counts.decision||0]
   ];
-  return buttons.map(([key,label,count])=>`<button type="button" class="v3-pool-filter${v3AutoFilter===key?' active':''}" data-v3-pool="${key}">${label}<span>${count}</span></button>`).join('');
+  const controls=buttons.map(([key,label,count])=>`<button type="button" class="v3-pool-filter${v3AutoFilter===key?' active':''}" data-v3-pool="${key}">${label}<span>${count}</span></button>`).join('');
+  return `${controls}<span class="v3-pool-filtered">已过滤非待办 ${v3AutoFilteredCount}</span>`;
+}
+
+function visibleFor(category){
+  if(v3AutoFilter==='active')return category==='todo'||category==='pending';
+  return category===v3AutoFilter;
+}
+
+function maybeReloadAfterFiltering(counts){
+  if(v3AutoReloadScheduled||v3AutoFilteredCount===0||v3AutoFilteringIds.size>0||(counts.pending||0)>0)return;
+  v3AutoReloadScheduled=true;
+  setTimeout(()=>location.reload(),500);
 }
 
 function renderClassificationPools(){
@@ -62,12 +116,18 @@ function renderClassificationPools(){
   for(const item of items){
     const category=inferCategory(item);counts[category]=(counts[category]||0)+1;
     ensureCategoryPill(item,category);
-    const visible=v3AutoFilter==='all'||category===v3AutoFilter;
+    if(AUTO_FILTER_NON_TODO.has(category)){
+      item.hidden=true;
+      void dismissFilteredNonTodo(item,category);
+      continue;
+    }
+    const visible=visibleFor(category);
     if(item.hidden===visible)item.hidden=!visible;
   }
   let bar=queue.querySelector('.v3-pool-filters');
   if(!bar){bar=document.createElement('div');bar.className='v3-pool-filters';source.insertAdjacentElement('afterend',bar);}
-  const html=filterBarHtml(counts,items.length);if(bar.innerHTML!==html)bar.innerHTML=html;
+  const html=filterBarHtml(counts);if(bar.innerHTML!==html)bar.innerHTML=html;
+  maybeReloadAfterFiltering(counts);
 }
 
 function schedule(){if(v3AutoScheduled)return;v3AutoScheduled=true;requestAnimationFrame(()=>{v3AutoScheduled=false;renderClassificationPools();attachObserver();});}
@@ -79,7 +139,7 @@ function attachObserver(){
 
 document.addEventListener('click',event=>{
   const button=event.target.closest?.('[data-v3-pool]');if(!button)return;
-  event.preventDefault();event.stopPropagation();v3AutoFilter=button.dataset.v3Pool||'all';schedule();
+  event.preventDefault();event.stopPropagation();v3AutoFilter=button.dataset.v3Pool||'active';schedule();
 },true);
 window.addEventListener('hashchange',schedule);
 const app=document.querySelector('#app');if(app)new MutationObserver(schedule).observe(app,{childList:true});
