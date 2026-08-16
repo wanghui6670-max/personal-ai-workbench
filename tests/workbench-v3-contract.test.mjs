@@ -57,6 +57,27 @@ test('v3 enhancement observer cannot self-trigger through descendant rewrites',a
   assert.match(script,/button\.textContent!=='同步飞书收件箱'/);
 });
 
+test('focused home surface prioritizes workflow and binds the right panel to the selected item',async()=>{
+  const [index,focusScript,focusCss]=await Promise.all([
+    fsp.readFile('public/index.html','utf8'),
+    fsp.readFile('public/workbench-v3-focus.js','utf8'),
+    fsp.readFile('public/workbench-v3-focus.css','utf8')
+  ]);
+  assert.match(index,/workbench-v3-focus\.css/);
+  assert.match(index,/workbench-v3-focus\.js/);
+  assert.match(focusScript,/待处理工作流/);
+  assert.match(focusScript,/今天已确认/);
+  assert.match(focusScript,/需要你拍板/);
+  assert.match(focusScript,/当前事项助手/);
+  assert.match(focusScript,/data-focus-forward="confirm"/);
+  assert.match(focusScript,/data-focus-forward="clarify"/);
+  assert.match(focusScript,/data-focus-forward="analyze"/);
+  assert.match(focusScript,/\.v3-inbox-item/);
+  assert.match(focusCss,/\.v3-inbox-item\.v3-selected/);
+  assert.match(focusCss,/#v3-focus-assistant/);
+  assert.match(focusCss,/\.v3-dashboard>\.v3-card:nth-of-type\(1\)\{order:1\}/);
+});
+
 test('legacy GetNote task UI no longer hijacks Feishu sync or settings',async()=>{
   const script=await fsp.readFile('public/getnote-integration.js','utf8');
   assert.doesNotMatch(script,/external_tasks_sync/);
