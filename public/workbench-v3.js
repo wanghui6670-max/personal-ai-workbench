@@ -85,13 +85,18 @@ async function refresh(force=false){
 
 function enhanceSidebar(){
   const today=document.querySelector('.nav a[href="#today"]');
-  if(today&&v3State){today.innerHTML=`⌂ 今日与收件箱<span class="count">${Number(v3State.stats?.today||0)+Number(v3State.stats?.inbox||0)}</span>`;}
-  const inbox=document.querySelector('.nav a[href="#inbox"]');if(inbox)inbox.classList.add('v3-hidden');
-  const journal=document.querySelector('.nav a[href="#journal"]');if(journal)journal.textContent='≡ 项目现场';
-  const cleanup=document.querySelector('[data-action="toggle-cleanup"]');
-  if(cleanup&&!document.querySelector('.v3-nav-media')){
-    const link=document.createElement('a');link.className=`v3-nav-media${currentView()==='media'?' active':''}`;link.href='#media';link.innerHTML='◉ 自媒体';cleanup.insertAdjacentElement('beforebegin',link);
+  if(today&&v3State){
+    const wanted=`⌂ 今日与收件箱<span class="count">${Number(v3State.stats?.today||0)+Number(v3State.stats?.inbox||0)}</span>`;
+    if(today.innerHTML!==wanted)today.innerHTML=wanted;
   }
+  const inbox=document.querySelector('.nav a[href="#inbox"]');if(inbox&&!inbox.classList.contains('v3-hidden'))inbox.classList.add('v3-hidden');
+  const journal=document.querySelector('.nav a[href="#journal"]');if(journal&&journal.textContent!=='≡ 项目现场')journal.textContent='≡ 项目现场';
+  const cleanup=document.querySelector('[data-action="toggle-cleanup"]');
+  let media=document.querySelector('.v3-nav-media');
+  if(cleanup&&!media){
+    media=document.createElement('a');media.className='v3-nav-media';media.href='#media';media.textContent='◉ 自媒体';cleanup.insertAdjacentElement('beforebegin',media);
+  }
+  if(media)media.classList.toggle('active',currentView()==='media');
 }
 
 function sourceHtml(state){
@@ -155,13 +160,16 @@ function dashboardHtml(state){
 function hideLegacyMain(main,keepCapture=true){
   for(const child of [...main.children]){
     if(child.id==='v3-dashboard'||child.id==='v3-scene'||child.id==='v3-media-page')continue;
-    if(keepCapture&&child.classList.contains('capture')){child.classList.remove('v3-hidden');continue;}
-    child.classList.add('v3-hidden');
+    if(keepCapture&&child.classList.contains('capture')){
+      if(child.classList.contains('v3-hidden'))child.classList.remove('v3-hidden');
+      continue;
+    }
+    if(!child.classList.contains('v3-hidden'))child.classList.add('v3-hidden');
   }
 }
 function setTop(title,desc){
-  const h=document.querySelector('.top-left h1');if(h)h.textContent=title;
-  const p=document.querySelector('.top-left p');if(p)p.textContent=desc;
+  const h=document.querySelector('.top-left h1');if(h&&h.textContent!==title)h.textContent=title;
+  const p=document.querySelector('.top-left p');if(p&&p.textContent!==desc)p.textContent=desc;
 }
 
 function enhanceToday(){
@@ -190,7 +198,10 @@ function enhanceScene(){
 
 function rewriteTaskSyncButton(){
   if(currentView()!=='tasks')return;
-  for(const button of document.querySelectorAll('[data-action="sync-feishu"]')){button.textContent='同步飞书收件箱';button.title='读回飞书云文档收件箱；得到大脑不再作为主待办来源';}
+  for(const button of document.querySelectorAll('[data-action="sync-feishu"]')){
+    if(button.textContent!=='同步飞书收件箱')button.textContent='同步飞书收件箱';
+    const wanted='读回飞书云文档收件箱；得到大脑不再作为主待办来源';if(button.title!==wanted)button.title=wanted;
+  }
 }
 
 function renderEnhancements(){
@@ -283,8 +294,9 @@ async function handleV3Action(event,target){
 
 document.addEventListener('click',event=>{const target=event.target.closest?.('[data-v3-action]');if(target)void handleV3Action(event,target);},true);
 window.addEventListener('hashchange',()=>{if(currentView()==='inbox'){location.hash='#today';return;}schedule();void refresh(true);});
-new MutationObserver(schedule).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
-function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;renderEnhancements();});}
+const appRoot=document.querySelector('#app')||document.body;
+new MutationObserver(schedule).observe(appRoot,{childList:true});
+function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;renderEnhancements();});}
 loadReviewCache();
 if(currentView()==='inbox')location.hash='#today';
 void refresh(true);

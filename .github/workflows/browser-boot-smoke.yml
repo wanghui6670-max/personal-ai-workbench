@@ -1,0 +1,26 @@
+name: Browser Boot Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-boot-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Install pinned browser driver only
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund puppeteer-core@24.16.0
+      - name: Validate browser smoke syntax
+        run: node --check scripts/browser-boot-smoke.mjs
+      - name: Execute Workbench in real Chrome
+        run: node scripts/browser-boot-smoke.mjs
