@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 
-test('Feishu sync and classification require an explicit user action',async()=>{
+test('Feishu todo source sync requires an explicit user action without gating AI review of already-synced todos',async()=>{
   const [index,gate,v3]=await Promise.all([
     fsp.readFile('public/index.html','utf8'),
     fsp.readFile('public/workbench-v3-manual-control.js','utf8'),
@@ -11,15 +11,14 @@ test('Feishu sync and classification require an explicit user action',async()=>{
   assert.match(index,/workbench-v3-manual-control\.js/);
   assert.ok(index.indexOf('workbench-v3-manual-control.js')<index.indexOf('workbench-v3.js'));
   assert.match(gate,/let syncPermit=false/);
-  assert.match(gate,/let classificationRun=false/);
-  assert.match(gate,/飞书同步只能由你点击“同步飞书”触发/);
-  assert.match(gate,/source:IDLE_SOURCE/);
-  assert.match(gate,/calledFromWorkbenchV3/);
-  assert.match(gate,/classificationRun=sessionStorage\.getItem\(INIT_ANALYZE_ONCE\)==='1'/);
-  assert.match(gate,/sessionStorage\.removeItem\(INIT_ANALYZE_ONCE\)/);
-  assert.match(gate,/window\.__WORKBENCH_FEISHU_CLASSIFY_RUN__=classificationRun/);
+  assert.match(gate,/飞书待办同步只能由你点击“同步飞书待办”触发/);
+  assert.match(gate,/path==='\/api\/inbox\/sync'/);
   assert.match(gate,/workbench:feishu-sync-complete/);
+  assert.match(gate,/只读取飞书云文档中的明确待办/);
+  assert.doesNotMatch(gate,/classificationRun|IDLE_SOURCE|INIT_ANALYZE_ONCE/);
+  assert.doesNotMatch(gate,/path==='\/api\/ai\/plan'/);
   assert.match(v3,/json\('\/api\/inbox\/sync'/);
+  assert.match(v3,/同步飞书待办/);
 });
 
 test('historical inbox records expose a local-only delete action',async()=>{
