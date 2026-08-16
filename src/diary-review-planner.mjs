@@ -24,14 +24,17 @@ function analysisSchema(decisionSchema,evidenceIds){
 function extractionPlan({route,candidates=[],reason='',analysis=[]}){
   if(!route?.id)return null;
   const safe=Array.isArray(candidates)?candidates.slice(0,5):[];
+  const fallbackReason=safe.length
+    ?`从当前日记内容提取到 ${safe.length} 个可独立执行的待办。`
+    :'当前日记内容没有可独立执行的待办。';
   return{
-    kind:'diary_extraction',
-    toolName:null,
+    kind:'tool',
+    toolName:'diary_extract_todos',
     args:{itemId:route.id,candidates:safe},
     category:safe.length?'todo':'non_todo',
     destination:'todo_candidate',
     confidence:safe.length?Math.max(...safe.map(item=>Number(item.confidence)||0)):1,
-    reason:reason||safe.length?`从当前日记内容提取到 ${safe.length} 个可独立执行的待办。`:'当前日记内容没有可独立执行的待办。',
+    reason:reason||fallbackReason,
     message:safe.length?`提取到 ${safe.length} 个待办候选；背景、分析和日常记录不进入待办。`:'没有提取到待办；这条日记只保留在飞书。',
     messageReply:safe.length?`提取到 ${safe.length} 个待办候选。`:'没有提取到待办。',
     analysis
