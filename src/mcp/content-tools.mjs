@@ -42,6 +42,11 @@ export function planContentMessage({message}={}){
     };
   }
   if(!/(内容|素材|笔记|自媒体)/.test(text))return null;
+  // Read-only status questions win over the generic word “同步”, e.g.
+  // “查看得到大脑内容同步到哪里” must never be interpreted as a write.
+  if(/(状态|同步到哪里|目录|多少篇|保存在哪里|本地位置)/.test(text)){
+    return{kind:'tool',toolName:'getnote_content_status',args:{},reason:'用户在查询自媒体得到大脑内容同步状态。',message:'我会读取本地同步状态。'};
+  }
   if(/(同步|拉取|导入|采集|保存到本地)/.test(text)){
     const match=text.match(/(?:最近|前)?\s*(\d{1,3})\s*(?:篇|条)/);
     const parsed=match?Number(match[1]):50;
@@ -51,9 +56,6 @@ export function planContentMessage({message}={}){
       reason:'用户明确要求把得到大脑内容同步到自媒体本地内容目录。',
       message:'我会只读取得到大脑内容并写入自媒体本地目录；不会把它们变成任务，执行前仍需要你确认。'
     };
-  }
-  if(/(状态|同步到哪里|目录|多少篇)/.test(text)){
-    return{kind:'tool',toolName:'getnote_content_status',args:{},reason:'用户在查询自媒体得到大脑内容同步状态。',message:'我会读取本地同步状态。'};
   }
   return null;
 }
