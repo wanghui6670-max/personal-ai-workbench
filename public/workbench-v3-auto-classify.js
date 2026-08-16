@@ -26,7 +26,7 @@ function inferCategory(item){
 
 function ensureCategoryPill(item,category){
   const meta=CATEGORY_META[category]||CATEGORY_META.decision;
-  item.dataset.v3Category=category;
+  if(item.dataset.v3Category!==category)item.dataset.v3Category=category;
   const host=item.querySelector('.v3-item-meta');if(!host)return;
   let pill=host.querySelector('.v3-category-pill');
   if(!pill){pill=document.createElement('span');pill.className='pill v3-category-pill';host.appendChild(pill);}
@@ -74,7 +74,7 @@ function schedule(){if(v3AutoScheduled)return;v3AutoScheduled=true;requestAnimat
 function attachObserver(){
   const main=document.querySelector('.main');if(!main||v3AutoObserver?._target===main)return;
   v3AutoObserver?.disconnect();v3AutoObserver=new MutationObserver(schedule);v3AutoObserver._target=main;
-  v3AutoObserver.observe(main,{childList:true,subtree:true});
+  v3AutoObserver.observe(main,{childList:true});
 }
 
 document.addEventListener('click',event=>{
