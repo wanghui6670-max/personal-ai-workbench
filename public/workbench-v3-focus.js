@@ -17,7 +17,7 @@ function polishDashboard(){
   const grid=dashboard.querySelector(':scope > .v3-grid');
   const today=grid?.children?.[0],decisions=grid?.children?.[1];
   setText(queue?.querySelector('.v3-card-head h2'),'待处理工作流');
-  setText(queue?.querySelector('.v3-card-head p'),'新输入 → AI 分析 → 你确认 → 进入今日、项目或备忘。');
+  setText(queue?.querySelector('.v3-card-head p'),'飞书日记新增/变化 → AI 分类 → 你确认 → 进入今日、项目或备忘。');
   setText(today?.querySelector('.v3-card-head h2'),'今天已确认');
   setText(today?.querySelector('.v3-card-head p'),'这里只放你已经明确决定今天要做的事。');
   setText(decisions?.querySelector('.v3-card-head h2'),'需要你拍板');
@@ -26,6 +26,14 @@ function polishDashboard(){
   setText(projects?.querySelector('.v3-card-head p'),'恢复最近做到哪里、进度和卡点；需要时再打开项目。');
   const labels=dashboard.querySelectorAll('.v3-hero .v3-metric span');
   ['今天已确认','待处理输入','AI 分析中','需要你拍板'].forEach((label,index)=>setText(labels[index],label));
+  const source=dashboard.querySelector('.v3-source');
+  const sourcePill=source?.querySelector('.pill.blue');
+  if(sourcePill)setText(sourcePill,'飞书日记主来源');
+  for(const item of dashboard.querySelectorAll('.v3-inbox-item')){
+    const pills=[...item.querySelectorAll('.v3-item-meta .pill')];
+    const sourceLabel=pills.find(pill=>/飞书/.test(pill.textContent||''));
+    if(sourceLabel)setText(sourceLabel,'飞书日记');
+  }
 }
 
 function focusInfo(item){
@@ -41,7 +49,7 @@ function focusInfo(item){
   };
 }
 function focusPanelHtml(info){
-  if(!info)return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-empty">从中间“待处理工作流”选一条事项。这里会显示 AI 建议、需要你补充的内容，以及确认处理按钮。</div>`;
+  if(!info)return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-empty">从中间“待处理工作流”选一条日记内容。这里会显示 AI 分类建议、需要你补充的内容，以及确认处理按钮。</div>`;
   return `<div class="v3-focus-eyebrow">当前事项助手</div><div class="v3-focus-title"></div><div class="v3-focus-status"><span class="pill blue"></span></div><div class="v3-focus-reason"></div>${info.command?'<div class="v3-focus-command"></div>':''}<div class="v3-focus-actions">${info.canConfirm?'<button class="btn small primary" data-focus-forward="confirm">确认并处理</button>':''}${info.canClarify?'<button class="btn small" data-focus-forward="clarify">补充信息</button>':''}${info.canAnalyze?'<button class="btn small" data-focus-forward="analyze">重新分析</button>':''}</div>`;
 }
 function renderFocusPanel(){
@@ -63,7 +71,7 @@ function renderFocusPanel(){
   }
   panel.classList.toggle('v3-has-focus',Boolean(info));
   const title=panel.querySelector('.ai-title'),subtitle=panel.querySelector('.ai-subtitle');
-  if(info){setText(title,'当前事项助手');setText(subtitle,'围绕选中事项追问、修改建议或确认处理');}
+  if(info){setText(title,'当前事项助手');setText(subtitle,'围绕选中日记内容追问、修改建议或确认处理');}
 }
 function attachMainObserver(){
   const main=document.querySelector('.main');
