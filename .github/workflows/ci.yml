@@ -49,6 +49,7 @@ jobs:
           node --check src/getnote-insight-parser.mjs
           node --check src/getnote-insight-service.mjs
           node --check src/getnote-content-sync.mjs
+          node --check src/ai-review-scope.mjs
           node --check src/task-cli.mjs
           node --check src/local-calendar.mjs
           node --check src/task-sync-domain.mjs
@@ -125,9 +126,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Build production image with Harness runtime
-        run: docker build -t personal-ai-workbench:v2 .
+        run: docker build -t personal-ai-workbench:v3 .
       - name: Initialize Harness inside production image
-        run: docker run --rm --entrypoint node personal-ai-workbench:v2 scripts/harness-check.mjs
+        run: docker run --rm --entrypoint node personal-ai-workbench:v3 scripts/harness-check.mjs
       - name: Start employee Harness sidecar from production image
         run: |
           set -euo pipefail
@@ -137,7 +138,7 @@ jobs:
             -e EMPLOYEE_HARNESS_PORT=49300 \
             -e EMPLOYEE_HARNESS_ALLOW_PRIVATE_BIND=1 \
             -e EMPLOYEE_HARNESS_SERVICE_TOKEN=employee-harness-smoke-token-1234567890 \
-            --entrypoint node personal-ai-workbench:v2 harness/employee-runtime-server.mjs
+            --entrypoint node personal-ai-workbench:v3 harness/employee-runtime-server.mjs
           trap 'docker rm -f employee-harness-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:49300/health >/tmp/employee-harness-health.json; then break; fi
@@ -153,17 +154,17 @@ jobs:
       - name: Start unified Workbench with Joycrew disabled and verify fail-isolation
         run: |
           set -euo pipefail
-          docker run -d --name workbench-v2-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 -e JOYCREW_ENABLED=0 personal-ai-workbench:v2
-          trap 'docker rm -f workbench-v2-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name workbench-v3-smoke -p 127.0.0.1:49173:49173 -e PORT=49173 -e ALLOW_INSECURE_PUBLIC=1 -e JOYCREW_ENABLED=0 personal-ai-workbench:v3
+          trap 'docker rm -f workbench-v3-smoke >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:49173/api/health >/tmp/workbench-health.json; then break; fi
             if [ "$attempt" -eq 40 ]; then
-              docker logs workbench-v2-smoke || true
+              docker logs workbench-v3-smoke || true
               exit 1
             fi
             sleep 1
           done
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-health.json','utf8')); if(value.ok!==true||value.version!=='2.0.0') throw new Error('unexpected health response');"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('/tmp/workbench-health.json','utf8')); if(value.ok!==true||value.version!=='3.0.0') throw new Error('unexpected health response');"
           curl --fail --silent http://127.0.0.1:49173/harness-navigator.js | grep 'Navigator'
           curl --fail --silent http://127.0.0.1:49173/joycrew-integration.js | grep '业务执行'
           curl --fail --silent http://127.0.0.1:49173/workbench-v3.js | grep '今日与收件箱'

@@ -1,6 +1,7 @@
 import { aiEnabled, aiRuntimeConfig, planAIConsole } from '../ai.mjs';
 import { matchesSchema } from '../ai/schema-validation.mjs';
 import { deriveState } from '../domain.mjs';
+import { enforceInboxReviewPlan, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
 import { createContentTools, planContentMessage } from './content-tools.mjs';
@@ -77,6 +78,8 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   async function plan(message,route={}){
     const current=await context();
     const derived=deriveState(current.appRoot,current.state,current.config,current.aiEnabled);
+    const modelState=scopedInboxReviewState(derived,route);
+    const modelTools=scopedInboxReviewTools(list(),route);
     let planned=null;
     let planner='local_fallback';
     let plannerModel=null;
@@ -84,14 +87,15 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       try{
         const runtime=aiRuntimeConfig();
         plannerModel=runtime.model||null;
-        planned=await planAIConsole({message,state:derived,tools:list(),route});
+        planned=await planAIConsole({message,state:modelState,tools:modelTools,route});
         if(planned)planner='model';
       }catch(error){console.warn('[AI console planner fallback]',error.message);}
     }
-    if(!planned)planned=planJoycrewMessage({message,state:derived});
-    if(!planned)planned=planContentMessage({message,state:derived});
-    if(!planned)planned=planProjectRecordMessage({message,state:derived});
-    if(!planned)planned=planWorkbenchMessage({message,state:derived});
+    if(!planned)planned=planJoycrewMessage({message,state:modelState});
+    if(!planned)planned=planContentMessage({message,state:modelState});
+    if(!planned)planned=planProjectRecordMessage({message,state:modelState});
+    if(!planned)planned=planWorkbenchMessage({message,state:modelState});
+    planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
       return {kind:'clarification',message:'这个入口当前不可用。个人收件箱主来源是飞书云文档；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null};

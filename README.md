@@ -1,102 +1,100 @@
-# Personal AI Workbench 2.0
+# Personal AI Workbench 3.0
 
-**动觉 AI 工作台：个人工作连续性 + Joycrew AI 员工业务执行的统一产品。**
+**动觉 AI 工作台：个人工作连续性 + Joycrew AI 员工业务执行的统一入口。**
 
-Personal AI Workbench 是唯一日常入口。它保留个人今日、收件箱、GetNote 会议待办、本地项目文件、Git 证据和飞书项目记忆，同时通过服务端受控连接接入 Joycrew 的客户、企业项目、AI 员工、Run、Evidence、审批和交付。
-
-产品基线见 [`docs/UNIFIED_PRODUCT_V2.md`](docs/UNIFIED_PRODUCT_V2.md)，跨服务合同见 [`docs/JOYCREW_INTEGRATION.md`](docs/JOYCREW_INTEGRATION.md)。
+当前正式产品合同是 v3：
 
 ```text
-左侧导航                  中间正式页面                   右侧 Harness Copilot
-个人今日 / 收件箱           个人项目 / 业务执行            连续对话 / 工具轨迹
-个人待办 / 工作日志         Run / Evidence / Approval      读取 + 操作预览
-             │                        │                          │
-             └──────── Personal AI Workbench Server ────────────┘
-                                      │
-                              Trusted Proxy / Session
-                                      │
-                           Joycrew → DataWeave / Runtime
+个人工作事项：飞书云文档 → Workbench Inbox → AI 自动分析 → 用户确认 → Workbench 执行
+内容素材：得到大脑 GetNote → 用户确认同步 → 自媒体 / 得到大脑内容（本地 Markdown）
+项目成果：本地项目文件夹 + Git 证据
+项目分析 / 总结 / 复盘：飞书项目云文档
+企业业务执行：Joycrew → Run / Evidence / Approval / Deliverable
+状态真相：Workbench state
 ```
+
+权威文档：
+
+- 产品来源合同：[`docs/WORKBENCH_V3_SOURCE_CONTRACT.md`](docs/WORKBENCH_V3_SOURCE_CONTRACT.md)
+- 当前工程收口：[`docs/UNIFIED_CLOSURE_REVIEW_20260816.md`](docs/UNIFIED_CLOSURE_REVIEW_20260816.md)
+- 跨服务合同：[`docs/JOYCREW_INTEGRATION.md`](docs/JOYCREW_INTEGRATION.md)
+
+旧 GetNote Task Sync v2 代码仍保留用于历史兼容和迁移，但 `external_tasks_sync` 等旧任务工具不再进入当前交互式 AI/MCP 能力面。
 
 ## 产品边界
 
-| 能力 | 权威系统 |
+| 能力 | 当前权威系统 |
 |---|---|
-| 个人收件箱、个人待办、我的今日 | Personal AI Workbench |
-| GetNote 会议待办事实 | 得到大脑；Workbench 单向只读并保存本地任务状态 |
+| 个人事项入口 | 飞书云文档“收件箱”章节 |
+| 个人 Inbox / Todo / Today / 用户决定 | Personal AI Workbench |
+| AI 自动分析 | 临时规划；只产生建议，不直接执行 |
+| 得到大脑 | 自媒体内容来源；只读同步到本地内容库 |
 | 本地项目成果 | 本地项目文件夹 |
-| 代码版本与变更证据 | Git / GitHub |
-| 项目分析、阶段总结、复盘与恢复叙事 | 飞书项目云文档 |
-| 个人任务快照与每日总结 | 飞书《每日工作日记》可选 sink |
+| 版本与代码变化证据 | Git / GitHub |
+| 项目分析、阶段总结、复盘、恢复叙事 | 飞书项目云文档 |
 | 客户、企业项目、业务任务 | Joycrew 当前 Workspace / 上游业务源 |
 | AI 员工、Run、Evidence、Approval、Deliverable | Joycrew |
-| 飞书、本机与服务器数据的按需查询 | DataWeave |
 | AI 员工实际执行 | Joycrew 配置的 Runtime / Hermes |
 
-两套任务不会自动互相覆盖：Joycrew 业务任务不会自动加入“我的今日”，Workbench 个人待办也不会自动变成企业任务。
+Joycrew 业务任务不会自动加入个人 Today，Workbench 个人待办也不会自动变成企业任务。
 
-## v2.0 主要能力
+## v3 主工作流
 
-### 个人工作台
+### 今日与收件箱
 
-- 通过统一只读 GetNoteReader 读取最近笔记和仍未完成任务对应的旧笔记，只认明确 `meeting_todos`，不从整篇笔记猜正式任务。
-- 有明确日期的事项进入正式待办；日期不明确的事项进入个人收件箱。
-- 当前 GetNote `meeting_todos.items` 只有 `text + completed`，没有 per-todo 稳定 ID；Workbench 使用 `noteId + 规范化待办文本 + 同文出现序号` 的 `text_fingerprint`，文案变化只在同一 note 一对一无歧义时继承旧 Workbench 实体。
-- 相对日期以会议/笔记创建时间优先解释，并显式携带 IANA 时区，不依赖 VPS 系统时区。
-- iPhone Shortcut `/api/capture` 使用 `captureId` 幂等，网络重试不会重复采集。
-- “我的今日”只包含用户明确加入的待办；来源日期变化不会擅自撤销用户的 Today 决定；AI 不自动安排。
-- 用户手工修改过 GetNote Todo 的本地截止日期后，Workbench 用 `sourceDueDate` 与本地 `dueDate` 分离追踪；后续来源变化不覆盖用户日期。
-- 本地项目目录是真实成果源，Git 提供变更证据。
-- 飞书项目文档是项目分析、阶段总结、复盘和上下文恢复的唯一长期叙事真源。
-- 飞书每日工作日记是可选任务快照与用户触发每日总结 sink；飞书不可用不阻塞 GetNote → Workbench 核心同步。
-- 本机 ICS 固定生成到 `data/calendar/personal-ai-workbench.ics`，它是可重建日历镜像，不是任务真源。
+- “今日工作台”和“收件箱”合并成同一工作面。
+- 飞书同步后，新增/更新的 `[INBOX]` 事项进入 AI 审阅队列。
+- 单条 AI 审阅只向模型提供当前目标事项和最多 30 个未归档项目的最小目录摘要，不发送其他 Inbox 原文、Todo 或确认项。
+- 自动分析队列最多 2 条并发、100 条待处理；队列会持续补充，不再只分析前 12 条。
+- 未变化事项的短时分析预览可在当前浏览器 session 内复用，减少刷新后的重复模型调用。
+- AI 只能形成 `inbox_process` 建议或 clarification；所有写操作仍需用户点击“确认并处理”。
+- AI 不自动加入 Today，不自动新建项目，不凭猜测删除来源事项。
 
-### 统一业务执行
+### 项目现场与进度
 
-导航中的“业务执行”页面原生显示：
+“最近工作现场”和“项目进度”合并展示：
 
-- Joycrew 连接状态、持久化、身份和 Runtime；
-- 企业项目、客户、业务任务；
-- 已授权 AI 员工及 Skill 版本；
-- 最近 Run 与 Evidence Package；
-- 写回审批；
-- 正式交付及 Run/Evidence 来源链。
+- 当前进度与状态；
+- 最近活动；
+- blocker；
+- 打开项目与主动同步入口。
 
-创建 Run、生成交付、批准或拒绝写回时采用两阶段合同：
+本地项目文件夹继续是真实工作产物源，Git 继续提供版本证据。
+
+### 自媒体 / 得到大脑内容
+
+得到大脑当前只承担内容采集：
 
 ```text
-页面或 Harness 提出动作
-→ Workbench 生成短时、不可伪造的操作预览
-→ 用户在“业务执行”页面检查影响范围
-→ 用户点击确认
-→ Workbench 服务端调用 Joycrew
-→ Joycrew 再次执行身份、Grant、源状态和审批校验
-→ Workbench 读回结果
+GetNote（只读）
+→ 用户确认同步
+→ <WORKSPACE_ROOT>/<业务序号>_自媒体/得到大脑内容/
+→ Markdown + .getnote-content-index.json
 ```
 
-未确认的预览不会调用 Joycrew；重复提交已执行预览不会重复创建 Run 或交付。
+不会创建 Todo，不会进入 Inbox，不会加入 Today，也不会写回 GetNote。拿不到真实原文字段的内容类型 fail closed，不用 AI 摘要冒充原文。
 
-### Harness 统一 Copilot
+## Joycrew 业务执行
 
-右侧 DeepSeek Harness 现在可以在同一会话中：
+Workbench 通过服务端受控连接读取 Joycrew 的客户、企业项目、业务任务、AI 员工、Run、Evidence、审批和交付。
 
-- 读取个人今日、收件箱、待办、项目和工作日志；
-- 读取飞书项目记录；
-- 读取 Joycrew 项目、客户、业务任务、员工、Run、Evidence、审批和交付；
-- 打开“业务执行”页面；
-- 为 Run、交付和审批生成操作预览。
+外部写操作继续采用：
 
-Harness 不拥有 Shell、终端、任意 Web、文件系统写入、Cron、Workflow 或 Subagent。`*_prepare` 工具只生成预览；没有页面确认回执时，Copilot 不得声称外部动作已执行。
+```text
+Preview → Confirm → Execute → Readback
+```
+
+浏览器不能传入 Joycrew Base URL、Token、任意 URL、Shell 命令或服务端文件路径。Joycrew 离线不能阻塞个人工作台 readiness。
 
 ## 运行要求
 
 - Node.js 24+
 - Git
-- GetNote 读取运行时：`local_cli` 时当前进程环境需要 `getnote`；`private_http` 时由受控 sidecar 提供读取，Workbench 容器不需要安装 getnote CLI
-- `lark-cli`：仅在启用飞书项目记录或飞书《每日工作日记》sink 时需要
+- 飞书收件箱/项目记录启用时需要可用的 `lark-cli`
+- GetNote 自媒体内容同步使用受控只读 `GetNoteReader`（`local_cli` 或 `private_http`）
 - 可选：独立运行的 Joycrew 服务
 
-## 本地启动
+## 本地开发
 
 ```bash
 cp .env.example .env
@@ -110,157 +108,37 @@ npm start
 http://127.0.0.1:4173
 ```
 
-Workbench 主应用没有普通 npm 运行依赖；Harness 依赖隔离在 `harness/` 中。源码首次启用 Harness：
+## macOS 正式常驻
+
+开发启动和正式常驻不是同一件事。正式 macOS 安装使用：
+
+```bash
+./install-macos.command
+npm run service:macos -- status
+```
+
+LaunchAgent 安装必须先校验 replacement plist，再切换旧服务；切换后的端口释放、bootstrap 或 health 失败必须尝试恢复旧服务，恢复失败必须显式同时报告原错误与恢复错误。详细流程见 [`docs/MACOS_ONE_CLICK.md`](docs/MACOS_ONE_CLICK.md)。
+
+## Harness
 
 ```bash
 npm run harness:install
 npm run harness:check
 npm run harness:e2e
+npm run harness:employee:e2e
 ```
 
-## 接入 Joycrew
+右侧 Harness Copilot 只使用固定白名单工具；外部改变必须经过现有确认门。
 
-推荐让 Joycrew 使用 `trusted_proxy`，由 Workbench 作为唯一浏览器入口：
+## iPhone Capture
 
-### Joycrew 侧
-
-```dotenv
-JOYCREW_AUTH_MODE=trusted_proxy
-JOYCREW_TRUSTED_PROXY_TOKEN=<至少 24 字节随机值>
-JOYCREW_PERSISTENCE=postgres
-JOYCREW_RUNTIME_MODE=mock
-```
-
-真实 Pilot 验证后再将 Runtime 切换为 Hermes。
-
-### Workbench 侧
-
-```dotenv
-JOYCREW_ENABLED=1
-JOYCREW_BASE_URL=http://127.0.0.1:4000
-JOYCREW_NETWORK_ZONE=local_loopback
-JOYCREW_AUTH_MODE=trusted_proxy
-JOYCREW_TRUSTED_PROXY_TOKEN=<与 Joycrew 相同>
-JOYCREW_WORKSPACE_ID=ws-dongjue
-JOYCREW_USER_ID=user-chris
-JOYCREW_ROLE=admin
-```
-
-这些值只由 Workbench 服务端读取，不返回浏览器、不进入 `state.json`、备份或项目文件。
-
-公网 Joycrew 必须使用 HTTPS，并将 `JOYCREW_NETWORK_ZONE` 设置为 `public_https`。Docker 中 Joycrew 运行在宿主机时，可使用：
-
-```dotenv
-JOYCREW_BASE_URL=http://host.docker.internal:4000
-JOYCREW_NETWORK_ZONE=private_http
-```
-
-完整合同见 [`docs/JOYCREW_INTEGRATION.md`](docs/JOYCREW_INTEGRATION.md)。
-
-## 得到大脑 → Workbench → 飞书 / ICS
-
-本地 CLI transport 的固定只读命令：
-
-```text
-getnote notes --limit <20-500> [--cursor <cursor>] -o json
-getnote note todos <note_id> -o json
-getnote note <note_id> -o json
-getnote doctor -o json
-```
-
-VPS/Docker 推荐：
-
-```text
-VPS 宿主机 getnote CLI
-        ↓
-只读 GetNote Runtime sidecar
-        ↓ private_http
-Workbench Docker
-```
-
-一次用户触发同步：
-
-```text
-读取最近 N 篇笔记
-+
-追踪 Workbench 中仍未完成事项对应的旧 noteId
-        ↓
-读取明确 meeting_todos
-        ↓
-text_fingerprint / 日期 / 时区 / 本地状态对账
-        ↓
-Workbench state 原子提交
-        │
-        ├─→ 飞书每日任务快照（可选、可失败）
-        └─→ ICS 原子重建（可选、可失败）
-```
-
-规则：
-
-- 只接受得到大脑明确提供的待办，不让模型从笔记正文自行发明正式 Todo。
-- 当前 `meeting_todos.items` 只有 `text` 和 `completed`，没有 per-todo 稳定 ID；身份固定为 `noteId + 规范化待办文本 + 同文出现序号` fingerprint。
-- 文案变化会改变原始 fingerprint；只在同一 note 去掉精确匹配后恰好一旧一新时继承旧 Workbench 实体，多个变化不做语义猜合并。
-- “今天/明天/后天”优先基于 note `createdAt`，而不是后来编辑的 `updatedAt`。
-- “下周”“稍后”“尽快”等模糊表达不自动变成日期。
-- 只有上游明确 `completed=true` 才同步完成，不根据事项消失推断完成。
-- Workbench 拥有用户的项目归属、优先级、tags、Today 和本地截止日期决定；来源同步不能擅自覆盖。
-- 不反向修改得到大脑，也不自动加入今日。
-- 飞书日记 URL 不是 Task Sync 的必填项；只有发布每日总结时才要求飞书 sink 已配置。
-- 飞书或 ICS 失败时返回独立 sink 状态，核心 Workbench 提交不回滚。
-
-详细合同见 [`docs/TASK_SOURCE_PIPELINE.md`](docs/TASK_SOURCE_PIPELINE.md) 和 [`docs/GETNOTE_RUNTIME_V1.md`](docs/GETNOTE_RUNTIME_V1.md)。
-
-## 项目记录
-
-`PROJECT.md` 只是项目身份证，不保存进度叙事、卡点、恢复摘要或总结正文。
-
-飞书项目文档固定章节：
-
-```text
-项目分析与总结
-```
-
-项目页临时读取飞书正文，不使用 `localStorage`、`sessionStorage` 或 IndexedDB 保存项目叙事。
-
-## API 边界
-
-Personal Workbench：
-
-```text
-POST /api/capture
-GET  /api/state
-POST /api/mcp
-POST /api/harness/navigator
-```
-
-统一 Joycrew BFF：
-
-```text
-GET  /api/joycrew/status
-GET  /api/joycrew/overview
-GET  /api/joycrew/projects/:projectId
-GET  /api/joycrew/actions
-POST /api/joycrew/actions/prepare
-POST /api/joycrew/actions/:actionId/execute
-POST /api/joycrew/actions/:actionId/cancel
-```
-
-浏览器不能传入 Joycrew Base URL、Token、任意 URL、Shell 命令或服务端文件路径。
+`POST /api/capture` 使用稳定 `captureId` 做幂等；同一次采集的所有网络重试必须复用同一个 `captureId`。Capture 只进入 Inbox，不自动创建 Todo 或 Today。
 
 ## 数据、备份与恢复
 
-默认数据目录：
+Workbench 本地状态和配置使用原子 JSON；运行时备份目录 `data/p0/` 已被 Git 忽略。
 
-```text
-state.json   个人机器状态、任务、收件箱和确认项
-config.json  工作区、业务板块和非秘密集成设置
-calendar/    可从 GetNote 待办重建的 ICS
-backups/     backup v2
-captures/    Capture 幂等收据
-recovery/    飞书跨资源事务恢复凭据
-```
-
-Workbench 的完整恢复包继续使用 backup v2：
+完整恢复包继续使用 backup v2：
 
 ```json
 {
@@ -272,12 +150,9 @@ Workbench 的完整恢复包继续使用 backup v2：
 }
 ```
 
-- `captureReceipts` 只保存 Capture 标识、正文 SHA-256 和处理引用，不保存 Capture 正文。
-- `projectRecordReceipts` 只保存 operationId、机器进度和飞书指针，不保存项目分析或总结正文。
-- 旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 时保留当前凭据目录；恢复任一阶段失败必须尝试整体回滚。
-- `GET /api/export` 是查看和迁移用 JSON，不是完整恢复包。
-
-Joycrew 数据、Token、Run、Evidence、Approval 和 Deliverable 不复制进 Workbench 备份。Joycrew 操作预览只保存在当前 Workbench 进程内存，默认 10 分钟过期。
+- `captureReceipts` 只保存 Capture 标识、正文 SHA-256 和处理引用。
+- `projectRecordReceipts` 只保存 operationId、机器进度和飞书指针。
+- `GET /api/export` 是查看/迁移用 JSON，不是完整恢复包。
 
 ## Docker
 
@@ -286,39 +161,21 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-默认只发布到 `127.0.0.1`。非 localhost 部署至少设置：
-
-```dotenv
-WORKBENCH_PASSWORD=<强密码>
-SESSION_SECRET=<至少 24 字符随机值>
-TRUSTED_ORIGINS=https://workbench.example.com
-COOKIE_SECURE=1
-```
-
-如果 Docker 通过 VPS 宿主机 sidecar 读取 GetNote：
-
-```dotenv
-GETNOTE_RUNTIME_MODE=private_http
-GETNOTE_RUNTIME_BASE_URL=http://host.docker.internal:4310
-GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
-```
+默认只发布到 loopback。非 localhost 部署至少设置访问密码、足够强的 `SESSION_SECRET`、可信 origin 和 secure cookie。
 
 ## 验证
 
 ```bash
-npm test
+npm run test:files
 npm run harness:install
 npm run verify
-docker build -t personal-ai-workbench:v2 .
+docker build -t personal-ai-workbench:v3 .
 ```
 
-CI 覆盖：
+CI 必须真实执行并通过：
 
-- Workbench 全量合同测试；
-- Joycrew 客户端认证、网络边界、错误映射和响应体上限；
-- 操作预览、确认、重复执行和路径穿越拒绝；
-- Joycrew MCP 读取与 preview-only 工具；
-- Harness 固定工具目录和确定性 Agent→工具 E2E；
-- Joycrew 未启用时的 Docker 主产品可用性。
+1. Workbench contract tests；
+2. Harness E2E；
+3. Docker smoke。
 
-自动化通过不等于真实 GetNote、飞书、系统日历、模型 Provider、Joycrew、DataWeave、Hermes、Mac Local Bridge 或生产部署已经完成现场验证。外部服务不可用时必须明确报错，不使用旧缓存冒充实时结果，也不影响个人工作台继续运行。
+自动化通过不等于真实飞书、GetNote、Joycrew、模型 Provider、iPhone Shortcut 或 macOS LaunchAgent 已完成现场验收；现场状态必须单独读回确认。

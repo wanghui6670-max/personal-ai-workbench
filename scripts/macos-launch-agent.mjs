@@ -30,6 +30,7 @@ function domain(){return `gui/${uid}`;}
 function target(){return `${domain()}/${label}`;}
 function baseUrl(host,port){return `http://${host.includes(':')?`[${host}]`:host}:${port}`;}
 function timestamp(){return new Date().toISOString().replace(/[:.]/g,'-');}
+function errorText(error){return String(error?.message||error||'unknown error').replace(/\s+/g,' ').trim();}
 
 async function execResult(file,args,{timeout=20_000}={}){
   try{const result=await execFileAsync(file,args,{timeout,maxBuffer:2*1024*1024});return{code:0,stdout:result.stdout,stderr:result.stderr};}
@@ -47,13 +48,19 @@ async function bootstrap(){
 }
 function portInUse(host,port){return new Promise(resolve=>{const socket=net.connect({host,port});const finish=value=>{socket.destroy();resolve(value);};socket.setTimeout(500);socket.once('connect',()=>finish(true));socket.once('timeout',()=>finish(false));socket.once('error',()=>finish(false));});}
 async function waitForPortFree(host,port,timeoutMs=5000){const started=Date.now();while(Date.now()-started<timeoutMs){if(!(await portInUse(host,port)))return true;await new Promise(resolve=>setTimeout(resolve,100));}return false;}
-async function waitForHealth(binding,timeoutMs=25_000){
+async function waitForHealth(binding,timeoutMs=25_000,{expectedVersion=PRODUCT_VERSION}={}){
   const url=`${baseUrl(binding.host,binding.port)}/api/health`;const started=Date.now();
   while(Date.now()-started<timeoutMs){
-    try{const response=await fetch(url,{cache:'no-store'});if(response.status===200){const body=await response.json();if(body.ok===true&&body.version===PRODUCT_VERSION)return body;}}catch{}
+    try{
+      const response=await fetch(url,{cache:'no-store'});
+      if(response.status===200){
+        const body=await response.json();
+        if(body.ok===true&&(expectedVersion===null||body.version===expectedVersion))return body;
+      }
+    }catch{}
     await new Promise(resolve=>setTimeout(resolve,250));
   }
-  throw new Error(`LaunchAgent 已启动但 ${url} 未通过健康检查。`);
+  throw new Error(`LaunchAgent 已启动但 ${url} 未通过健康检查${expectedVersion===null?'':`（期望 v${expectedVersion}）`}。`);
 }
 
 async function plistCommit(){
@@ -101,6 +108,34 @@ async function validateInstallGate(binding){
   return{reportPath,commit,report};
 }
 
+async function restorePreviousLaunchAgent({previous,wasLoaded,binding}){
+  await bootout();
+  if(previous===null){
+    await fsp.rm(plistPath,{force:true});
+    if(wasLoaded)throw new Error('旧服务此前处于 loaded，但没有旧 plist 可用于恢复。');
+    return null;
+  }
+  await fsp.writeFile(plistPath,previous,{encoding:'utf8',mode:0o600});
+  await fsp.chmod(plistPath,0o600);
+  if(!wasLoaded)return null;
+  await bootstrap();
+  const health=await waitForHealth(binding,25_000,{expectedVersion:null});
+  if(!(await loaded()))throw new Error('旧 LaunchAgent 已 bootstrap，但 launchctl print 未确认 loaded。');
+  return health;
+}
+
+async function recoverCurrentLaunchAgent(binding){
+  await bootout();
+  await bootstrap();
+  const health=await waitForHealth(binding);
+  if(!(await loaded()))throw new Error('LaunchAgent 恢复 bootstrap 后未保持 loaded。');
+  return health;
+}
+
+function transitionRecoveryError(action,original,recovery){
+  return new Error(`${action}失败，且恢复服务也失败。原错误：${errorText(original)}；恢复错误：${errorText(recovery)}`,{cause:recovery});
+}
+
 async function install(){
   assert.equal(process.platform,'darwin','LaunchAgent 安装仅支持 macOS。');
   assert.ok(Number.isInteger(uid),'无法确定当前 macOS 用户 UID。');
@@ -116,8 +151,6 @@ async function install(){
   try{previous=await fsp.readFile(plistPath,'utf8');}catch(error){if(error?.code!=='ENOENT')throw error;}
   const backupPath=previous?`${plistPath}.backup-${timestamp()}`:null;
   if(previous)await fsp.writeFile(backupPath,previous,{encoding:'utf8',mode:0o600});
-  await bootout();
-  if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用，拒绝覆盖。`);
 
   const plist=buildMacosLaunchAgentPlist({
     label,
@@ -130,10 +163,15 @@ async function install(){
     buildCommit:gate.commit
   });
   const temp=`${plistPath}.tmp-${process.pid}`;
+  let cutoverStarted=false;
   try{
+    // Validate the replacement before touching the currently running service.
     await fsp.writeFile(temp,plist,{encoding:'utf8',mode:0o600});
     const lint=await execResult('plutil',['-lint',temp]);
     if(lint.code!==0)throw new Error(`LaunchAgent plist 校验失败：${String(lint.stderr||lint.stdout).trim()}`);
+
+    await bootout();cutoverStarted=true;
+    if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用，拒绝覆盖。`);
     await fsp.rename(temp,plistPath);
     await fsp.chmod(plistPath,0o600);
     await requirePlistCommit(gate.commit);
@@ -172,9 +210,10 @@ async function install(){
     if(backupPath)console.log(`旧 plist 备份：${backupPath}`);
   }catch(error){
     await fsp.rm(temp,{force:true}).catch(()=>undefined);
-    await bootout();
-    if(previous){await fsp.writeFile(plistPath,previous,{encoding:'utf8',mode:0o600});if(wasLoaded)await bootstrap().catch(()=>undefined);}
-    else await fsp.rm(plistPath,{force:true});
+    if(cutoverStarted){
+      try{await restorePreviousLaunchAgent({previous,wasLoaded,binding});}
+      catch(recoveryError){throw transitionRecoveryError('LaunchAgent 安装',error,recoveryError);}
+    }
     throw error;
   }
 }
@@ -228,12 +267,22 @@ async function restart(){
   await fsp.access(plistPath);
   const expectedCommit=await git(['rev-parse','HEAD']);
   await requirePlistCommit(expectedCommit);
-  await bootout();
-  if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用。`);
-  await bootstrap();
-  const health=await waitForHealth(binding);
-  await requirePlistCommit(expectedCommit);
-  console.log(`已重启 ${label} · v${health.version} · ${expectedCommit.slice(0,12)}`);
+  const wasLoaded=await loaded();
+  let cutoverStarted=false;
+  try{
+    await bootout();cutoverStarted=true;
+    if(!(await waitForPortFree(binding.host,binding.port)))throw new Error(`端口 ${binding.host}:${binding.port} 仍被其他进程占用。`);
+    await bootstrap();
+    const health=await waitForHealth(binding);
+    await requirePlistCommit(expectedCommit);
+    console.log(`已重启 ${label} · v${health.version} · ${expectedCommit.slice(0,12)}`);
+  }catch(error){
+    if(cutoverStarted&&wasLoaded){
+      try{await recoverCurrentLaunchAgent(binding);}
+      catch(recoveryError){throw transitionRecoveryError('LaunchAgent 重启',error,recoveryError);}
+    }else if(cutoverStarted)await bootout();
+    throw error;
+  }
 }
 
 async function uninstall(){

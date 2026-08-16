@@ -4,7 +4,13 @@ let rendering=false;
 let refreshPromise=null;
 let planVersion=0;
 const inboxPlans=new Map();
-const AUTO_ANALYZE_LIMIT=12;
+const autoAnalyzeQueue=[];
+const queuedIds=new Set();
+let autoAnalyzeActive=0;
+const AUTO_ANALYZE_CONCURRENCY=2;
+const AUTO_ANALYZE_QUEUE_LIMIT=100;
+const REVIEW_CACHE_KEY='workbench-v3-inbox-reviews-v1';
+const REVIEW_CACHE_MAX_AGE_MS=9*60*1000;
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const attr=esc;
@@ -34,10 +40,46 @@ function stateSignature(state){
     plans:planVersion
   });
 }
+function reviewKey(item){return JSON.stringify([item?.id||'',item?.text||'',item?.source||'',item?.createdAt||'']);}
+function loadReviewCache(){
+  try{
+    const raw=JSON.parse(sessionStorage.getItem(REVIEW_CACHE_KEY)||'[]');
+    const now=Date.now();
+    if(!Array.isArray(raw))return;
+    for(const entry of raw){
+      if(!entry||typeof entry.id!=='string'||typeof entry.reviewKey!=='string'||!entry.plan||!Number.isFinite(entry.cachedAt))continue;
+      if(now-entry.cachedAt>REVIEW_CACHE_MAX_AGE_MS)continue;
+      inboxPlans.set(entry.id,{status:'ready',reviewKey:entry.reviewKey,plan:entry.plan,cachedAt:entry.cachedAt});
+    }
+  }catch{}
+}
+function persistReviewCache(){
+  try{
+    const now=Date.now();
+    const safe=[];
+    for(const [id,entry] of inboxPlans){
+      if(entry?.status!=='ready'||!entry.plan||typeof entry.reviewKey!=='string')continue;
+      const cachedAt=Number(entry.cachedAt||now);if(now-cachedAt>REVIEW_CACHE_MAX_AGE_MS)continue;
+      safe.push({id,reviewKey:entry.reviewKey,plan:entry.plan,cachedAt});
+      if(safe.length>=100)break;
+    }
+    sessionStorage.setItem(REVIEW_CACHE_KEY,JSON.stringify(safe));
+  }catch{}
+}
+function reconcileReviewCache(){
+  if(!v3State)return;
+  const items=new Map((v3State.inbox||[]).map(item=>[item.id,item]));
+  let changed=false;
+  for(const [id,entry] of inboxPlans){
+    const item=items.get(id);
+    if(!item||entry.reviewKey!==reviewKey(item)){inboxPlans.delete(id);changed=true;}
+  }
+  if(changed)persistReviewCache();
+}
 
 async function refresh(force=false){
   if(refreshPromise&&!force)return refreshPromise;
-  refreshPromise=json('/api/state').then(state=>{v3State=state;renderEnhancements();void autoAnalyze();return state;}).finally(()=>{refreshPromise=null;});
+  refreshPromise=json('/api/state').then(state=>{v3State=state;reconcileReviewCache();renderEnhancements();void autoAnalyze();return state;}).finally(()=>{refreshPromise=null;});
   return refreshPromise;
 }
 
@@ -66,6 +108,7 @@ function todoRow(todo,state){
 
 function reviewIsExecutable(item,entry){
   const plan=entry?.plan;
+  if(entry?.reviewKey!==reviewKey(item))return false;
   if(!plan||plan.kind==='clarification'||plan.toolName!=='inbox_process'||plan.confirmationRequired!==true)return false;
   if(plan.args?.itemId!==item.id||typeof plan.args?.command!=='string'||!plan.args.command.trim())return false;
   const command=plan.args.command;
@@ -75,8 +118,8 @@ function reviewIsExecutable(item,entry){
 }
 function reviewHtml(item){
   const entry=inboxPlans.get(item.id);
-  if(!entry)return `<div class="v3-ai-review pending"><div class="v3-ai-label">AI 自动分析</div><div class="v3-ai-reason">等待分析…</div></div>`;
-  if(entry.status==='pending')return `<div class="v3-ai-review pending"><div class="v3-ai-label">AI 自动分析</div><div class="v3-ai-reason"><span class="v3-loading">正在根据收件箱、项目和待办上下文生成处理建议…</span></div></div>`;
+  if(!entry)return `<div class="v3-ai-review pending"><div class="v3-ai-label">AI 自动分析</div><div class="v3-ai-reason">等待进入有界分析队列…</div></div>`;
+  if(entry.status==='pending')return `<div class="v3-ai-review pending"><div class="v3-ai-label">AI 自动分析</div><div class="v3-ai-reason"><span class="v3-loading">正在用“当前事项 + 项目目录摘要”的最小上下文生成建议…</span></div></div>`;
   if(entry.status==='error')return `<div class="v3-ai-review"><div class="v3-ai-label">分析暂不可用</div><div class="v3-ai-reason">${esc(entry.message||'AI 分析失败，可改用手工处理。')}</div><div class="v3-actions"><button class="btn small" data-v3-action="analyze" data-id="${attr(item.id)}">重试分析</button></div></div>`;
   const plan=entry.plan||{};
   if(plan.kind==='clarification'||!plan.toolName)return `<div class="v3-ai-review"><div class="v3-ai-label">需要你决定</div><div class="v3-ai-reason">${esc(plan.messageReply||plan.reason||'现有信息不足以安全决定处理方式。')}</div><div class="v3-actions"><button class="btn small" data-action="open-command" data-id="${attr(item.id)}">告诉 AI 怎么处理</button><button class="btn small" data-v3-action="analyze" data-id="${attr(item.id)}">重新分析</button></div></div>`;
@@ -104,9 +147,9 @@ function projectLiveHtml(state){
 function dashboardHtml(state){
   const today=state.todayTodos||[];
   const inbox=state.inbox||[];
-  const aiPending=inbox.filter(item=>item.source==='feishu_doc').length;
+  const aiPending=inbox.filter(item=>item.source==='feishu_doc'&&!inboxPlans.has(item.id)).length+autoAnalyzeQueue.length+autoAnalyzeActive;
   const attention=Number(state.stats?.confirmations||0)+Number(state.stats?.overdue||0)+Number(state.stats?.unclassified||0);
-  return `<div id="v3-dashboard" class="v3-dashboard" data-signature="${attr(stateSignature(state))}"><div class="v3-hero"><div class="v3-metric"><strong>${today.length}</strong><span>今天明确要做</span></div><div class="v3-metric"><strong>${inbox.length}</strong><span>收件箱待处理</span></div><div class="v3-metric"><strong>${aiPending}</strong><span>AI 自动分析队列</span></div><div class="v3-metric"><strong>${attention}</strong><span>需要你拍板/留意</span></div></div><div class="v3-grid"><section class="v3-card"><div class="v3-card-head"><div><h2>今天要做什么</h2><p>Today 仍然只接受你明确确认的任务；AI 可以建议，但不会自动加入。</p></div></div>${today.length?today.map(todo=>todoRow(todo,state)).join(''):'<div class="v3-empty">今天还没有明确安排的任务。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>需要你决定的事</h2><p>AI 建议、逾期、待归类和其他人工确认统一看这里。</p></div></div><div class="v3-attention"><a class="pill amber" href="#confirm">待确认 ${state.stats?.confirmations||0}</a><a class="pill red" href="#overdue">逾期 ${state.stats?.overdue||0}</a><a class="pill" href="#unclassified">待归类 ${state.stats?.unclassified||0}</a></div><div class="v3-notice" style="margin-top:12px">AI 的职责是先分析并给出一个可审计建议；任何会改变工作台的动作，仍然要你点“确认并处理”。</div></section></div><section class="v3-card"><div class="v3-card-head"><div><h2>飞书收件箱 · AI 处理队列</h2><p>飞书云文档是主同步入口。同步后 AI 自动分析每条信息；分析不等于执行。</p></div></div>${sourceHtml(state)}${inbox.length?inbox.map(inboxItemHtml).join(''):'<div class="v3-empty">收件箱为空。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>项目现场与进度</h2><p>把“最近工作现场”和“项目进度”合并：每个项目直接看进度、最后活动和卡点。</p></div><button class="btn small" data-action="sync-all">同步所有项目</button></div>${projectLiveHtml(state)}</section></div>`;
+  return `<div id="v3-dashboard" class="v3-dashboard" data-signature="${attr(stateSignature(state))}"><div class="v3-hero"><div class="v3-metric"><strong>${today.length}</strong><span>今天明确要做</span></div><div class="v3-metric"><strong>${inbox.length}</strong><span>收件箱待处理</span></div><div class="v3-metric"><strong>${aiPending}</strong><span>AI 自动分析队列</span></div><div class="v3-metric"><strong>${attention}</strong><span>需要你拍板/留意</span></div></div><div class="v3-grid"><section class="v3-card"><div class="v3-card-head"><div><h2>今天要做什么</h2><p>Today 仍然只接受你明确确认的任务；AI 可以建议，但不会自动加入。</p></div></div>${today.length?today.map(todo=>todoRow(todo,state)).join(''):'<div class="v3-empty">今天还没有明确安排的任务。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>需要你决定的事</h2><p>AI 建议、逾期、待归类和其他人工确认统一看这里。</p></div></div><div class="v3-attention"><a class="pill amber" href="#confirm">待确认 ${state.stats?.confirmations||0}</a><a class="pill red" href="#overdue">逾期 ${state.stats?.overdue||0}</a><a class="pill" href="#unclassified">待归类 ${state.stats?.unclassified||0}</a></div><div class="v3-notice" style="margin-top:12px">AI 的职责是先分析并给出一个可审计建议；任何会改变工作台的动作，仍然要你点“确认并处理”。</div></section></div><section class="v3-card"><div class="v3-card-head"><div><h2>飞书收件箱 · AI 处理队列</h2><p>飞书云文档是主同步入口。同步后按最多 2 条并发的有界队列自动分析；分析不等于执行。</p></div></div>${sourceHtml(state)}${inbox.length?inbox.map(inboxItemHtml).join(''):'<div class="v3-empty">收件箱为空。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>项目现场与进度</h2><p>把“最近工作现场”和“项目进度”合并：每个项目直接看进度、最后活动和卡点。</p></div><button class="btn small" data-action="sync-all">同步所有项目</button></div>${projectLiveHtml(state)}</section></div>`;
 }
 
 function hideLegacyMain(main,keepCapture=true){
@@ -172,20 +215,37 @@ function acceptedPlan(item,plan){
   return plan;
 }
 async function analyzeItem(item,{force=false}={}){
-  if(!v3State?.aiEnabled){inboxPlans.set(item.id,{status:'error',message:'当前没有启用 AI Provider；可以使用手工处理，或配置 AI 后重新分析。'});planVersion+=1;renderEnhancements();return;}
-  const existing=inboxPlans.get(item.id);if(existing&&!force)return;
-  inboxPlans.set(item.id,{status:'pending'});planVersion+=1;renderEnhancements();
+  const key=reviewKey(item);
+  if(!v3State?.aiEnabled){inboxPlans.set(item.id,{status:'error',reviewKey:key,message:'当前没有启用 AI Provider；可以使用手工处理，或配置 AI 后重新分析。'});planVersion+=1;renderEnhancements();return;}
+  const existing=inboxPlans.get(item.id);if(existing?.reviewKey===key&&!force)return;
+  inboxPlans.set(item.id,{status:'pending',reviewKey:key});planVersion+=1;renderEnhancements();
   try{
     const message=`只分析这一条飞书收件箱事项并提出一个处理建议，不要执行：itemId=${item.id}；原文=${JSON.stringify(item.text)}。优先使用 inbox_process；如果缺少截止日期、项目归属不明确、需要新建项目或无法唯一判断，就返回 clarification。不得自动加入 Today，不得自动创建项目，不得因为猜测而删除。`;
-    const response=await json('/api/ai/plan',{method:'POST',body:JSON.stringify({message,view:'today',id:null})});
-    const plan=acceptedPlan(item,response.plan||{});inboxPlans.set(item.id,{status:'ready',plan});
-  }catch(error){inboxPlans.set(item.id,{status:'error',message:error.message});}
+    const response=await json('/api/ai/plan',{method:'POST',body:JSON.stringify({message,view:'inbox-review',id:item.id})});
+    const plan=acceptedPlan(item,response.plan||{});inboxPlans.set(item.id,{status:'ready',reviewKey:key,plan,cachedAt:Date.now()});persistReviewCache();
+  }catch(error){inboxPlans.set(item.id,{status:'error',reviewKey:key,message:error.message});persistReviewCache();}
   planVersion+=1;renderEnhancements();
+}
+function pumpAutoAnalyzeQueue(){
+  while(autoAnalyzeActive<AUTO_ANALYZE_CONCURRENCY&&autoAnalyzeQueue.length){
+    const queued=autoAnalyzeQueue.shift();queuedIds.delete(queued.id);
+    const current=v3State?.inbox?.find(item=>item.id===queued.id);
+    if(!current||reviewKey(current)!==queued.reviewKey)continue;
+    const existing=inboxPlans.get(current.id);if(existing?.reviewKey===queued.reviewKey)continue;
+    autoAnalyzeActive+=1;
+    void analyzeItem(current).finally(()=>{autoAnalyzeActive-=1;pumpAutoAnalyzeQueue();void autoAnalyze();});
+  }
 }
 async function autoAnalyze(){
   if(!v3State||currentView()!=='today')return;
-  const items=(v3State.inbox||[]).filter(item=>item.source==='feishu_doc').slice(0,AUTO_ANALYZE_LIMIT);
-  for(const item of items){if(!inboxPlans.has(item.id))void analyzeItem(item);}
+  const items=(v3State.inbox||[]).filter(item=>item.source==='feishu_doc');
+  for(const item of items){
+    if(autoAnalyzeQueue.length>=AUTO_ANALYZE_QUEUE_LIMIT)break;
+    const key=reviewKey(item);const existing=inboxPlans.get(item.id);
+    if(existing?.reviewKey===key||queuedIds.has(item.id))continue;
+    autoAnalyzeQueue.push({id:item.id,reviewKey:key});queuedIds.add(item.id);
+  }
+  pumpAutoAnalyzeQueue();
 }
 async function confirmPlan(itemId){
   const entry=inboxPlans.get(itemId);const item=v3State?.inbox?.find(candidate=>candidate.id===itemId);
@@ -195,21 +255,21 @@ async function confirmPlan(itemId){
     const executed=await json('/api/ai/execute',{method:'POST',body:JSON.stringify({planId:entry.plan.id,confirmed:true})});
     const result=executed.result||{};
     if(result.needsProjectCreation||result.needsProjectSelection||result.needsFollowup){
-      inboxPlans.set(itemId,{status:'ready',plan:{...entry.plan,kind:'clarification',toolName:null,messageReply:result.question||'这一步还需要你补充项目或日期信息。'},outcome:result.question||'需要补充信息'});
-      planVersion+=1;renderEnhancements();return;
+      inboxPlans.set(itemId,{status:'ready',reviewKey:entry.reviewKey,plan:{...entry.plan,kind:'clarification',toolName:null,messageReply:result.question||'这一步还需要你补充项目或日期信息。'},outcome:result.question||'需要补充信息',cachedAt:Date.now()});
+      persistReviewCache();planVersion+=1;renderEnhancements();return;
     }
-    notify(result.message||'已按确认的 AI 建议处理');inboxPlans.delete(itemId);planVersion+=1;await refresh(true);
+    notify(result.message||'已按确认的 AI 建议处理');inboxPlans.delete(itemId);persistReviewCache();planVersion+=1;await refresh(true);
   }catch(error){
     if(/过期/.test(error.message))inboxPlans.delete(itemId);else inboxPlans.set(itemId,{...entry,status:'error',message:error.message});
-    planVersion+=1;renderEnhancements();notify(error.message,true);
+    persistReviewCache();planVersion+=1;renderEnhancements();notify(error.message,true);
   }
 }
 async function syncFeishu(target){
   if(!v3State?.config?.dataSource){document.querySelector('[data-action="settings"]')?.click();return;}
   target.disabled=true;target.textContent='同步并分析中…';
   try{
-    const response=await json('/api/inbox/sync',{method:'POST',body:'{}'});inboxPlans.clear();planVersion+=1;
-    await refresh(true);notify(`飞书已同步：新增 ${response.sync?.imported||0}，更新 ${response.sync?.updated||0}，移除 ${response.sync?.removed||0}；AI 正在分析。`);
+    const response=await json('/api/inbox/sync',{method:'POST',body:'{}'});planVersion+=1;
+    await refresh(true);notify(`飞书已同步：新增 ${response.sync?.imported||0}，更新 ${response.sync?.updated||0}，移除 ${response.sync?.removed||0}；AI 已进入有界分析队列。`);
   }catch(error){notify(error.message,true);target.disabled=false;target.textContent='同步飞书并自动分析';}
 }
 
@@ -225,5 +285,6 @@ document.addEventListener('click',event=>{const target=event.target.closest?.('[
 window.addEventListener('hashchange',()=>{if(currentView()==='inbox'){location.hash='#today';return;}schedule();void refresh(true);});
 new MutationObserver(schedule).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
 function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;renderEnhancements();});}
+loadReviewCache();
 if(currentView()==='inbox')location.hash='#today';
 void refresh(true);

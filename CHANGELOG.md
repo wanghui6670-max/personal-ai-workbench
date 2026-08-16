@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.0.0 - 2026-08-16
+
+- 个人工作事项主入口改为飞书云文档：`[INBOX]` → Workbench Inbox → AI 分析 → 用户确认 → Workbench 执行
+- “今日工作台 + 收件箱”合并成“今日与收件箱”，把 Today、飞书待处理、AI 建议、待确认、逾期和待归类放到同一决策面
+- “最近工作现场 + 项目进度”合并成“项目现场与进度”
+- 得到大脑退出个人待办主链路，仅保留“自媒体 / 得到大脑内容”本地 Markdown 内容采集；旧 GetNote Task Sync 工具退出交互式 AI/MCP registry
+- 新增 `src/ai-review-scope.mjs`：飞书单条审阅只向模型提供目标 Inbox item + 最多 30 个未归档项目目录摘要，并且模型只可提议 `inbox_process`
+- 飞书自动 AI 审阅改为最多 2 条并发、100 条有界队列；不再只处理前 12 条；未变化事项的短时预览可在浏览器 session 内复用
+- LaunchAgent install 改为先生成并 lint replacement plist，再进入 cutover；端口释放、bootstrap、health 或 commit 失败都会尝试恢复旧服务
+- LaunchAgent rollback 不再吞掉 bootstrap 失败；恢复旧版本时允许旧版本 health，只要求服务重新可用；restart 也增加已运行服务恢复路径
+- 产品版本、package、Docker smoke 和合同测试统一升级到 `3.0.0`
+- README / PRODUCT_SPEC / ARCHITECTURE / API 统一到 v3 来源与处理合同
+- 新增当前工程收口审查，旧 GetNote v2 深审明确降级为历史审查证据
+
 ## 2.0.0 - 2026-08-14
 
 - 将 Personal AI Workbench 明确升级为动觉 AI 工作台的唯一日常入口；个人工作连续性与 Joycrew 企业 AI 员工执行形成一个产品
@@ -51,7 +65,6 @@
 - 收件箱强制入口、人在回路的早晨对焦与今日工作台
 - 待确认、待归类、逾期、归档和业务板块目录管理
 - 访问密码、Capture Token、安全 Headers、原子 JSON、自动备份、Docker、Doctor 和测试
-
 
 ## 不确定结果保护
 

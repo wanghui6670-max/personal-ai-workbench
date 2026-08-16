@@ -1,313 +1,167 @@
-# 架构说明
+# 架构说明（v3.0）
 
-## 1. 总体边界
-
-```text
-得到大脑             ── 个人笔记与明确 meeting_todos 事实源
-GetNoteReader        ── 统一只读读取合同；local_cli / private_http
-Workbench state      ── 个人任务、Inbox、Today 选择与本地任务状态真源
-本地项目文件夹       ── 真实工作产物
-Git                  ── 版本与代码变化证据
-飞书每日工作日记     ── 个人任务快照与每日总结 sink
-飞书项目文档         ── 项目分析、总结、复盘和恢复叙事真源
-本机 ICS             ── 可重建日历镜像
-Capture receipts     ── 正文哈希与幂等标识
-Recovery receipts    ── 飞书跨资源事务机器凭据
-AI Provider          ── 临时分析，不成为资料真源
-```
-
-系统不替用户安排今日工作。AI 只能分析、建议和执行用户明确确认的白名单操作。
-
-## 2. 得到大脑外部待办源
-
-### `src/getnote-runtime.mjs`
-
-业务层只依赖统一只读接口：
+## 1. 当前总体边界
 
 ```text
-listNotes
-fetchTodos
-fetchNote
-status
-```
-
-`local_cli` 只执行固定 `getnote` 读命令：
-
-```text
-getnote notes --limit <20-500> [--cursor <cursor>] -o json
-getnote note todos <note_id> -o json
-getnote note <note_id> -o json
-```
-
-`private_http` 只允许 loopback、私网 IP、Docker 内部名称、`host.docker.internal` 或 `.internal/.local` 目标，并使用 32+ 字符 service token。它不接受公网 origin、redirect、任意 URL、任意 argv 或任意命令。
-
-VPS 推荐形态：
-
-```text
-VPS 宿主机 getnote CLI
+飞书云文档 [INBOX] ── 个人工作事项主入口
         ↓
-只读 GetNote Runtime sidecar
-        ↓ private_http
-Workbench Docker
+Workbench Inbox     ── 个人待处理事实
+        ↓
+AI scoped review    ── 只分析目标 item，产生建议，不直接执行
+        ↓ 用户确认
+Workbench domain    ── Todo / Today / 项目归属 / 用户决定真源
+
+得到大脑 GetNote    ── 自媒体内容来源（只读）
+        ↓ 用户确认
+自媒体本地内容库    ── Markdown + 最小索引
+
+本地项目文件夹      ── 真实工作产物
+Git                 ── 版本与代码变化证据
+飞书项目文档        ── 项目分析、总结、复盘与恢复叙事真源
+Joycrew             ── 企业项目 / AI 员工 / Run / Evidence / Approval / Deliverable
+Harness             ── 右侧受控 Copilot；固定白名单工具
 ```
 
-CLI 登录和凭证因此留在宿主机，不打进 Workbench 镜像。
+系统不替用户安排 Today。所有会改变 Workbench 或外部系统的动作继续受确认门保护。
 
-### `src/task-cli.mjs`
+## 2. 飞书个人事项入口
 
-适配器职责：
+现有 `/api/inbox/sync` 和 MCP 工具 `feishu_inbox_sync` 负责读取飞书“收件箱”章节的 `[INBOX]` 条目并提交到 Workbench Inbox。
 
-- 分页读取最近 N 篇笔记，所有 note ID 按字符串处理；
-- 额外读取 Workbench 仍未完成 GetNote Todo / Inbox 对应的旧 `sourceNoteId`；
-- 两组笔记按 note ID 去重后逐篇执行 `fetchTodos` / `getnote note todos`；
-- 只读取 `meeting_todos.source` 和 `meeting_todos.items`；
-- 上游没有明确待办章节时接受空列表，不使用模型猜测；
-- 当前官方 GetNote CLI v1.5.2 的 `meeting_todos.items[]` 只有 `text + completed`，没有 per-todo 稳定 ID；
-- 当前身份固定为历史兼容 `noteId + 规范化文本 + 同文序号` 的 `text_fingerprint`；未文档化 `id` 字段不会改变身份语义；
-- 相对日期锚点固定为 `createdAt → updatedAt → 当前日期 fallback`；
-- 显式携带 IANA 时区，默认 `Asia/Shanghai`；
-- 对“下周”“稍后”“尽快”等模糊表达返回无日期；
-- 设置不能提供任意 shell、二进制路径、命令模板或凭证。
+同步本身不：
 
-### `src/external-task-reconcile.mjs`
+- 创建 Today；
+- 自动创建项目；
+- 自动执行 AI 建议。
 
-负责来源身份和 Workbench 本地状态对账：
+### AI scoped review
 
-- 文案变化会改变原始 fingerprint；去掉精确匹配后，仅在同 note 恰好一旧一新的无歧义场景继承旧 Workbench 实体；
-- 同一 note 多项同时变化时不做语义猜测或批量自动合并；
-- 已存在 Todo 更新时保留用户拥有的 `projectId / priority / priorityLabel / tags / createdAt`；
-- Todo 与 Inbox 因来源日期出现/消失互相迁移时保留 Workbench 实体 ID 和上述本地字段；
-- 已经由用户选入 Today 的 Todo，即使来源日期后来消失，也保留 Todo 与 Today 选择，并以 `sourceDueDate=null` 表示来源计划已撤回；
-- 用户手工修改过本地截止日期后，以 `sourceDueDate` 和 `dueDate` 分离来源计划与用户决定，后续来源更新不覆盖本地日期；
-- 只有来源明确 `completed=true` 才标记完成并移出 Today；
-- 某条来源任务本轮没有出现，不据此猜测完成。
+单条自动审阅使用 `view=inbox-review` 和目标 `itemId`。服务端 `src/ai-review-scope.mjs` 在进入模型前做两层收缩：
 
-### `src/task-sync-domain.mjs`
+1. **状态收缩**：只保留目标 Inbox item 和最多 30 个未归档项目的目录摘要；其他 Inbox 原文、Todo、Today、confirmations 均不进入模型输入。
+2. **工具收缩**：模型目录只暴露 `inbox_process`。即使模型或本地 fallback 产生别的 tool，registry 也会降级为 clarification。
 
-一次同步的核心事务边界：
+浏览器 `public/workbench-v3.js` 使用有界自动分析队列：
+
+- 同时最多 2 条；
+- pending queue 最多 100 条；
+- 队列持续补充，不只处理前 N 条；
+- 未变化事项的预览在浏览器 session 内短时复用；
+- item 文本/来源/创建基准变化后缓存失效；
+- 真正执行仍调用 `/api/ai/execute` 且 `confirmed=true`。
+
+## 3. Today / Inbox / 项目现场
+
+v3 只合并用户工作面，不强行合并领域对象：
+
+- `state.inbox` 继续表示待处理事项；
+- `state.todayPlan` 继续表示用户明确选择的今日任务；
+- “今日与收件箱”页面把 Today、Inbox、AI 建议、逾期、待归类和待确认放在同一决策面。
+
+“最近工作现场”和“项目进度”合并为项目现场视图，但项目真实来源、Git 证据和同步事务边界不变。
+
+## 4. 得到大脑内容管线
+
+得到大脑不再作为个人待办主来源。当前交互式能力面只暴露：
 
 ```text
-读取 GetNote（最近 N + 未完成旧 note）
-→ Normalize / Reconcile
-→ Workbench state 原子提交
+getnote_content_status
+getnote_content_sync
 ```
 
-只有以上步骤失败，才算核心同步失败。
-
-Workbench 提交成功后才执行派生输出：
+内容流：
 
 ```text
-Workbench committed
-       │
-       ├─→ 飞书每日任务快照
-       └─→ 私有 ICS 原子重建
+GetNoteReader（read-only）
+→ 最近笔记
+→ 取得真实原文
+→ safeAtomicWrite
+→ <WORKSPACE_ROOT>/<业务序号>_自媒体/得到大脑内容/
 ```
 
-飞书或 ICS 失败时：
+固定安全规则：
 
-- 不回滚 Workbench；
-- 返回各自 sink `status=error`；
-- `lastSyncStatus=ok_with_sink_errors`；
-- 留下不含任务正文的 sink failure 审计事件；
-- 后续可以通过再次显式同步重试。
+- 不接受任意 shell / 二进制 / URL / 文件路径；
+- 输出目录由 Workbench 业务目录派生；
+- symlink / 普通文件检查；
+- 临时文件 + rename 原子替换；
+- 无真实原文字段时 fail closed；
+- 不创建 Todo / Inbox / Today；
+- 不写回 GetNote。
 
-映射规则：
+## 5. Legacy GetNote Task Sync v2
 
-- 有明确日期的未完成 item → 正式 Todo；
-- 无法确定日期的未完成 item → Inbox；
-- 新建事项不自动加入 Today；
-- 来源同步不替用户排优先级或修改项目归属；
-- `completed=true` → 已有 Todo 完成并退出 Today；
-- 不反向修改得到大脑；
-- 启用新管线时清除旧 `config.dataSource.provider=feishu_doc` 个人收件箱主来源。
-
-### 错误来源迁移
-
-若历史配置包含 `provider=dida_cli` 或 `cliFlavor`，规范化层会将集成停用并标记为需要重新配置。用户明确保存得到大脑配置后，领域层只移除 `source=dida_cli` 的机器导入 Todo 和 Inbox，不触碰手工、Capture、项目或其他来源数据。
-
-## 3. 飞书每日工作日记 sink
-
-### `src/feishu-daily-journal.mjs`
-
-飞书日记是**可选派生 sink**，不是启用 GetNote Task Sync 的前置条件。未配置 URL 时，核心同步仍可成功，返回 `journal.status=not_configured`。
-
-固定章节：
+以下模块保留用于历史数据兼容、迁移和回归，但不再注册进交互式 AI/MCP registry：
 
 ```text
-每日工作日记
+src/task-cli.mjs
+src/external-task-reconcile.mjs
+src/external-task-decisions.mjs
+src/task-sync-domain.mjs
+src/mcp/external-task-tools.mjs
 ```
 
-固定记录：
+旧链路仍存在已知 backlog（完成态翻回、snowflake JSON Number 精度、逐 note 串行 fetch、tombstone 容量等）。这些问题不重新定义 v3 的个人事项主入口。
+
+## 6. 项目记录
+
+本地项目文件夹是真实成果源，Git 提供版本证据。
+
+`PROJECT.md` 只保存项目身份证和叙事真源声明，不保存阶段总结或复盘正文。长期项目叙事统一写入飞书项目文档固定章节：
 
 ```text
-[WORKBENCH_DAILY_TODOS]
-[WORKBENCH_DAILY_SUMMARY]
-[WORKBENCH_OP:<operationId>]
+项目分析与总结
 ```
 
-流程：
+项目同步采用：
 
 ```text
-fetch
-→ operationId 查重
-→ block_insert_after
-→ fetch readback
-→ 唯一 operationId / block 校验
+读取本地文件 / Git 证据
+→ 分析
+→ 飞书写入 + operationId 读回
+→ Workbench 机器状态提交
 ```
 
-- 同 ID + 同正文安全重放；
-- 同 ID + 不同正文返回冲突；
-- `lark-cli` 可能把同一段落内部换行在读回时折叠，正文比较只把这种换行边界视为等价；普通空格和其他正文差异仍保留，因此真实不同正文继续 fail closed；
-- 写后读回正文必须在上述规范化后等价；
-- 任务快照和每日总结正文只保存飞书，不进入本地 activity；
-- 每日总结只能由用户明确触发；
-- 每日总结要求已经配置飞书日记 URL，但这不影响 GetNote → Workbench 核心同步。
+## 7. Joycrew / Harness
 
-`src/feishu.mjs` 中旧的“飞书收件箱来源 client”仅作为历史 REST/Capture 兼容实现保留，不再进入 AI/MCP 个人待办白名单。项目记录 client 继续承担项目分析与总结。
+Workbench 是浏览器统一入口。Joycrew 提供企业业务执行面，Workbench 通过受控客户端访问。
 
-## 4. 本机日历
-
-### `src/local-calendar.mjs`
-
-固定文件：
+Joycrew 写操作：
 
 ```text
-<data-dir>/calendar/personal-ai-workbench.ics
+Prepare → Preview → 用户确认 → Execute → Readback
 ```
 
-- 目录 `0700`，文件 `0600`；
-- 临时文件 + 原子 rename；
-- 失败清理临时文件；
-- UID 由稳定外部待办 ID 的 SHA-256 派生；
-- 未完成 + dueDate 才进入日历；
-- 全天事项使用 `VALUE=DATE`；
-- 无 offset 的明确本地时刻使用任务 `TZID`，不依赖 VPS 系统时区；
-- 已带 offset 的时刻可规范化为 UTC；
-- 只有明确截止时刻时生成只含 `DTSTART` 的瞬时事件，不猜持续时间；
-- 不猜测日期、时长或优先级；
-- 完成任务在下一次完整重写时退出日历；
-- DESCRIPTION 保留来源笔记 ID、标题、链接和时区。
+Joycrew 连接使用受限网络分区与认证配置；浏览器不接触上游 token、任意 URL 或服务端路径。
 
-ICS 是可重建镜像，不属于 backup 真源，也不代表系统日历客户端已经导入成功。ICS 写失败不回滚 Workbench 任务提交。
+核心 `/api/health` 是 Workbench readiness，不应同步等待远程 Joycrew probe。Joycrew 实时连通性走独立 `/api/joycrew/status`，避免上游超时拖慢个人工作台 readiness。
 
-## 5. HTTP 服务与前端
+## 8. macOS LaunchAgent
 
-### `src/server.mjs`
+正式常驻由 `scripts/macos-launch-agent.mjs` 管理。
 
-- Node HTTP 与静态资源；
-- Host / Origin / Content-Type 边界；
-- Cookie 登录、Capture Bearer token、限流；
-- REST、AI plan/execute 和 MCP-compatible JSON-RPC；
-- API 错误脱敏。
-
-外部待办主路径通过 MCP 工具调用，不新增任意 shell REST 接口。
-
-### `public/getnote-integration.js`
-
-- 在设置页展示最近笔记扫描数量、任务 IANA 时区、可选飞书工作日记 URL、ICS 开关与名称；
-- 接管旧“同步飞书”按钮，显示“同步得到大脑待办”；
-- 状态区分别展示核心同步、飞书 sink 和 ICS sink；
-- 提供“沉淀今日总结”；未配置飞书日记时只阻止该动作，不阻止任务同步；
-- 用户点击是写操作确认；
-- 对历史错误来源配置显示“需要重新配置”，不把它误显示为已启用；
-- 不把任务或日记正文写入 `localStorage`、`sessionStorage` 或 IndexedDB。
-
-### `public/getnote-integration.css`
-
-只提供集成设置、来源状态和操作回执样式，不定义业务状态。
-
-## 6. MCP 控制面
-
-### `src/mcp/external-task-tools.mjs`
+安全切换顺序：
 
 ```text
-external_task_integration_read
-external_task_integration_update
-external_tasks_sync
-daily_summary_publish
+P0 gate
+→ 生成 replacement plist
+→ plutil lint
+→ bootout 旧服务
+→ 等端口释放
+→ 原子替换 plist
+→ bootstrap
+→ health + commit 读回
 ```
 
-后三个工具需要确认，写操作共享一把 mutation lease。
+一旦 `bootout` 后进入 cutover，后续任何失败都必须尝试恢复旧服务。恢复旧版本 health 时只要求 `ok=true`，不能拿新版本号要求去否定旧版本恢复成功。若原操作和恢复都失败，必须同时报告两组错误。
 
-### `src/mcp/registry.mjs`
+`restart` 虽不改 plist，也必须在失败时恢复此前已 loaded 的服务。
 
-- 合并工作台、项目记录和外部任务工具；
-- 本地 schema 校验；
-- 写工具确认门；
-- 规划后和执行后重新读取状态；
-- 旧 `feishu_inbox_sync` 从工具列表移除；
-- “同步得到大脑待办”“从 Get笔记 拉取待办”“沉淀今日总结”由确定性 planner 安全映射；
-- Provider 失败时回退本地 planner。
+## 9. 数据、Capture、备份与恢复
 
-## 7. 项目领域
+`POST /api/capture` 使用稳定 `captureId` 做幂等，同一次采集的网络重试必须复用同一个 `captureId`。
 
-### `src/domain.mjs`
-
-唯一项目生产领域入口：
-
-- identity-only 项目创建和归类；
-- 项目基准、飞书链接、完成和归档；
-- 项目证据扫描和主动同步；
-- 项目飞书记录读取与阶段总结；
-- 机器进度和飞书指针提交；
-- stale、busy 和跨资源部分提交错误。
-
-### 项目数据边界
-
-`PROJECT.md` 只保存项目身份和入口。
-
-本地机器进度只允许：
-
-```text
-percent
-status
-hasBlocker
-lastActivity
-syncedAt
-confidence
-feishuRevisionId
-feishuRecordBlockId
-feishuRecordedAt
-feishuOperationId
-```
-
-项目分析、卡点、恢复摘要、阶段总结和复盘正文只保存到绑定的飞书项目文档。
-
-## 8. Capture
-
-### `src/capture-contract.mjs`
-
-每条采集使用 `captureId`：
-
-- 同 ID + 同正文安全重放；
-- 同 ID + 不同正文返回 `CAPTURE_ID_CONFLICT`；
-- 可靠网络重试复用同一个 ID。
-
-### `src/capture-domain.mjs`
-
-```text
-验证 captureId / 计算正文哈希
-→ 查询本地收据
-→ 可选兼容飞书 marker 查重/写入
-→ 提交 Workbench 收件箱
-→ 写哈希收据
-```
-
-Capture 是独立快速采集入口，不是得到大脑主来源，不自动成为正式待办或加入今日。
-
-## 9. Store、backup v2 和恢复
-
-### `src/store.mjs`
-
-- `state.json` / `config.json` 原子写入；
-- 私有目录和文件权限；
-- 写队列、每日备份、手工备份、恢复和回滚；
-- Capture 幂等收据和项目飞书恢复凭据；
-- backup v2 与旧备份兼容。
-
-### `src/receipt-backup.mjs`
-
-backup v2：
+backup v2 继续包含：
 
 ```json
 {
@@ -319,46 +173,23 @@ backup v2：
 }
 ```
 
-- `captureReceipts`：Capture ID、正文 SHA-256、Inbox ID、飞书 block ID 和时间；
-- `projectRecordReceipts`：operationId、项目 ID、飞书指针、机器进度和事务阶段；
-- 不接受 Capture 正文、项目分析正文或任意未知字段；
-- ICS 不进入备份真源。
+- `captureReceipts` 只保存 Capture 标识、正文 hash 和处理引用；
+- `projectRecordReceipts` 只保存 operationId、机器进度和飞书指针；
+- 项目正文、飞书正文、凭证、GetNote 登录态和 Joycrew token 不属于备份内容；
+- `data/p0/` 是运行时安装/备份目录，必须保持 Git ignored；
+- 恢复任一阶段失败必须尝试整体回滚，不能留下部分恢复状态。
 
-旧备份没有 `captureReceipts` 或 `projectRecordReceipts` 字段时，保留当前凭据目录。
+## 10. 部署与门禁
 
-恢复使用 staging/rename 成组替换。**恢复任一阶段失败时，恢复器尝试回滚所有已经修改的 state、config 和凭据目录。**
+当前产品版本：**3.0.0**。
 
-## 10. doctor
+CI 最新 HEAD 必须真实执行：
 
-`scripts/doctor.mjs` 检查：
+1. runtime syntax checks；
+2. Workbench contract tests；
+3. Harness E2E；
+4. Docker smoke。
 
-- Node、Git；
-- 数据目录、工作区和业务板块；
-- 得到大脑外部任务管线配置；
-- `GETNOTE_RUNTIME_MODE=local_cli` 时运行 `getnote doctor -o json`；
-- `GETNOTE_RUNTIME_MODE=private_http` 时通过统一 Reader 对 sidecar 做只读鉴权/连通性检查，不要求 Workbench 容器内存在 getnote CLI；
-- 只有配置飞书每日工作日记 sink 时才要求 `lark-cli`；
-- ICS 路径；
-- AI 配置与访问密码。
+Docker smoke 直接校验 `health.version === 3.0.0`、v3 前端资产、当前 MCP 工具面和 Joycrew fail-isolation。
 
-外部管线启用后，GetNote 读取运行时不可用使 doctor 失败；飞书未配置时缺少 `lark-cli` 不影响核心同步 readiness。doctor 不执行得到大脑写入、飞书写入或系统日历导入。
-
-## 11. 测试边界
-
-合同测试使用 fake CLI / fake GetNote Runtime、fake Feishu client、fake Provider 和临时数据目录，覆盖：
-
-- 固定 `getnote` 命令、Reader transport 边界、分页和字符串 note ID；
-- 最近 N 篇 + 未完成旧 note 追踪；
-- `meeting_todos.source/items` 与空待办列表；
-- 当前 `text + completed` schema、`text_fingerprint` 身份、未文档化 `id` 不改变语义，以及同 note 一对一文案继承；
-- `createdAt` 相对日期锚点与显式 IANA 时区；
-- Todo/Inbox 跨状态时的 Workbench 实体 ID、项目、优先级、tags 和 Today 所有权；
-- Workbench-first 事务顺序与飞书/ICS sink fail-isolation；
-- 飞书 operationId 重放/冲突和段落换行折叠读回兼容；
-- ICS 全天、TZID 定时、瞬时事件、权限和原子写；
-- MCP 确认门和旧工具退休；
-- browser 静态合同；
-- doctor 的 local_cli / private_http 与可选飞书依赖；
-- 项目、Capture、backup v2 和恢复原有合同。
-
-测试不等同于 live 得到大脑、飞书、系统日历、OpenAI、浏览器、iPhone 或生产部署验证。
+当前 GitHub `main` 是否启用 branch protection / required checks 属于仓库托管层配置，应与上述 CI 门禁同时开启；仅靠团队流程约定不能视为强制保护。
