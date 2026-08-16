@@ -106,6 +106,7 @@ export async function planDiaryReviewAI({state={},route={},env=process.env,fetch
       '待办 text 必须是简洁、独立、可执行的动作，忠实于原文。可以删掉背景铺垫，但不能发明对象、范围、数量、日期、交付物或结论。',
       '“建议/结论/价值/原则/复盘/感受/已经完成/今天发生了什么”本身不是待办。只有泛泛的“以后注意”“要重视”“记住这一点”而没有具体可执行动作时，也不要提取。',
       '明确出现补完、跟进、联系、确认、准备、提交、发送、拍摄、修改、整理、采购、发布、选择后执行等下一步行动时，可以提取。一个段落有两个独立动作就输出两个候选。',
+      '否定表达不是待办，例如“不要发布”“不是再整理”“无需跟进”“不用修改”。不得把否定动作反向提取成正向任务。',
       'checkbox 或明确 [INBOX] 只是强提示，不代表整段都要进入待办；仍然只提取实际动作。',
       'dueDate 只有原文明示了可可靠转换为 YYYY-MM-DD 的截止日期时才填写，否则必须为 null；绝不能猜日期。',
       'targetProjectId 只有原文与一个现有项目能够唯一、明确对应时才填写，否则必须为 null；绝不能新建项目。',
@@ -124,8 +125,10 @@ function localActionSentences(text){
   const source=stripDiaryPrefix(text);
   const parts=source.split(/[。！？!?；;\n]+/).map(part=>part.trim()).filter(Boolean);
   const action=/待办|记得|需要(?:去|做|补|改|跟|联|确|准|提|发|拍|整|采|更|处)|要(?:去|做|补|改|跟|联|确|准|提|发|拍|整|采|更|处)|补完|补充|跟进|联系|确认|准备|提交|发送|拍摄|再拍|修改|整理|采购|发布|更新|处理|完成|选一个|试\s*\d+个/i;
+  const actionVerb='(?:补完|补充|跟进|联系|确认|准备|提交|发送|拍摄|再拍|修改|整理|采购|发布|更新|处理|完成|去做|做|补|改|跟|联|确|准|提|发|拍|整|采|更|处)';
+  const negatedAction=new RegExp(`(?:不是(?:再)?|不要|不需要|不用|无需|别|不能|禁止)[^，。！？；;]{0,12}${actionVerb}`,'i');
   const vague=/^(?:以后|后续)?(?:要|需要)?(?:注意|重视|记住|提醒自己)(?:这|那|这一|这一点|一下)?$/;
-  return parts.filter(part=>action.test(part)&&!vague.test(part)).slice(0,3);
+  return parts.filter(part=>action.test(part)&&!negatedAction.test(part)&&!vague.test(part)).slice(0,3);
 }
 
 export function localDiaryReviewPlan({state={},route={}}={}){
@@ -135,7 +138,7 @@ export function localDiaryReviewPlan({state={},route={}}={}){
   const sentences=localActionSentences(item.text);
   const candidates=sentences.map(text=>{
     const matched=projects.filter(project=>project.name&&text.includes(project.name));
-    return{text,dueDate:null,targetProjectId:matched.length===1?matched[0].id:null,confidence:.55,reason:'本地回退检测到明确行动表达；未推测截止日期。'};
+    return{text,dueDate:null,targetProjectId:matched.length===1?matched[0].id:null,confidence:.55,reason:'本地回退检测到明确且未被否定的行动表达；未推测截止日期。'};
   });
   return extractionPlan({route,candidates,reason:candidates.length?'本地回退从当前日记段落中提取明确行动。':'本地回退未检测到足够明确的下一步行动。',analysis:[]});
 }
