@@ -22,7 +22,8 @@ export class HarnessRuntime{
     if(context.agentId){
       const agent=this.registry.getAgent(context.agentId);
       if(!agent)throw new Error(`unknown agent: ${context.agentId}`);
-      if(agent.allowedTools.length&&!agent.allowedTools.includes(toolName))throw new Error(`tool not allowed for agent ${agent.id}: ${toolName}`);
+      const allowed=agent.toolAccess==='all'||(agent.toolAccess==='allowlist'&&agent.allowedTools.includes(toolName));
+      if(!allowed)throw new Error(`tool not allowed for agent ${agent.id}: ${toolName}`);
     }
     if(tool.validateInput&&!tool.validateInput(input))throw new TypeError(`invalid input for tool: ${toolName}`);
     const authorization=this.approval.authorize(tool,{approved:context.approved===true,explicit:context.explicit===true});
