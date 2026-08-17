@@ -4,13 +4,18 @@ function brokerError(message,code,statusCode){
 
 export class ToolBroker{
   #registry;
+  #executionRecorder;
   #invokers=new Map();
 
-  constructor({registry}={}){
+  constructor({registry,executionRecorder=null}={}){
     if(!registry||typeof registry.getTool!=='function'||typeof registry.getProvider!=='function'){
       throw new TypeError('ToolBroker requires a CapabilityRegistry');
     }
+    if(executionRecorder!==null&&typeof executionRecorder?.run!=='function'){
+      throw new TypeError('ToolBroker executionRecorder must expose run()');
+    }
     this.#registry=registry;
+    this.#executionRecorder=executionRecorder;
   }
 
   registerInvoker({providerId,invoke}={}){
@@ -22,7 +27,7 @@ export class ToolBroker{
     return id;
   }
 
-  async call(name,args={},options={}){
+  async call(name,args={},options={},context={}){
     const toolName=String(name??'').trim();
     const tool=this.#registry.getTool(toolName);
     if(!tool)throw brokerError(`未知 MCP 工具：${toolName}`,'MCP_TOOL_NOT_FOUND',404);
@@ -30,6 +35,9 @@ export class ToolBroker{
     if(!invoke){
       throw brokerError(`Harness capability provider unavailable: ${tool.providerId}`,'HARNESS_PROVIDER_UNAVAILABLE',503);
     }
-    return invoke(tool.name,args??{},options??{});
+    const operation=()=>invoke(tool.name,args??{},options??{});
+    if(!this.#executionRecorder)return operation();
+    const recorded=await this.#executionRecorder.run({tool,args:args??{},context:context??{}},operation);
+    return recorded.outcome;
   }
 }

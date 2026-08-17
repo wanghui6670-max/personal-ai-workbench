@@ -59,7 +59,12 @@ export function createHarnessHttp({navigator,mcpRegistry,toolBroker}={}){
         if(typeof params.name!=='string'||!params.name.trim()){
           throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
         }
-        const outcome=await toolBroker.call(params.name,params.arguments||{},toolOptions);
+        const outcome=await toolBroker.call(
+          params.name,
+          params.arguments||{},
+          toolOptions,
+          {trigger:'harness_mcp',actor:'harness-navigator',sessionId:null}
+        );
         sendJson(res,200,jsonRpcResult(id,{
           content:[{type:'text',text:JSON.stringify(outcome.result)}],
           structuredContent:{result:outcome.result,readback:true}
