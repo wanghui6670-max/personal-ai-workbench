@@ -1,4 +1,6 @@
 const LOCAL_EPHEMERAL_TOOLS=new Set([
+  'panel_navigate',
+  'joycrew_workspace_open',
   'joycrew_run_prepare',
   'joycrew_deliverable_prepare',
   'joycrew_approval_prepare'
