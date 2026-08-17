@@ -3,7 +3,7 @@ function legacyRisk(tool){
 }
 
 export function createLegacyMcpProvider({mcpRegistry}={}){
-  if(!mcpRegistry||!Array.isArray(mcpRegistry.tools)||typeof mcpRegistry.call!=='function'){
+  if(!mcpRegistry||!Array.isArray(mcpRegistry.tools)){
     throw new TypeError('createLegacyMcpProvider requires the existing Workbench v3 MCP registry');
   }
 
@@ -24,12 +24,11 @@ export function createLegacyMcpProvider({mcpRegistry}={}){
     capabilities:[{
       id:capabilityId,
       name:'Workbench v3 MCP compatibility surface',
-      description:'Temporary compatibility capability exposing existing Workbench v3 MCP tools without changing their names or behavior.',
+      description:'Temporary compatibility capability exposing existing Workbench v3 MCP tool metadata without changing tool names or behavior.',
       toolNames:tools.map(tool=>tool.name),
       metadata:{migrationOnly:true,source:'src/mcp/registry.mjs'}
     }],
     tools,
-    call:(name,args={},options={})=>mcpRegistry.call(name,args,options),
     metadata:{migrationOnly:true}
   };
 }
