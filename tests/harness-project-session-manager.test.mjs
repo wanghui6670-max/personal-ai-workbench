@@ -30,7 +30,7 @@ async function fixture(t){
   return{state,sessionStore,manager};
 }
 
-test('opening the same project resumes one stable Session and refreshes only Authority refs/cursors',async t=>{
+test('opening the same project resumes one stable Session without advancing its checkpoint cursor',async t=>{
   const f=await fixture(t);
   const first=await f.manager.openProject('prj_1');
   assert.equal(first.id,'project:prj_1');
@@ -61,11 +61,19 @@ test('opening the same project resumes one stable Session and refreshes only Aut
   const second=await f.manager.openProject('prj_1');
   assert.equal(second.id,first.id);
   assert.equal(second.createdAt,first.createdAt);
-  assert.equal(second.cursor.lastActivity,'2026-08-17T12:00:00.000Z');
-  assert.equal(second.cursor.feishuRevisionId,'rev-2');
+  assert.equal(second.cursor.lastActivity,'2026-08-17T10:00:00.000Z');
+  assert.equal(second.cursor.feishuRevisionId,'rev-1');
+
+  const checkpointed=await f.manager.checkpoint(second.id,{
+    lastActivity:'2026-08-17T12:00:00.000Z',
+    feishuRevisionId:'rev-2'
+  });
+  assert.equal(checkpointed.cursor.lastActivity,'2026-08-17T12:00:00.000Z');
+  assert.equal(checkpointed.cursor.feishuRevisionId,'rev-2');
+  assert.equal(checkpointed.cursor.syncedAt,'2026-08-17T10:05:00.000Z');
 });
 
-test('Project Session preserves Execution refs while refreshing current Authority cursors',async t=>{
+test('Project Session preserves Execution refs and checkpoint cursor across ordinary opens',async t=>{
   const f=await fixture(t);
   const opened=await f.manager.openProject('prj_1');
   await f.manager.attachExecution(opened.id,'ex_1');
@@ -75,7 +83,10 @@ test('Project Session preserves Execution refs while refreshing current Authorit
 
   const resumed=await f.manager.openProject('prj_1');
   assert.deepEqual(resumed.executionRefs,['ex_1','ex_2']);
-  assert.equal(resumed.cursor.syncedAt,'2026-08-17T12:30:00.000Z');
+  assert.equal(resumed.cursor.syncedAt,'2026-08-17T10:05:00.000Z');
+
+  const checkpointed=await f.manager.checkpoint(resumed.id,{syncedAt:'2026-08-17T12:30:00.000Z'});
+  assert.equal(checkpointed.cursor.syncedAt,'2026-08-17T12:30:00.000Z');
 });
 
 test('Project Session only advertises the Feishu Authority when a valid project binding exists',async t=>{
