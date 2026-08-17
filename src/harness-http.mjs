@@ -18,7 +18,7 @@ function methodNotAllowed(res,allowed){
   return sendJson(res,405,{error:'Method not allowed'},{Allow:allowed});
 }
 
-export function createHarnessHttp({navigator,mcpRegistry}={}){
+export function createHarnessHttp({navigator,mcpRegistry,toolBroker=null,driver=null}={}){
   if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
   // The exposed tools either read external state or create an expiring local
   // preview. Actual Workbench/Joycrew mutations are not callable here.
@@ -52,14 +52,17 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
         return true;
       }
       if(body.method==='tools/list'){
-        sendJson(res,200,jsonRpcResult(id,{tools:mcpRegistry.list(toolOptions)}));
+        const tools=toolBroker?toolBroker.list(toolOptions):mcpRegistry.list(toolOptions);
+        sendJson(res,200,jsonRpcResult(id,{tools}));
         return true;
       }
       if(body.method==='tools/call'){
         if(typeof params.name!=='string'||!params.name.trim()){
           throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
         }
-        const outcome=await mcpRegistry.call(params.name,params.arguments||{},toolOptions);
+        const outcome=toolBroker
+          ?await toolBroker.call({name:params.name,arguments:params.arguments||{},options:toolOptions,trigger:'harness-http'})
+          :await mcpRegistry.call(params.name,params.arguments||{},toolOptions);
         sendJson(res,200,jsonRpcResult(id,{
           content:[{type:'text',text:JSON.stringify(outcome.result)}],
           structuredContent:{result:outcome.result,readback:true}
@@ -83,11 +86,10 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
       if(req.method!=='POST'){methodNotAllowed(res,'POST');return true;}
       const body=await requestBody(req,requestSchemas.harnessNavigator);
       if(typeof rateLimit==='function'&&rateLimit())return true;
-      const result=await navigator.run({
-        message:body.message,
-        sessionId:body.sessionId??null,
-        route:{view:body.view||'today',id:body.id??null}
-      });
+      const route={view:body.view||'today',id:body.id??null};
+      const result=driver
+        ?await driver.run({message:body.message,sessionId:body.sessionId??null,route})
+        :await navigator.run({message:body.message,sessionId:body.sessionId??null,route});
       sendJson(res,200,{ok:true,navigator:result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;
     }

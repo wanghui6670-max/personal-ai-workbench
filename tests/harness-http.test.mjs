@@ -78,3 +78,65 @@ test('user endpoint returns only the bounded Navigator result contract',async t=
   assert.equal(body.navigator.reply,'seen:查看项目');
   assert.equal(body.navigator.readOnly,true);
 });
+
+test('tools/call uses toolBroker when provided and keeps confirmation mapping',async t=>{
+  const token='h'.repeat(43);
+  const calls=[];
+  const navigator={bridgeToken:token,status:()=>({enabled:true,available:true,state:'ready'}),run:async()=>({sessionId:'s1',reply:'ok',trajectory:[],navigation:null,readOnly:true})};
+  const mcpRegistry={
+    list:()=>[],
+    call:async()=>{throw new Error('mcpRegistry.call must not be used when toolBroker is provided');}
+  };
+  const toolBroker={
+    list(options){calls.push({kind:'list',options});return[{name:'project_list'}];},
+    async call(input){
+      calls.push({kind:'call',input});
+      if(input.name==='needs_confirm'){
+        throw Object.assign(new Error('需确认'),{code:'MCP_CONFIRMATION_REQUIRED'});
+      }
+      return {result:[{id:'p1'}]};
+    }
+  };
+  const handlers=createHarnessHttp({navigator,mcpRegistry,toolBroker});
+  const server=http.createServer(async(req,res)=>{
+    const pathname=new URL(req.url,'http://localhost').pathname;
+    if(await handlers.handleBridge(req,res,pathname))return;
+    res.writeHead(404);res.end();
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const ok=await rpc(base,token,'tools/call',{name:'project_list',arguments:{}});
+  assert.equal(ok.body.result.structuredContent.readback,true);
+  assert.equal(calls[0].kind,'call');
+  const denied=await rpc(base,token,'tools/call',{name:'needs_confirm',arguments:{}});
+  assert.equal(denied.body.error.code,-32001);
+});
+
+test('navigator endpoint uses driver when provided',async t=>{
+  const token='h'.repeat(43);
+  const navigator={
+    bridgeToken:token,
+    status:()=>({enabled:true,available:true,state:'ready'}),
+    run:async()=>{throw new Error('navigator.run must not be used when driver is provided');}
+  };
+  const driver={
+    async run(input){return {sessionId:'drv',reply:`drv:${input.message}`,trajectory:[],navigation:null,readOnly:true,working:{authority:'live',project:{id:input.route.id}}};}
+  };
+  const handlers=createHarnessHttp({navigator,mcpRegistry:{list:()=>[],call:async()=>({result:{}})},driver});
+  const server=http.createServer(async(req,res)=>{
+    const pathname=new URL(req.url,'http://localhost').pathname;
+    if(await handlers.handleUser(req,res,pathname,{rateLimit:()=>false}))return;
+    res.writeHead(404);res.end();
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const response=await fetch(`${base}/api/harness/navigator`,{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({message:'继续',view:'project',id:'prj-1'})
+  });
+  const body=await response.json();
+  assert.equal(body.navigator.reply,'drv:继续');
+  assert.equal(body.navigator.working.project.id,'prj-1');
+});

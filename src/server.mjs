@@ -21,6 +21,8 @@ import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/regi
 import { createHarnessNavigator, resolveHarnessWebUrl } from './harness-navigator.mjs';
 import { createHarnessHttp } from './harness-http.mjs';
 import { harnessBridgeBaseUrl } from './harness-auth.mjs';
+import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from './harness-policy.mjs';
+import { createCapabilityRegistry, createLegacyMcpProvider, createToolBroker, createExecutionStore, createExecutionService, createHarnessPolicy, createSessionStore, createSessionManager, createDshRuntimeAdapter, createContextAwareDriver } from './harness-core/index.mjs';
 import { createJoycrewClient, JoycrewClientError } from './joycrew-client.mjs';
 import { createJoycrewActionBroker } from './joycrew-actions.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from './product.mjs';
@@ -82,7 +84,33 @@ const joycrewClient=createJoycrewClient({env:process.env});
 const joycrewActions=createJoycrewActionBroker({client:joycrewClient});
 const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store,joycrewClient,joycrewActions});
 const harnessNavigator=createHarnessNavigator({appRoot:APP_ROOT,bridgeUrl:harnessBridgeBaseUrl(host,port),env:process.env});
-const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry});
+const capabilityRegistry=createCapabilityRegistry();
+capabilityRegistry.registerProvider(createLegacyMcpProvider({
+  id:'legacy-mcp',
+  mcpRegistry,
+  capabilities:[{id:'harness.navigator',toolNames:[...HARNESS_NAVIGATOR_TOOL_ALLOWLIST]}]
+}));
+const executionStore=createExecutionStore({file:path.join(DATA_DIR,'harness/executions.json')});
+await executionStore.load();
+const execution=createExecutionService({store:executionStore});
+const toolBroker=createToolBroker({registry:capabilityRegistry,policy:createHarnessPolicy(),execution});
+const sessionStore=createSessionStore({file:path.join(DATA_DIR,'harness/sessions.json')});
+await sessionStore.load();
+const sessionManager=createSessionManager({
+  store:sessionStore,
+  projectLookup:async projectId=>{
+    const state=await store.readState();
+    return (state.projects||[]).find(item=>item.id===projectId)||null;
+  },
+  execution,
+  authorities:{
+    async readGit(project){return {head:null,remote:project.git||''};},
+    async readFeishu(project){return {documentUrl:project.feishu||''};}
+  }
+});
+const runtime=createDshRuntimeAdapter({navigator:harnessNavigator});
+const driver=createContextAwareDriver({sessionManager,runtime});
+const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry,toolBroker,driver});
 const aiPlans=new Map();
 const AI_PLAN_TTL_MS=10*60*1000;
 function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
