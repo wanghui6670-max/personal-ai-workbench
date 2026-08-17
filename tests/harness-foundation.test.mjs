@@ -62,3 +62,23 @@ test('daily scheduler computes the next run deterministically',()=>{
   const from=new Date('2026-08-17T07:30:00');
   assert.equal(nextRunAt({type:'daily',time:'08:00',enabled:true},from).toISOString(),'2026-08-17T08:00:00.000Z');
 });
+
+test('Workbench v3 registry adapter preserves read/write boundaries while moving ownership to Harness',async()=>{
+  const calls=[];
+  const legacyRegistry={
+    tools:[
+      {name:'legacy.read',description:'read',readOnly:true,requiresConfirmation:false,inputSchema:{}},
+      {name:'legacy.write',description:'write',readOnly:false,requiresConfirmation:true,inputSchema:{}}
+    ],
+    async call(name,args,options){calls.push({name,args,options});return {result:{name,confirmed:options.confirmed}};}
+  };
+  const {createWorkbenchV3RegistryPack}=await import('../platform/adapters/workbench-v3-registry-pack.mjs');
+  const runtime=new HarnessRuntime();
+  runtime.install(createWorkbenchV3RegistryPack({mcpRegistry:legacyRegistry}));
+  assert.equal((await runtime.invoke('legacy.read',{q:1})).ok,true);
+  assert.deepEqual(await runtime.invoke('legacy.write',{q:2}),{ok:false,status:'approval_required',approval:'confirm',risk:'external_write'});
+  const written=await runtime.invoke('legacy.write',{q:2},{approved:true});
+  assert.equal(written.ok,true);
+  assert.equal(written.result.confirmed,true);
+  assert.deepEqual(calls.map(call=>call.name),['legacy.read','legacy.write']);
+});
