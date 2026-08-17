@@ -59,7 +59,7 @@ export class ProjectSessionManager{
     const sessionId=`project:${project.id}`;
     const now=String(this.clock());
     const refs=authorityRefs(project);
-    const cursor=projectCursor(project);
+    const initialCursor=projectCursor(project);
     return this.sessionStore.upsert(sessionId,current=>{
       if(current&&current.projectId!==project.id){
         throw projectSessionError('Project Session 与当前项目身份冲突。','PROJECT_SESSION_IDENTITY_CONFLICT',409);
@@ -67,7 +67,6 @@ export class ProjectSessionManager{
       return current?{
         ...current,
         authorityRefs:refs,
-        cursor,
         updatedAt:now
       }:{
         version:1,
@@ -76,12 +75,26 @@ export class ProjectSessionManager{
         projectId:project.id,
         status:'open',
         authorityRefs:refs,
-        cursor,
+        cursor:initialCursor,
         executionRefs:[],
         createdAt:now,
         updatedAt:now
       };
     });
+  }
+
+  async checkpoint(sessionId,cursorPatch={}){
+    const sid=String(sessionId??'').trim();
+    if(!sid)throw projectSessionError('sessionId 不能为空。','PROJECT_SESSION_REF_INVALID');
+    if(!cursorPatch||typeof cursorPatch!=='object'||Array.isArray(cursorPatch)){
+      throw projectSessionError('cursorPatch 必须是对象。','PROJECT_SESSION_CURSOR_INVALID');
+    }
+    const now=String(this.clock());
+    return this.sessionStore.update(sid,current=>({
+      ...current,
+      cursor:{...current.cursor,...cursorPatch},
+      updatedAt:now
+    }));
   }
 
   async attachExecution(sessionId,executionId){
