@@ -24,6 +24,7 @@ import { harnessBridgeBaseUrl } from './harness-auth.mjs';
 import { CapabilityRegistry } from './harness-core/capability-registry.mjs';
 import { createLegacyMcpProvider } from './harness-core/legacy-mcp-provider.mjs';
 import { ToolBroker } from './harness-core/tool-broker.mjs';
+import { ToolPolicy } from './harness-core/tool-policy.mjs';
 import { createLegacyMcpInvoker } from './harness-core/legacy-mcp-invoker.mjs';
 import { ExecutionReceiptStore } from './harness-core/execution-receipt-store.mjs';
 import { ExecutionRecorder } from './harness-core/execution-recorder.mjs';
@@ -92,7 +93,8 @@ harnessCapabilityRegistry.registerProvider(createLegacyMcpProvider({mcpRegistry}
 const harnessExecutionStore=new ExecutionReceiptStore({dataDir:DATA_DIR});
 await harnessExecutionStore.ensure();
 const harnessExecutionRecorder=new ExecutionRecorder({store:harnessExecutionStore});
-const harnessToolBroker=new ToolBroker({registry:harnessCapabilityRegistry,executionRecorder:harnessExecutionRecorder});
+const harnessToolPolicy=new ToolPolicy({mode:'shadow'});
+const harnessToolBroker=new ToolBroker({registry:harnessCapabilityRegistry,executionRecorder:harnessExecutionRecorder,policy:harnessToolPolicy});
 harnessToolBroker.registerInvoker(createLegacyMcpInvoker({mcpRegistry}));
 const harnessNavigator=createHarnessNavigator({appRoot:APP_ROOT,bridgeUrl:harnessBridgeBaseUrl(host,port),env:process.env});
 const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry,toolBroker:harnessToolBroker});

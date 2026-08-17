@@ -5,17 +5,22 @@ function brokerError(message,code,statusCode){
 export class ToolBroker{
   #registry;
   #executionRecorder;
+  #policy;
   #invokers=new Map();
 
-  constructor({registry,executionRecorder=null}={}){
+  constructor({registry,executionRecorder=null,policy=null}={}){
     if(!registry||typeof registry.getTool!=='function'||typeof registry.getProvider!=='function'){
       throw new TypeError('ToolBroker requires a CapabilityRegistry');
     }
     if(executionRecorder!==null&&typeof executionRecorder?.run!=='function'){
       throw new TypeError('ToolBroker executionRecorder must expose run()');
     }
+    if(policy!==null&&(policy?.mode!=='shadow'||typeof policy?.evaluate!=='function')){
+      throw new TypeError('ToolBroker policy must be a shadow ToolPolicy');
+    }
     this.#registry=registry;
     this.#executionRecorder=executionRecorder;
+    this.#policy=policy;
   }
 
   registerInvoker({providerId,invoke}={}){
@@ -35,6 +40,7 @@ export class ToolBroker{
     if(!invoke){
       throw brokerError(`Harness capability provider unavailable: ${tool.providerId}`,'HARNESS_PROVIDER_UNAVAILABLE',503);
     }
+    if(this.#policy)this.#policy.evaluate({tool,options:options??{},context:context??{}});
     const operation=()=>invoke(tool.name,args??{},options??{});
     if(!this.#executionRecorder)return operation();
     const recorded=await this.#executionRecorder.run({tool,args:args??{},context:context??{}},operation);
