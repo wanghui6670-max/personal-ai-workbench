@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import {once} from 'node:events';
 import {createHarnessHttp} from '../src/harness-http.mjs';
+import {HARNESS_NAVIGATOR_TOOL_ALLOWLIST} from '../src/harness-policy.mjs';
 
 async function rpc(base,token,method,params={}){
   const response=await fetch(`${base}/api/harness/mcp`,{
@@ -43,7 +44,7 @@ test('Harness MCP tools/call uses Tool Broker instead of calling the legacy MCP 
   assert.deepEqual(brokerCalls,[{
     name:'project_list',
     args:{includeArchived:false},
-    options:{readOnlyOnly:true,allowedNames:assert.match.any}
+    options:{readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST}
   }]);
 });
 
