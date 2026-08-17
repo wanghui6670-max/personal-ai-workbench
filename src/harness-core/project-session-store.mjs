@@ -9,11 +9,13 @@ const SESSION_FIELDS=new Set([
   'version','id','type','projectId','status','authorityRefs','cursor','executionRefs','createdAt','updatedAt'
 ]);
 const AUTHORITY_FIELDS=new Set(['authority','kind','refId']);
-const CURSOR_FIELDS=new Set([
+const BASE_CURSOR_FIELDS=Object.freeze([
   'lastActivity','syncedAt','feishuRevisionId','feishuRecordBlockId','feishuRecordedAt','feishuOperationId'
 ]);
+const HYDRATION_CURSOR_FIELDS=Object.freeze(['workspaceLastActivity','gitHead']);
+const CURSOR_FIELDS=new Set([...BASE_CURSOR_FIELDS,...HYDRATION_CURSOR_FIELDS]);
 const AUTHORITIES=new Set(['workbench','local_workspace','git','feishu_project_record']);
-const TIME_CURSOR_FIELDS=new Set(['lastActivity','syncedAt','feishuRecordedAt']);
+const TIME_CURSOR_FIELDS=new Set(['lastActivity','syncedAt','feishuRecordedAt','workspaceLastActivity']);
 
 function sessionError(message,code='PROJECT_SESSION_INVALID'){
   return Object.assign(new Error(message),{code});
@@ -64,10 +66,16 @@ function normalizeAuthorityRefs(value,projectId){
 }
 
 function normalizeCursor(value){
-  rejectExtraFields(value??{},CURSOR_FIELDS,'Project Session cursor');
+  const input=value??{};
+  rejectExtraFields(input,CURSOR_FIELDS,'Project Session cursor');
   const output={};
-  for(const field of CURSOR_FIELDS){
-    output[field]=optionalCursorValue(value?.[field],`cursor.${field}`,{time:TIME_CURSOR_FIELDS.has(field)});
+  for(const field of BASE_CURSOR_FIELDS){
+    output[field]=optionalCursorValue(input[field],`cursor.${field}`,{time:TIME_CURSOR_FIELDS.has(field)});
+  }
+  for(const field of HYDRATION_CURSOR_FIELDS){
+    if(Object.hasOwn(input,field)){
+      output[field]=optionalCursorValue(input[field],`cursor.${field}`,{time:TIME_CURSOR_FIELDS.has(field)});
+    }
   }
   return Object.freeze(output);
 }
