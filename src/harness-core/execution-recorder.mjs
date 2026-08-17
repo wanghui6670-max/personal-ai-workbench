@@ -18,6 +18,11 @@ function completionReceiptFailure(error,executionId){
   });
 }
 
+function argumentCount(args){
+  if(!args||typeof args!=='object'||Array.isArray(args))return 0;
+  return Object.keys(args).length;
+}
+
 export class ExecutionRecorder{
   constructor({store,idFactory=defaultId,clock=defaultClock}={}){
     if(!store||typeof store.writeStart!=='function'||typeof store.writeFinish!=='function'){
@@ -41,7 +46,7 @@ export class ExecutionRecorder{
       toolName:String(tool.name||''),
       capabilityId:String(tool.capabilityId||''),
       providerId:String(tool.providerId||''),
-      argumentKeys:Object.keys(args&&typeof args==='object'&&!Array.isArray(args)?args:{}),
+      argumentCount:argumentCount(args),
       startedAt:String(this.clock())
     };
     await this.store.writeStart(start);
