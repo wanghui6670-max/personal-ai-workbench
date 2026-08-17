@@ -7,6 +7,8 @@ function legacyRegistry(){
   return {
     tools:[
       {name:'project_list',readOnly:true,requiresConfirmation:false,inputSchema:{}},
+      {name:'panel_navigate',readOnly:true,requiresConfirmation:false,inputSchema:{}},
+      {name:'joycrew_workspace_open',readOnly:true,requiresConfirmation:false,inputSchema:{}},
       {name:'joycrew_run_prepare',readOnly:true,requiresConfirmation:false,inputSchema:{}},
       {name:'todo_today',readOnly:false,requiresConfirmation:true,inputSchema:{}},
       {name:'explicit_external_write',readOnly:false,requiresConfirmation:true,effect:'external_write',inputSchema:{}}
@@ -20,6 +22,11 @@ test('legacy readOnly is compatibility metadata, not the authoritative Harness e
 
   assert.equal(registry.getTool('project_list').readOnly,true);
   assert.equal(registry.getTool('project_list').effect,'read');
+
+  assert.equal(registry.getTool('panel_navigate').readOnly,true);
+  assert.equal(registry.getTool('panel_navigate').effect,'local_ephemeral');
+  assert.equal(registry.getTool('joycrew_workspace_open').readOnly,true);
+  assert.equal(registry.getTool('joycrew_workspace_open').effect,'local_ephemeral');
 
   assert.equal(registry.getTool('joycrew_run_prepare').readOnly,true);
   assert.equal(registry.getTool('joycrew_run_prepare').effect,'local_ephemeral');
