@@ -61,7 +61,6 @@ function normalizedProvider(raw){
     id,
     capabilities:Object.freeze(normalizedCapabilities),
     tools:Object.freeze(normalizedTools),
-    call:typeof raw.call==='function'?raw.call:null,
     metadata:Object.freeze({...raw.metadata})
   });
 }
