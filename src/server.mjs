@@ -21,6 +21,10 @@ import { createWorkbenchRegistry, jsonRpcResult, jsonRpcError } from './mcp/regi
 import { createHarnessNavigator, resolveHarnessWebUrl } from './harness-navigator.mjs';
 import { createHarnessHttp } from './harness-http.mjs';
 import { harnessBridgeBaseUrl } from './harness-auth.mjs';
+import { CapabilityRegistry } from './harness-core/capability-registry.mjs';
+import { createLegacyMcpProvider } from './harness-core/legacy-mcp-provider.mjs';
+import { ToolBroker } from './harness-core/tool-broker.mjs';
+import { createLegacyMcpInvoker } from './harness-core/legacy-mcp-invoker.mjs';
 import { createJoycrewClient, JoycrewClientError } from './joycrew-client.mjs';
 import { createJoycrewActionBroker } from './joycrew-actions.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from './product.mjs';
@@ -81,8 +85,12 @@ const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,i
 const joycrewClient=createJoycrewClient({env:process.env});
 const joycrewActions=createJoycrewActionBroker({client:joycrewClient});
 const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store,joycrewClient,joycrewActions});
+const harnessCapabilityRegistry=new CapabilityRegistry();
+harnessCapabilityRegistry.registerProvider(createLegacyMcpProvider({mcpRegistry}));
+const harnessToolBroker=new ToolBroker({registry:harnessCapabilityRegistry});
+harnessToolBroker.registerInvoker(createLegacyMcpInvoker({mcpRegistry}));
 const harnessNavigator=createHarnessNavigator({appRoot:APP_ROOT,bridgeUrl:harnessBridgeBaseUrl(host,port),env:process.env});
-const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry});
+const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry,toolBroker:harnessToolBroker});
 const aiPlans=new Map();
 const AI_PLAN_TTL_MS=10*60*1000;
 function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
