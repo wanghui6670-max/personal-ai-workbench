@@ -11,7 +11,7 @@ test('business composition installs new packs without changing Harness platform 
   const legacyRegistry={tools:[],async call(){throw new Error('not expected');}};
   const aihot=createAihotPack({client:{latest:async()=>({items:['ok']})}});
   const runtime=createHarnessPlatform({mcpRegistry:legacyRegistry,dataDir:root,packs:[aihot]});
-  assert.deepEqual(runtime.describe().packs,['personal-workbench','workbench-v3-bridge','aihot']);
+  assert.deepEqual(runtime.describe().packs,['personal-workbench','engineering-methods','workbench-v3-bridge','aihot']);
   const result=await runtime.invoke('aihot.latest',{}, {agentId:'research-agent'});
   assert.deepEqual(result.result,{items:['ok']});
 });
