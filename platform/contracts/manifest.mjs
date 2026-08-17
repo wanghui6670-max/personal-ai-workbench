@@ -50,6 +50,9 @@ export function validateAgentManifest(agent){
   if(!agent||typeof agent!=='object')throw new TypeError('agent manifest must be an object');
   const id=validateId(agent.id,'agent.id');
   const allowedTools=Array.from(new Set((agent.allowedTools??[]).map(value=>validateId(value,'agent.allowedTools[]'))));
+  const toolAccess=String(agent.toolAccess??(allowedTools.length?'allowlist':'none'));
+  if(!['none','allowlist','all'].includes(toolAccess))throw new TypeError(`unsupported agent toolAccess: ${toolAccess}`);
+  if(toolAccess==='allowlist'&&!allowedTools.length)throw new TypeError('agent toolAccess allowlist requires allowedTools');
   return Object.freeze({
     id,
     name:requiredString(agent.name??id,'agent.name'),
@@ -57,6 +60,7 @@ export function validateAgentManifest(agent){
     modelProfile:String(agent.modelProfile??'default'),
     skills:Object.freeze([...(agent.skills??[])]),
     methods:Object.freeze([...(agent.methods??[])]),
+    toolAccess,
     allowedTools:Object.freeze(allowedTools),
     metadata:Object.freeze({...agent.metadata})
   });
