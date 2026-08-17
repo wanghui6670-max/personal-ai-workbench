@@ -6,7 +6,7 @@ const DIRECTORY_MODE=0o700;
 const FILE_MODE=0o600;
 const SAFE_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const SAFE_CODE=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const START_FIELDS=new Set(['version','id','trigger','actor','sessionId','toolName','capabilityId','providerId','argumentKeys','startedAt']);
+const START_FIELDS=new Set(['version','id','trigger','actor','sessionId','toolName','capabilityId','providerId','argumentCount','startedAt']);
 const FINISH_FIELDS=new Set(['version','id','status','completedAt','errorCode']);
 
 function receiptError(message,code='EXECUTION_RECEIPT_INVALID'){
@@ -31,14 +31,9 @@ function rejectExtraFields(value,allowed){
   if(extra)throw receiptError(`Execution receipt 包含不允许持久化的字段：${extra}`,'EXECUTION_RECEIPT_UNSAFE_FIELD');
 }
 
-function normalizeArgumentKeys(value){
-  if(!Array.isArray(value))throw receiptError('argumentKeys 必须是数组。');
-  if(value.length>64)throw receiptError('argumentKeys 数量超出限制。');
-  return value.map(key=>{
-    const text=String(key??'').trim();
-    if(!text||text.length>128||/[\r\n\0]/.test(text))throw receiptError('argumentKeys 包含无效字段名。');
-    return text;
-  });
+function normalizeArgumentCount(value){
+  if(!Number.isInteger(value)||value<0||value>1024)throw receiptError('argumentCount 必须是 0 到 1024 之间的整数。');
+  return value;
 }
 
 function normalizeStart(value){
@@ -53,7 +48,7 @@ function normalizeStart(value){
     toolName:stableId(value.toolName,'toolName'),
     capabilityId:stableId(value.capabilityId,'capabilityId'),
     providerId:stableId(value.providerId,'providerId'),
-    argumentKeys:Object.freeze(normalizeArgumentKeys(value.argumentKeys)),
+    argumentCount:normalizeArgumentCount(value.argumentCount),
     startedAt:timestamp(value.startedAt,'startedAt')
   });
 }
