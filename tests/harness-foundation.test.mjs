@@ -82,3 +82,20 @@ test('Workbench v3 registry adapter preserves read/write boundaries while moving
   assert.equal(written.result.confirmed,true);
   assert.deepEqual(calls.map(call=>call.name),['legacy.read','legacy.write']);
 });
+
+test('Workbench process can bootstrap the Harness platform beside v3 without replacing legacy routes',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'harness-platform-'));
+  const legacyRegistry={
+    tools:[{name:'workbench_get_state',description:'state',readOnly:true,requiresConfirmation:false,inputSchema:{}}],
+    async call(name){return {result:{name,state:'legacy-v3'}};}
+  };
+  const {createHarnessPlatform,harnessPlatformStatus}=await import('../src/harness-platform.mjs');
+  const runtime=createHarnessPlatform({mcpRegistry:legacyRegistry,dataDir:root});
+  const status=harnessPlatformStatus(runtime);
+  assert.deepEqual(status.packs,['personal-workbench','workbench-v3-bridge']);
+  assert.equal(status.enabled,true);
+  const result=await runtime.invoke('workbench_get_state');
+  assert.deepEqual(result.result,{name:'workbench_get_state',state:'legacy-v3'});
+  const session=await runtime.sessions.create({id:'project:bootstrap-test',scope:'project',goal:'bootstrap'});
+  assert.equal(session.scope,'project');
+});
