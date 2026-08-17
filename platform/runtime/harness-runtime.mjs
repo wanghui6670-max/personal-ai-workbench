@@ -2,10 +2,12 @@ import {CapabilityRegistry} from '../registry/capability-registry.mjs';
 import {ApprovalEngine} from './approval-engine.mjs';
 import {InMemoryEventStore} from '../kernel/event-store.mjs';
 import {Scheduler} from './scheduler.mjs';
+import {AgentRuntime} from './agent-runtime.mjs';
 
 export class HarnessRuntime{
   constructor({registry=new CapabilityRegistry(),approval=new ApprovalEngine(),events=new InMemoryEventStore(),sessions=null}={}){
     this.registry=registry;this.approval=approval;this.events=events;this.sessions=sessions;this.scheduler=new Scheduler({registry});
+    this.agents=new AgentRuntime({registry,events,sessions,invokeTool:(name,input,context)=>this.invoke(name,input,context)});
   }
   install(pack){return this.registry.install(pack);}
   async invoke(toolName,input={},context={}){
@@ -27,6 +29,7 @@ export class HarnessRuntime{
     if(context.sessionId&&this.sessions)await this.sessions.appendEvent(context.sessionId,{type:'tool.completed',toolName,result});
     return {ok:true,result,readback:true};
   }
+  async runAgent(agentId,options={}){return this.agents.run(agentId,options);}
   describe(){
     return Object.freeze({packs:this.registry.listPacks().map(item=>item.id),capabilities:this.registry.listCapabilities().map(item=>item.id),tools:this.registry.listTools().map(item=>item.name),agents:this.registry.listAgents().map(item=>item.id),schedules:this.registry.listSchedules().map(item=>item.id)});
   }

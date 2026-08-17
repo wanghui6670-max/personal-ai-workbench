@@ -4,5 +4,6 @@ export * from './registry/capability-registry.mjs';
 export * from './runtime/approval-engine.mjs';
 export * from './runtime/session-store.mjs';
 export * from './runtime/scheduler.mjs';
+export * from './runtime/agent-runtime.mjs';
 export * from './runtime/harness-runtime.mjs';
 export * from './adapters/workbench-v3-registry-pack.mjs';
