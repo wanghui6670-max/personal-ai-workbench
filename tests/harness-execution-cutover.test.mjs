@@ -117,12 +117,14 @@ test('Harness MCP bridge supplies bounded Execution context without changing leg
   }]);
 });
 
-test('server composition installs private Execution storage and injects the recorder into Tool Broker',async()=>{
+test('server composition installs private Execution storage and injects the recorder plus shadow Policy into Tool Broker',async()=>{
   const source=await fsp.readFile('src/server.mjs','utf8');
   assert.match(source,/ExecutionReceiptStore/);
   assert.match(source,/ExecutionRecorder/);
+  assert.match(source,/ToolPolicy/);
   assert.match(source,/new ExecutionReceiptStore\(\{dataDir:DATA_DIR\}\)/);
   assert.match(source,/await harnessExecutionStore\.ensure\(\)/);
   assert.match(source,/new ExecutionRecorder\(\{store:harnessExecutionStore\}\)/);
-  assert.match(source,/new ToolBroker\(\{registry:harnessCapabilityRegistry,executionRecorder:harnessExecutionRecorder\}\)/);
+  assert.match(source,/new ToolPolicy\(\{mode:'shadow'\}\)/);
+  assert.match(source,/new ToolBroker\(\{registry:harnessCapabilityRegistry,executionRecorder:harnessExecutionRecorder,policy:harnessToolPolicy\}\)/);
 });
