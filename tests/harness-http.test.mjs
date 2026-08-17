@@ -23,7 +23,8 @@ async function fixture(t){
       return{result:[{id:'p1'}]};
     }
   };
-  const handlers=createHarnessHttp({navigator,mcpRegistry});
+  const toolBroker={call:(name,args,options)=>mcpRegistry.call(name,args,options)};
+  const handlers=createHarnessHttp({navigator,mcpRegistry,toolBroker});
   const server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;
     if(await handlers.handleBridge(req,res,pathname))return;
