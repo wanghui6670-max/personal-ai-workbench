@@ -92,7 +92,7 @@ test('Workbench process can bootstrap the Harness platform beside v3 without rep
   const {createHarnessPlatform,harnessPlatformStatus}=await import('../src/harness-platform.mjs');
   const runtime=createHarnessPlatform({mcpRegistry:legacyRegistry,dataDir:root});
   const status=harnessPlatformStatus(runtime);
-  assert.deepEqual(status.packs,['personal-workbench','workbench-v3-bridge']);
+  assert.deepEqual(status.packs,['personal-workbench','engineering-methods','workbench-v3-bridge']);
   assert.equal(status.enabled,true);
   const result=await runtime.invoke('workbench_get_state');
   assert.deepEqual(result.result,{name:'workbench_get_state',state:'legacy-v3'});
