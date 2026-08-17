@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {HarnessRuntime,SessionStore,JsonlEventStore,createWorkbenchV3RegistryPack} from '../platform/index.mjs';
 import {personalWorkbenchPack} from '../packs/personal-workbench/manifest.mjs';
+import {engineeringMethodsPack} from '../packs/engineering-methods/manifest.mjs';
 
 export function createHarnessPlatform({mcpRegistry,dataDir,packs=[]}={}){
   if(!dataDir)throw new TypeError('createHarnessPlatform requires dataDir');
@@ -10,6 +11,7 @@ export function createHarnessPlatform({mcpRegistry,dataDir,packs=[]}={}){
   const events=new JsonlEventStore(path.join(root,'events.jsonl'));
   const runtime=new HarnessRuntime({sessions,events});
   runtime.install(personalWorkbenchPack);
+  runtime.install(engineeringMethodsPack);
   runtime.install(createWorkbenchV3RegistryPack({mcpRegistry}));
   for(const pack of packs)runtime.install(pack);
   return runtime;
