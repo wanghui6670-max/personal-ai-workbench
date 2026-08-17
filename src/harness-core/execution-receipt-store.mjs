@@ -132,6 +132,11 @@ export class ExecutionReceiptStore{
 
   async writeFinish(value){
     const receipt=normalizeFinish(value);
+    await this.ensure();
+    const startRaw=await this.#readFile(this.#file(receipt.id,'start'));
+    if(!startRaw)throw receiptError('Execution start receipt 不存在。','EXECUTION_START_MISSING');
+    const start=normalizeStart(startRaw);
+    if(start.id!==receipt.id)throw receiptError('Execution start/finish ID 不一致。');
     await this.#writeImmutable(this.#file(receipt.id,'finish'),receipt,receipt.id,'finish');
     return receipt;
   }
