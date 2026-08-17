@@ -80,6 +80,19 @@ test('Execution store uses private immutable start/finish receipts and treats a 
   assert.equal(startStat.mode&0o777,0o600);
 });
 
+test('Execution store rejects a finish receipt that has no immutable start receipt',async t=>{
+  const dataDir=await tempDataDir(t);
+  const store=new ExecutionReceiptStore({dataDir});
+  await assert.rejects(()=>store.writeFinish({
+    version:1,
+    id:'ex_orphan',
+    status:'failed',
+    completedAt:'2026-08-17T15:00:01.000Z',
+    errorCode:'CRM_TIMEOUT'
+  }),error=>error?.code==='EXECUTION_START_MISSING');
+  assert.equal(await store.read('ex_orphan'),null);
+});
+
 test('Execution store rejects unsafe extra fields and unsafe symlinked directories',async t=>{
   const dataDir=await tempDataDir(t);
   const store=new ExecutionReceiptStore({dataDir});
