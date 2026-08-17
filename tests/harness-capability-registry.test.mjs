@@ -26,6 +26,16 @@ test('Workbench v3 MCP surface can register as one compatibility capability with
   assert.equal(registry.getTool('legacy.write').requiresConfirmation,true);
 });
 
+test('legacy Workbench MCP tool names with underscores remain valid without renaming',()=>{
+  const registry=new CapabilityRegistry();
+  const legacy={tools:[
+    {name:'feishu_inbox_sync',readOnly:false,requiresConfirmation:true,inputSchema:{}},
+    {name:'project_records_read',readOnly:true,requiresConfirmation:false,inputSchema:{}}
+  ]};
+  registry.registerProvider(createLegacyMcpProvider({mcpRegistry:legacy}));
+  assert.deepEqual(registry.listTools().map(item=>item.name),['feishu_inbox_sync','project_records_read']);
+});
+
 test('Capability Registry is discovery-only and exposes no provider execution entrypoint',()=>{
   const registry=new CapabilityRegistry();
   registry.registerProvider(createLegacyMcpProvider({mcpRegistry:legacyRegistry()}));
