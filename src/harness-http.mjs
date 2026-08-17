@@ -18,8 +18,8 @@ function methodNotAllowed(res,allowed){
   return sendJson(res,405,{error:'Method not allowed'},{Allow:allowed});
 }
 
-export function createHarnessHttp({navigator,mcpRegistry}={}){
-  if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
+export function createHarnessHttp({navigator,mcpRegistry,toolBroker}={}){
+  if(!navigator||!mcpRegistry||!toolBroker)throw new Error('createHarnessHttp requires navigator, mcpRegistry and toolBroker');
   // The exposed tools either read external state or create an expiring local
   // preview. Actual Workbench/Joycrew mutations are not callable here.
   const toolOptions={readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST};
@@ -59,7 +59,7 @@ export function createHarnessHttp({navigator,mcpRegistry}={}){
         if(typeof params.name!=='string'||!params.name.trim()){
           throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
         }
-        const outcome=await mcpRegistry.call(params.name,params.arguments||{},toolOptions);
+        const outcome=await toolBroker.call(params.name,params.arguments||{},toolOptions);
         sendJson(res,200,jsonRpcResult(id,{
           content:[{type:'text',text:JSON.stringify(outcome.result)}],
           structuredContent:{result:outcome.result,readback:true}
