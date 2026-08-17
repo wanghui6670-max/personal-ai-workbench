@@ -40,9 +40,10 @@ test('Execution receipts persist only audit metadata, never raw arguments, resul
   assert.equal(receipt.toolName,'customer_lookup');
   assert.equal(receipt.capabilityId,'crm.read');
   assert.equal(receipt.providerId,'crm-provider');
-  assert.deepEqual(receipt.argumentKeys,['query','token']);
+  assert.equal(receipt.argumentCount,2);
+  assert.equal(Object.hasOwn(receipt,'argumentKeys'),false);
   const serialized=JSON.stringify(receipt);
-  for(const forbidden of ['secret-customer-name','secret-token-value','secret-result-name'])assert.equal(serialized.includes(forbidden),false);
+  for(const forbidden of ['query','token','secret-customer-name','secret-token-value','secret-result-name'])assert.equal(serialized.includes(forbidden),false);
 
   const failedStore=new ExecutionReceiptStore({dataDir});
   const failedRecorder=new ExecutionRecorder({
@@ -72,7 +73,7 @@ test('Execution store uses private immutable start/finish receipts and treats a 
 
   await store.writeStart({
     version:1,id:'ex_incomplete',trigger:'harness_mcp',actor:'harness-navigator',sessionId:null,
-    toolName:'project_list',capabilityId:'workbench.v3.mcp',providerId:'workbench-v3-mcp',argumentKeys:[],startedAt:'2026-08-17T15:00:00.000Z'
+    toolName:'project_list',capabilityId:'workbench.v3.mcp',providerId:'workbench-v3-mcp',argumentCount:0,startedAt:'2026-08-17T15:00:00.000Z'
   });
   const incomplete=await store.read('ex_incomplete');
   assert.equal(incomplete.status,'incomplete');
@@ -98,7 +99,7 @@ test('Execution store rejects unsafe extra fields and unsafe symlinked directori
   const store=new ExecutionReceiptStore({dataDir});
   await assert.rejects(()=>store.writeStart({
     version:1,id:'ex_unsafe',trigger:'harness_mcp',actor:'harness-navigator',sessionId:null,
-    toolName:'project_list',capabilityId:'workbench.v3.mcp',providerId:'workbench-v3-mcp',argumentKeys:[],startedAt:'2026-08-17T15:00:00.000Z',
+    toolName:'project_list',capabilityId:'workbench.v3.mcp',providerId:'workbench-v3-mcp',argumentCount:0,startedAt:'2026-08-17T15:00:00.000Z',
     args:{secret:'must-not-persist'}
   }),error=>error?.code==='EXECUTION_RECEIPT_UNSAFE_FIELD');
 
