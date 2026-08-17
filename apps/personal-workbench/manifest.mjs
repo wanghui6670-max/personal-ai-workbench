@@ -1,0 +1,30 @@
+export const personalWorkbenchApp=Object.freeze({
+  id:'personal-workbench',
+  version:'4.0.0-alpha.1',
+  capabilities:Object.freeze([
+    'project',
+    'inbox',
+    'todo',
+    'capture'
+  ]),
+  plugins:Object.freeze([
+    'feishu',
+    'github',
+    'local-workspace',
+    'getnote',
+    'joycrew'
+  ]),
+  agents:Object.freeze([
+    'chief-of-staff',
+    'project-manager',
+    'content-agent'
+  ]),
+  views:Object.freeze([
+    'today',
+    'inbox',
+    'projects',
+    'recent-work',
+    'ai-employees',
+    'content'
+  ])
+});
