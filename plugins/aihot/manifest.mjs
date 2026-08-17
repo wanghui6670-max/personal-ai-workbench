@@ -20,7 +20,7 @@ export function createAihotPack({client=new AihotClient()}={}){
       name:'Research Agent',
       instructions:'Use installed read-only intelligence capabilities to collect evidence before synthesis.',
       skills:['ai-trend-research'],
-      methods:['first-principles'],
+      methods:[],
       allowedTools:['aihot.latest']
     }],
     schedules:[{id:'aihot.daily-scan',type:'daily',time:'08:00',agentId:'research-agent',metadata:{purpose:'daily-ai-intelligence'}}],
