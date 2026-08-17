@@ -1,4 +1,6 @@
 import { createCapabilityRegistry } from '../registry/capability-registry.mjs';
+import { createEventStore } from '../kernel/event-store.mjs';
+import { createTraceStore } from '../kernel/trace-store.mjs';
 import { createApprovalEngine } from './approval-engine.mjs';
 import { createToolBroker } from './tool-broker.mjs';
 import { createSessionManager } from './session-manager.mjs';
@@ -22,11 +24,13 @@ function createNamedRegistry(kind){
   });
 }
 
-export function createHarnessPlatform({dispatch=async job=>job}={}){
+export function createHarnessPlatform({dispatch=async job=>job,sessionStore=null,eventStore=null,traceStore=null}={}){
+  const events=eventStore||createEventStore();
+  const traces=traceStore||createTraceStore();
   const approval=createApprovalEngine();
   const capabilities=createCapabilityRegistry();
   const tools=createToolBroker({approvalEngine:approval});
-  const sessions=createSessionManager();
+  const sessions=sessionStore?createSessionManager({store:sessionStore}):createSessionManager();
   const scheduler=createScheduler({dispatch});
   const agents=createAgentRegistry();
   const plugins=createNamedRegistry('plugin');
@@ -65,6 +69,8 @@ export function createHarnessPlatform({dispatch=async job=>job}={}){
   }
 
   return Object.freeze({
+    events,
+    traces,
     approval,
     capabilities,
     tools,
