@@ -13,6 +13,20 @@ export function validateId(value,name='id'){
   return id;
 }
 
+function namedContribution(value,kind){
+  const raw=typeof value==='string'?{id:value}:value;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new TypeError(`${kind} manifest must be a string or object`);
+  const id=validateId(raw.id,`${kind}.id`);
+  return Object.freeze({
+    id,
+    name:String(raw.name??id),
+    description:String(raw.description??''),
+    contentRef:raw.contentRef?String(raw.contentRef):null,
+    optional:raw.optional===true,
+    metadata:Object.freeze({...raw.metadata})
+  });
+}
+
 export function validateToolManifest(tool){
   if(!tool||typeof tool!=='object')throw new TypeError('tool manifest must be an object');
   const name=validateId(tool.name,'tool.name');
@@ -88,8 +102,9 @@ export function validatePackManifest(pack){
     tools:Object.freeze((pack.tools??[]).map(validateToolManifest)),
     agents:Object.freeze((pack.agents??[]).map(validateAgentManifest)),
     schedules:Object.freeze((pack.schedules??[]).map(validateScheduleManifest)),
-    views:Object.freeze([...(pack.views??[])]),
-    skills:Object.freeze([...(pack.skills??[])]),
+    views:Object.freeze((pack.views??[]).map(item=>namedContribution(item,'view'))),
+    skills:Object.freeze((pack.skills??[]).map(item=>namedContribution(item,'skill'))),
+    methods:Object.freeze((pack.methods??[]).map(item=>namedContribution(item,'method'))),
     metadata:Object.freeze({...pack.metadata})
   });
 }
