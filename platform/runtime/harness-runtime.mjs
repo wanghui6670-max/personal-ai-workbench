@@ -6,14 +6,22 @@ import {AgentRuntime} from './agent-runtime.mjs';
 
 export class HarnessRuntime{
   constructor({registry=new CapabilityRegistry(),approval=new ApprovalEngine(),events=new InMemoryEventStore(),sessions=null}={}){
-    this.registry=registry;this.approval=approval;this.events=events;this.sessions=sessions;this.scheduler=new Scheduler({registry});
+    this.registry=registry;
+    this.approval=approval;
+    this.events=events;
+    this.sessions=sessions;
+    this.scheduler=new Scheduler({registry});
     this.agents=new AgentRuntime({registry,events,sessions,invokeTool:(name,input,context)=>this.invoke(name,input,context)});
   }
+
   install(pack){return this.registry.install(pack);}
+
   async invoke(toolName,input={},context={}){
-    const tool=this.registry.getTool(toolName);if(!tool)throw new Error(`unknown tool: ${toolName}`);
+    const tool=this.registry.getTool(toolName);
+    if(!tool)throw new Error(`unknown tool: ${toolName}`);
     if(context.agentId){
-      const agent=this.registry.getAgent(context.agentId);if(!agent)throw new Error(`unknown agent: ${context.agentId}`);
+      const agent=this.registry.getAgent(context.agentId);
+      if(!agent)throw new Error(`unknown agent: ${context.agentId}`);
       if(agent.allowedTools.length&&!agent.allowedTools.includes(toolName))throw new Error(`tool not allowed for agent ${agent.id}: ${toolName}`);
     }
     if(tool.validateInput&&!tool.validateInput(input))throw new TypeError(`invalid input for tool: ${toolName}`);
@@ -29,8 +37,19 @@ export class HarnessRuntime{
     if(context.sessionId&&this.sessions)await this.sessions.appendEvent(context.sessionId,{type:'tool.completed',toolName,result});
     return {ok:true,result,readback:true};
   }
+
   async runAgent(agentId,options={}){return this.agents.run(agentId,options);}
+
   describe(){
-    return Object.freeze({packs:this.registry.listPacks().map(item=>item.id),capabilities:this.registry.listCapabilities().map(item=>item.id),tools:this.registry.listTools().map(item=>item.name),agents:this.registry.listAgents().map(item=>item.id),schedules:this.registry.listSchedules().map(item=>item.id)});
+    return Object.freeze({
+      packs:this.registry.listPacks().map(item=>item.id),
+      capabilities:this.registry.listCapabilities().map(item=>item.id),
+      tools:this.registry.listTools().map(item=>item.name),
+      agents:this.registry.listAgents().map(item=>item.id),
+      schedules:this.registry.listSchedules().map(item=>item.id),
+      skills:this.registry.listSkills().map(item=>item.id),
+      methods:this.registry.listMethods().map(item=>item.id),
+      views:this.registry.listViews().map(item=>item.id)
+    });
   }
 }
