@@ -26,6 +26,13 @@ test('Workbench v3 MCP surface can register as one compatibility capability with
   assert.equal(registry.getTool('legacy.write').requiresConfirmation,true);
 });
 
+test('Capability Registry is discovery-only and exposes no provider execution entrypoint',()=>{
+  const registry=new CapabilityRegistry();
+  registry.registerProvider(createLegacyMcpProvider({mcpRegistry:legacyRegistry()}));
+  assert.equal(Object.hasOwn(registry.getProvider('workbench-v3-mcp'),'call'),false);
+  assert.equal(Object.hasOwn(registry.getTool('legacy.read'),'execute'),false);
+});
+
 test('Capability Registry fails closed when two providers claim the same tool',()=>{
   const registry=new CapabilityRegistry();
   registry.registerProvider(createLegacyMcpProvider({mcpRegistry:legacyRegistry()}));
