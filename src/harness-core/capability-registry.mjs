@@ -1,5 +1,6 @@
 const ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const TOOL_RISKS=new Set(['read','local_write','external_write','destructive']);
+const TOOL_EFFECTS=new Set(['read','local_ephemeral','local_write','external_write','destructive','write_unknown']);
 
 function requiredId(value,label){
   const id=String(value??'').trim();
@@ -38,10 +39,13 @@ function normalizedProvider(raw){
     if(!localCapabilities.has(capabilityId))throw new Error(`tool ${name} references unknown provider capability: ${capabilityId}`);
     const risk=String(item.risk??'read');
     if(!TOOL_RISKS.has(risk))throw new TypeError(`unsupported tool risk: ${risk}`);
+    const effect=String(item.effect??(item.readOnly===true?'read':'write_unknown'));
+    if(!TOOL_EFFECTS.has(effect))throw new TypeError(`unsupported tool effect: ${effect}`);
     return Object.freeze({
       name,
       description:String(item.description??''),
       capabilityId,
+      effect,
       risk,
       readOnly:item.readOnly===true,
       requiresConfirmation:item.requiresConfirmation===true,
@@ -121,3 +125,4 @@ export class CapabilityRegistry{
 }
 
 export const HARNESS_TOOL_RISKS=Object.freeze([...TOOL_RISKS]);
+export const HARNESS_TOOL_EFFECTS=Object.freeze([...TOOL_EFFECTS]);

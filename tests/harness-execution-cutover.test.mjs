@@ -47,6 +47,7 @@ test('Tool Broker wraps provider invocation in Execution while preserving the pr
       name:'fixture_read',
       description:'',
       capabilityId:'fixture.reads',
+      effect:'read',
       risk:'read',
       readOnly:true,
       requiresConfirmation:false,
