@@ -34,3 +34,19 @@ test('product metadata, package, PWA and health source agree on v3',async()=>{
   assert.equal(manifest.name,PRODUCT_DISPLAY_NAME);
   assert.match(server,/version:PRODUCT_VERSION/);
 });
+
+test('Node workflows consume the pinned toolchain and root lockfile',async()=>{
+  const workflowFiles=[
+    '.github/workflows/ci.yml',
+    '.github/workflows/browser-boot-smoke.yml',
+    '.github/workflows/macos-host-contract.yml',
+    '.github/workflows/p0-deployment-acceptance.yml'
+  ];
+  for(const workflowFile of workflowFiles){
+    const workflow=await read(workflowFile);
+    assert.match(workflow,/node-version-file:\s*['"]?\.node-version['"]?/);
+    assert.match(workflow,/npm ci --ignore-scripts --no-audit --no-fund/);
+    assert.doesNotMatch(workflow,/node-version:\s*['"]?24['"]?/);
+    assert.doesNotMatch(workflow,/npm install --no-save/);
+  }
+});
