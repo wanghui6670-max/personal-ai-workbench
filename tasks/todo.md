@@ -27,6 +27,11 @@ Tasks are dependency ordered. A checked box requires the listed verification evi
   - Verify: focused runtime-identity test plus isolated service health readback.
   - Files: runtime identity module, `src/health.mjs`, `src/server.mjs`, focused test.
 
+- [x] Task R1-003A: Add the build identity and static manifest core.
+  - Acceptance: full SHA/version/time validation, canonical asset hashing, Git-tracked allowlists, symlink/path rejection, safe errors, and frozen-buffer loading are covered without claiming service integration.
+  - Verify: `/opt/homebrew/opt/node@24/bin/node --test tests/build-identity.test.mjs`.
+  - Files: `src/build-identity.mjs`, `tests/build-identity.test.mjs`.
+
 - [ ] Task R1-004: Fail closed on live/artifact version mismatch.
   - Acceptance: macOS status, post-install verification, and browser startup detect mismatched source or static assets and stop business actions.
   - Verify: mismatch unit tests, browser smoke, isolated LaunchAgent fixture test.
