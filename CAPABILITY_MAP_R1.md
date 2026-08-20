@@ -22,3 +22,7 @@ release-contract
 ```
 
 `personal-core` and `external-safety` may proceed in parallel after the runtime identity contract is stable. R1 is not complete until `field-acceptance` has current-machine evidence; green unit tests alone are insufficient.
+
+Module specs:
+
+- `reproducible-runtime`: [`SPEC-reproducible-runtime.md`](SPEC-reproducible-runtime.md)
