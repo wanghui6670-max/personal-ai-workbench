@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 .DS_Store
+/.claude/worktrees/
+/.worktrees/
 node_modules/
 coverage/
 *.log

@@ -19,6 +19,7 @@ function runDoctor(env) {
         ...process.env,
         OPENAI_API_KEY: '',
         WORKBENCH_PASSWORD: '',
+        JOYCREW_ENABLED: '0',
         ...env
       },
       stdio: ['ignore', 'pipe', 'pipe']

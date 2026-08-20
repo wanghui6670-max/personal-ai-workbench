@@ -145,10 +145,10 @@ AI_PROVIDER_ALLOW_ANONYMOUS=1
 
 ## 7. 工作流 allowlist
 
-默认允许四个工作流（包含右侧 AI 控制平面的工具规划）：
+默认允许六个工作流（包含右侧 AI 控制平面的工具规划、GetNote insight，以及飞书混合日记待办提取）：
 
 ```text
-project_creation,project_progress,morning_dialogue,ai_console
+project_creation,project_progress,morning_dialogue,ai_console,getnote_insight,mixed_diary_todo_extraction
 ```
 
 可以收窄：

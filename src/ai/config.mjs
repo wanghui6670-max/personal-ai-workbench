@@ -12,9 +12,16 @@ export const AI_DEFAULT_MAX_RESPONSE_BYTES=2_000_000;
 // The console planner is deliberately a first-class workflow. It may only
 // propose one registered MCP tool call (or ask a clarification); the registry
 // still owns argument validation, confirmation and execution. GetNote insight
-// is also registered explicitly so note content cannot piggy-back on another
-// workflow's provider allow-list.
-export const AI_WORKFLOWS=Object.freeze(['project_creation','project_progress','morning_dialogue','ai_console','getnote_insight']);
+// and mixed-diary extraction are registered explicitly so note/diary content
+// cannot piggy-back on another workflow's provider allow-list.
+export const AI_WORKFLOWS=Object.freeze([
+  'project_creation',
+  'project_progress',
+  'morning_dialogue',
+  'ai_console',
+  'getnote_insight',
+  'mixed_diary_todo_extraction'
+]);
 
 const PROFILE_ALIASES=new Map([
   ['openai','openai_luna'],
@@ -172,7 +179,7 @@ function resolveOpenAIProfile(env){
     model:assertNoHeaderControls(clean(env.OPENAI_MODEL)||OPENAI_DEFAULT_MODEL,'OPENAI_MODEL'),
     credential,
     endpoint:{id:'openai_public',baseUrl:'https://api.openai.com/v1',origin:'https://api.openai.com',networkZone:'public_https',trustedBuiltIn:true},
-    workflowAllowlist:AI_WORKFLOWS,
+    workflowAllowlist:resolveWorkflowAllowlist(env.AI_PROVIDER_WORKFLOWS),
     reasoning:{requestedLevel:AI_REASONING_LEVEL,mode:'xhigh',degraded:false},
     structuredOutput:{mode:'strict_native',degraded:false},
     retention:{mode:'send',sendNoStore:true,degraded:false},
