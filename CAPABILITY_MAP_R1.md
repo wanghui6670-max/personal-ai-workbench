@@ -9,7 +9,7 @@ Status: approved for implementation on 2026-08-20 by the user's instruction to p
 | `personal-core` | Capture, Inbox, review/clarification, Todo, Today, restart recovery, and truthful batch outcomes | `reproducible-runtime` |
 | `external-safety` | Atomic Provider profiles, actual-model receipts, Feishu idempotency/redaction, and bounded DSH/Joycrew egress | `reproducible-runtime` |
 | `operations` | Dependency diagnostics, structured operational receipts, backup/restore, fault injection, and rollback | `personal-core`, `external-safety` |
-| `field-acceptance` | Real non-production canaries, browser/iPhone flow, restart recovery, and the 72-hour-or-longer pilot | `operations` |
+| `field-acceptance` | Real non-production canaries, local browser flow, restart recovery, and the 72-hour-or-longer pilot; cross-device iPhone access requires a separate private-mobile profile | `operations` |
 
 Build order:
 
