@@ -15,6 +15,7 @@
 - ECMAScript modules
 - macOS LaunchAgent
 - detached Git worktree 或等价的版本化不可变 release 目录
+- release 外的版本化运行配置 revision（权限 `0600`）
 - JSON build manifest
 - SHA-256 资产摘要
 - Node built-in test runner
@@ -97,6 +98,7 @@ export function assertBuildMatch(expected,actual){
 - 静态资产在启动时完整验证并冻结。
 - health、安装清单和 status 使用同一个 build identity schema。
 - 保留至少一个可读回的旧 release 作为回滚点。
+- 正式配置通过显式 `WORKBENCH_ENV_FILE` 指向 release 外的不可变 revision；release 内不保存 `.env`。
 - 保留用户未跟踪的 `CLAUDE.md`、`docs/HANDOFF_20260820.md`、`public/preview.html`，但不得把它们复制进正式 release。
 
 ### Ask First
@@ -117,18 +119,19 @@ export function assertBuildMatch(expected,actual){
 
 1. 干净检出在 Node `24.19.0`、npm `11.17.0` 下可使用根/Harness lockfile完成安装和全量验证。
 2. 正式 release 位于独立版本化目录，不从可变开发工作树提供代码或静态资产。
-3. build identity 至少包含完整 Git SHA、产品版本、固定构建时间、静态资产数量和规范 manifest SHA-256。
-4. 正式静态 manifest 只根据 Git tracked `public/**` 生成；未跟踪 `public/preview.html` 不进入 release 且 HTTP 返回 404。
-5. 正式入口在加载业务服务前验证提交、tracked runtime clean 状态、manifest 和全部静态资产。
-6. 静态资源从启动时冻结的 Buffer/allowlist 提供，运行中修改源工作树不会改变响应。
-7. `/api/health` 返回固定且完整的运行 build identity，不在每次请求时读取 Git。
-8. LaunchAgent plist、service manifest、runtime health 和浏览器 manifest 的 build identity 完全一致。
-9. 浏览器身份不一致时锁定；旧页面向新后端写入时收到 `409 WORKBENCH_BUILD_MISMATCH`，且业务状态不变。
-10. 安装、重启或验证失败时能恢复上一个完整 build identity；原错误和恢复错误均可安全读回。
-11. `npm run service:macos -- status` 只有在 source、installed、runtime 和 static identities 全部一致时退出 `0`。
+3. 正式配置位于 release 外的版本化 `0600` revision；新旧 plist 分别绑定自己的配置 revision，代码回滚同时恢复对应配置。
+4. build identity 至少包含完整 Git SHA、产品版本、固定构建时间、精确 Node/npm、根/Harness lock 摘要、静态资产数量和规范 manifest SHA-256。
+5. 正式静态 manifest 只根据 Git tracked `public/**` 生成；未跟踪 `public/preview.html` 不进入 release 且 HTTP 返回 404。
+6. 正式入口在加载业务服务前验证提交、tracked runtime clean 状态、manifest 和全部静态资产。
+7. 静态资源从启动时冻结的 Buffer/allowlist 提供，运行中修改源工作树不会改变响应。
+8. `/api/health` 返回固定且完整的运行 build identity，不在每次请求时读取 Git。
+9. LaunchAgent plist、service manifest、runtime health 和浏览器 manifest 的 build identity 完全一致。
+10. 浏览器身份不一致时锁定；旧页面向新后端写入时收到 `409 WORKBENCH_BUILD_MISMATCH`，且业务状态不变。
+11. 安装、重启或验证失败时能恢复上一个完整 build identity 和对应配置；原错误和恢复错误均可安全读回。
+12. `npm run service:macos -- status` 只有在 source、installed、runtime、toolchain、lock 和 static identities 全部一致时退出 `0`。
 
 ## Open Questions
 
-- release 根目录的最终默认位置需在安装切片中确定，但必须与可变 Git checkout 和业务 `DATA_DIR` 分离。
+- release/config/runtime 根目录的最终默认位置需在安装切片中确定，但必须与可变 Git checkout、业务 `DATA_DIR` 和 `WORKSPACE_ROOT` 分离。
 - Node runtime 首版记录并校验精确外部二进制；是否在后续版本打包自带 Node，不阻塞 R1。
 - 完整运行代码的可重复证明首版使用 detached worktree + clean tracked runtime gate；若未来出现运行期动态加载代码，再扩展为 runtime file manifest。
