@@ -37,7 +37,7 @@ Tasks are dependency ordered. A checked box requires the listed verification evi
   - Verify: mismatch unit tests, browser smoke, isolated LaunchAgent fixture test.
   - Files: `scripts/macos-launch-agent.mjs`, browser bootstrap module, related tests.
 
-- [ ] Task R1-005: Replace localized P0 doctor parsing with a structured contract.
+- [x] Task R1-005: Replace localized P0 doctor parsing with a structured contract.
   - Acceptance: host preflight is independent of Chinese/English presentation text and reports per-dependency state.
   - Verify: `node --test tests/doctor.test.mjs tests/host-p0.test.mjs`.
   - Files: `scripts/doctor.mjs`, `scripts/p0-host-preflight.mjs`, two focused tests.

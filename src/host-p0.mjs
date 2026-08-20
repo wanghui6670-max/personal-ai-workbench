@@ -27,6 +27,64 @@ function gitCommit(value){
   return commit;
 }
 
+function doctorContractError(message,code){
+  return Object.assign(new Error(message),{code});
+}
+
+function normalizeDoctorReport(report){
+  if(!report||typeof report!=='object'||Array.isArray(report))throw doctorContractError('doctor JSON 报告必须是对象。','HOST_P0_DOCTOR_CONTRACT_INVALID');
+  if(report.schemaVersion!==1)throw doctorContractError('doctor JSON schemaVersion 不受支持。','HOST_P0_DOCTOR_SCHEMA_UNSUPPORTED');
+  if(typeof report.ok!=='boolean')throw doctorContractError('doctor JSON 缺少布尔 ok 字段。','HOST_P0_DOCTOR_CONTRACT_INVALID');
+  if(!Array.isArray(report.checks))throw doctorContractError('doctor JSON 缺少 checks 数组。','HOST_P0_DOCTOR_CONTRACT_INVALID');
+  const seen=new Set();
+  const checks=report.checks.map(check=>{
+    if(!check||typeof check!=='object'||Array.isArray(check)||typeof check.id!=='string'||!check.id.trim()){
+      throw doctorContractError('doctor JSON 包含无效 check id。','HOST_P0_DOCTOR_CONTRACT_INVALID');
+    }
+    if(seen.has(check.id))throw doctorContractError(`doctor JSON 包含重复 check id：${check.id}。`,'HOST_P0_DOCTOR_CHECK_DUPLICATE');
+    seen.add(check.id);
+    if(typeof check.required!=='boolean'||typeof check.ok!=='boolean'){
+      throw doctorContractError(`doctor JSON check ${check.id} 缺少布尔 required 或 ok。`,'HOST_P0_DOCTOR_CONTRACT_INVALID');
+    }
+    if(Object.hasOwn(check,'liveRead')&&typeof check.liveRead!=='boolean'){
+      throw doctorContractError(`doctor JSON check ${check.id} 的 liveRead 必须是布尔值。`,'HOST_P0_DOCTOR_CONTRACT_INVALID');
+    }
+    return Object.freeze({...check});
+  });
+  return Object.freeze({schemaVersion:report.schemaVersion,ok:report.ok,checks:Object.freeze(checks)});
+}
+
+export function parseDoctorJsonReport(stdout){
+  if(typeof stdout!=='string'||!stdout.trim())throw doctorContractError('doctor JSON 输出为空。','HOST_P0_DOCTOR_JSON_EMPTY');
+  let parsed;
+  try{parsed=JSON.parse(stdout);}catch{throw doctorContractError('doctor JSON 无法解析。','HOST_P0_DOCTOR_JSON_INVALID');}
+  return normalizeDoctorReport(parsed);
+}
+
+export function evaluateHostDoctorReport(report){
+  const normalized=normalizeDoctorReport(report);
+  const byId=new Map(normalized.checks.map(check=>[check.id,check]));
+  const failedRequiredCheckIds=normalized.checks.filter(check=>check.required&&!check.ok).map(check=>check.id);
+  const summary=id=>{
+    const check=byId.get(id);
+    return Object.freeze({
+      present:Boolean(check),
+      ok:check?.ok===true,
+      required:check?.required===true,
+      liveRead:check?.liveRead===true
+    });
+  };
+  const getnoteRuntime=summary('getnote_runtime');
+  const larkCli=summary('lark_cli');
+  return Object.freeze({
+    ok:normalized.ok===true&&failedRequiredCheckIds.length===0,
+    failedRequiredCheckIds:Object.freeze(failedRequiredCheckIds),
+    getnoteRuntime,
+    larkCli,
+    realCliReadChecks:getnoteRuntime.ok&&getnoteRuntime.liveRead||larkCli.ok&&larkCli.liveRead
+  });
+}
+
 export function validateHostBinding({appRoot,dataDir,workspaceRoot,host='127.0.0.1',port='4173',joycrewEnabled='0',requireJoycrewDisabled=true}={}){
   const app=path.resolve(String(appRoot||''));
   const data=String(dataDir||'').trim();

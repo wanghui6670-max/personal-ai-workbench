@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   buildMacosLaunchAgentPlist,
   compareSnapshots,
+  evaluateHostDoctorReport,
+  parseDoctorJsonReport,
   pathFingerprint,
   snapshotTree,
   validateHostBinding,
@@ -94,6 +96,51 @@ test('LaunchAgent install gate binds a recent report to version, commit, and pat
   assert.throws(()=>validateHostReadinessReport({...input,finishedAt:new Date(now-2*24*60*60*1000).toISOString()},{productVersion:'2.0.0',commit:'abc123',appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',now}),/过期/);
 });
 
+test('host P0 consumes the stable doctor JSON contract by check id, never display labels',()=>{
+  const doctorJson=JSON.stringify({
+    schemaVersion:1,
+    ok:true,
+    checks:[
+      {id:'node_runtime',required:true,ok:true,mode:'node'},
+      {id:'data_dir',required:true,ok:true,mode:'read_write'},
+      {id:'workspace_root',required:true,ok:true,mode:'read_write'},
+      {id:'business_config',required:true,ok:true},
+      {id:'getnote_runtime',required:false,ok:true,mode:'disabled',liveRead:false},
+      {id:'lark_cli',required:true,ok:true,mode:'configured',liveRead:true}
+    ]
+  });
+  const report=parseDoctorJsonReport(doctorJson);
+  const evidence=evaluateHostDoctorReport(report);
+
+  assert.deepEqual(evidence,{
+    ok:true,
+    failedRequiredCheckIds:[],
+    getnoteRuntime:{present:true,ok:true,required:false,liveRead:false},
+    larkCli:{present:true,ok:true,required:true,liveRead:true},
+    realCliReadChecks:true
+  });
+
+  const renamedChecks={...report,checks:report.checks.map(check=>({...check,name:'任何人类展示名称都不应影响判定'}))};
+  assert.deepEqual(evaluateHostDoctorReport(renamedChecks),evidence);
+});
+
+test('host P0 rejects malformed doctor JSON and doctor reports with failed required checks',()=>{
+  assert.throws(()=>parseDoctorJsonReport('✓ 环境自检\n'),/JSON/);
+  assert.throws(()=>parseDoctorJsonReport(JSON.stringify({schemaVersion:1,ok:true,checks:[{id:'node_runtime',required:true,ok:true},{id:'node_runtime',required:true,ok:true}]})),/重复/);
+
+  const evidence=evaluateHostDoctorReport({
+    schemaVersion:1,
+    ok:false,
+    checks:[
+      {id:'node_runtime',required:true,ok:false},
+      {id:'getnote_runtime',required:false,ok:false,liveRead:false}
+    ]
+  });
+  assert.deepEqual(evidence.failedRequiredCheckIds,['node_runtime']);
+  assert.equal(evidence.ok,false);
+  assert.equal(evidence.realCliReadChecks,false);
+});
+
 test('host scripts never use shell evaluation for service control',async()=>{
   const [preflight,service]=await Promise.all([
     fsp.readFile(new URL('../scripts/p0-host-preflight.mjs',import.meta.url),'utf8'),
@@ -105,6 +152,8 @@ test('host scripts never use shell evaluation for service control',async()=>{
     assert.doesNotMatch(source,/\beval\s*\(/);
   }
   assert.match(preflight,/JOYCREW_ENABLED:'0'/);
+  assert.match(preflight,/runNode\('scripts\/doctor\.mjs',\['--json'\]/);
+  assert.doesNotMatch(preflight,/✓ getnote CLI:|✓ lark-cli:/);
   assert.match(preflight,/--allow-configured-port-in-use/);
   assert.match(preflight,/maxDepth:2/);
   assert.match(service,/validateHostReadinessReport/);

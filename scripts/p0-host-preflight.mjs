@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { loadWorkbenchEnv } from '../src/env.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from '../src/product.mjs';
-import { compareSnapshots, pathFingerprint, snapshotTree, validateHostBinding } from '../src/host-p0.mjs';
+import { compareSnapshots, evaluateHostDoctorReport, parseDoctorJsonReport, pathFingerprint, snapshotTree, validateHostBinding } from '../src/host-p0.mjs';
 
 const execFileAsync=promisify(execFile);
 const appRoot=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -143,13 +143,18 @@ try{
   pass(configuredPortBusy?'现有服务保留运行':'旧进程已停止',{configuredPortFree:!configuredPortBusy,existingServiceAllowed:configuredPortBusy&&allowConfiguredPortInUse});
 
   const doctorEnv={...process.env,JOYCREW_ENABLED:'0'};
-  const doctor=await runNode('scripts/doctor.mjs',[],doctorEnv,{timeoutMs:180_000});
+  const doctor=await runNode('scripts/doctor.mjs',['--json'],doctorEnv,{timeoutMs:180_000});
   assert.equal(doctor.timedOut,false,'doctor 超时。');
   assert.equal(doctor.code,0,doctor.stderr||doctor.stdout);
-  const getnoteChecked=/✓ getnote CLI:/.test(doctor.stdout);
-  const larkChecked=/✓ lark-cli:/.test(doctor.stdout);
-  report.scope.realCliReadChecks=getnoteChecked||larkChecked;
-  pass('真实主机 doctor',{getnoteReadOnlyCheck:getnoteChecked,larkCliPresentCheck:larkChecked,joycrewDisabled:true});
+  const doctorEvidence=evaluateHostDoctorReport(parseDoctorJsonReport(doctor.stdout));
+  assert.equal(doctorEvidence.ok,true,`doctor JSON required checks 失败：${doctorEvidence.failedRequiredCheckIds.join(',')||'unknown'}`);
+  report.scope.realCliReadChecks=doctorEvidence.realCliReadChecks;
+  pass('真实主机 doctor',{
+    schemaVersion:1,
+    getnoteRuntime:doctorEvidence.getnoteRuntime,
+    larkCli:doctorEvidence.larkCli,
+    joycrewDisabled:true
+  });
 
   const backup=await runNode('scripts/backup.mjs',[],doctorEnv,{timeoutMs:120_000});
   assert.equal(backup.timedOut,false,'backup v2 超时。');
