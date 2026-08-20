@@ -21,7 +21,9 @@ test('product metadata, package, PWA and health source agree on v3',async()=>{
   assert.equal(PRODUCT_DISPLAY_NAME,'动觉 AI 工作台');
   assert.equal(pkg.version,PRODUCT_VERSION);
   assert.equal(pkg.engines.node,'>=24');
-  assert.equal(nodeVersion.trim(),'24.15.0');
+  assert.equal(pkg.engines.npm,'>=11.17.0 <12');
+  assert.equal(pkg.packageManager,'npm@11.17.0');
+  assert.equal(nodeVersion.trim(),'24.19.0');
   assert.match(readme,/Node\.js 24\+/);
   assert.match(doctor,/Node\.js >= 24/);
   assert.match(harnessSource,/Node 22\.19\.x 或 Node 24\+/);

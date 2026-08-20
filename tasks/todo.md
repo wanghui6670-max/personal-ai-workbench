@@ -7,10 +7,15 @@ Tasks are dependency ordered. A checked box requires the listed verification evi
   - Verify: read `CAPABILITY_MAP_R1.md`, `docs/RELEASE_R1_CONTRACT.md`, and `tasks/plan.md`.
   - Files: `CAPABILITY_MAP_R1.md`, `docs/RELEASE_R1_CONTRACT.md`, `tasks/plan.md`, `tasks/todo.md`.
 
-- [ ] Task R1-002: Add a reproducible root install contract.
+- [x] Task R1-002: Add a reproducible root install contract.
   - Acceptance: Node 24 can run `npm ci` from a clean dependency state without creating an untracked lockfile.
   - Verify: `npm ci --ignore-scripts --no-audit --no-fund && npm test`.
   - Files: `package.json`, `package-lock.json`, `.node-version`, one install-contract test if required.
+
+- [ ] Task R1-002B: Make every automated build consume the pinned toolchain and root lockfile.
+  - Acceptance: CI uses `.node-version` plus root `npm ci`; browser smoke has no temporary dependency install; Docker uses an exact Node patch and both lockfiles.
+  - Verify: workflow contract tests, root/Harness clean installs, browser smoke, and Docker build.
+  - Files: workflow files in one slice; Dockerfile and its focused test in a separate slice.
 
 - [ ] Task R1-003: Define and expose immutable runtime identity.
   - Acceptance: health exposes full source SHA, build timestamp, and deterministic public asset manifest hash without reading Git on each request.

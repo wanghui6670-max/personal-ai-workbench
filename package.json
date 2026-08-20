@@ -3,6 +3,7 @@
   "version": "3.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.17.0",
   "description": "Unified AI workbench for personal execution, Joycrew digital employees, evidence, approvals and delivery.",
   "scripts": {
     "start": "node src/server.mjs",
@@ -26,6 +27,10 @@
     "verify": "npm run test:files && npm run harness:check && npm run harness:e2e && npm run harness:employee:e2e"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=24",
+    "npm": ">=11.17.0 <12"
+  },
+  "devDependencies": {
+    "puppeteer-core": "24.16.0"
   }
 }
