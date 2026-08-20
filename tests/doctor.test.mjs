@@ -11,9 +11,9 @@ import { JsonStore } from '../src/store.mjs';
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const doctorScript = path.join(projectRoot, 'scripts', 'doctor.mjs');
 
-function runDoctor(env) {
+function runDoctor(env, args = []) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [doctorScript], {
+    const child = spawn(process.execPath, [doctorScript, ...args], {
       cwd: projectRoot,
       env: {
         ...process.env,
@@ -33,6 +33,41 @@ function runDoctor(env) {
     child.once('error', reject);
     child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+
+const stableDoctorCheckIds = [
+  'node_runtime',
+  'data_dir',
+  'workspace_root',
+  'getnote_runtime',
+  'lark_cli',
+  'ai_provider',
+  'access_control',
+  'joycrew'
+];
+
+function parseDoctorJson(result) {
+  assert.doesNotMatch(result.stdout, /环境自检|[✓!]/, 'JSON stdout must not contain the human report');
+  assert.equal(result.stderr, '', result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(report), ['schemaVersion', 'ok', 'checks']);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(typeof report.ok, 'boolean');
+  assert.ok(Array.isArray(report.checks));
+  const allowedKeys = new Set(['id', 'required', 'ok', 'mode', 'liveRead', 'code', 'message']);
+  for (const check of report.checks) {
+    assert.equal(typeof check.id, 'string');
+    assert.equal(typeof check.required, 'boolean', `${check.id} must declare whether it is required`);
+    assert.equal(typeof check.ok, 'boolean', `${check.id} must declare its result`);
+    assert.deepEqual(Object.keys(check).filter(key => !allowedKeys.has(key)), [], `${check.id} exposes an unsafe field`);
+  }
+  assert.equal(new Set(report.checks.map(check => check.id)).size, report.checks.length, 'check ids must be unique');
+  assert.deepEqual(
+    stableDoctorCheckIds.filter(id => !report.checks.some(check => check.id === id)),
+    [],
+    'JSON report must always expose the stable P0 check ids'
+  );
+  return report;
 }
 
 async function prepareEnabledStore(root,{journalDocumentUrl=''}={}){
@@ -150,4 +185,74 @@ test('doctor accepts private_http GetNote Runtime without a local getnote binary
   assert.match(result.stdout,/只读连通性与鉴权检查通过/);
   assert.match(result.stdout,/✓ 飞书每日工作日记: 未配置/);
   assert.doesNotMatch(result.stdout,/未找到 getnote/);
+});
+
+test('doctor --json emits only the stable machine-readable contract without sensitive values', async t => {
+  const secretMarker = 'doctor-secret-marker-8f55bdf1';
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), `workbench-${secretMarker}-`));
+  t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
+  const dataDir = path.join(tempRoot, 'data');
+  const workspaceRoot = path.join(tempRoot, 'workspace');
+
+  const result = await runDoctor({
+    DATA_DIR: dataDir,
+    WORKSPACE_ROOT: workspaceRoot,
+    OPENAI_API_KEY: secretMarker,
+    WORKBENCH_PASSWORD: `${secretMarker}-password`
+  }, ['--json']);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, new RegExp(secretMarker));
+  const report = parseDoctorJson(result);
+  assert.equal(report.ok, true);
+  assert.equal(report.checks.find(check => check.id === 'access_control')?.ok, true);
+  assert.equal(report.checks.find(check => check.id === 'ai_provider')?.required, false);
+});
+
+test('doctor --json returns a complete report and non-zero exit when a required check fails', async t => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-json-failure-'));
+  t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
+  const dataDir = path.join(tempRoot, 'data');
+  const workspaceFile = path.join(tempRoot, 'workspace-file');
+  await fsp.writeFile(workspaceFile, 'not a directory\n', 'utf8');
+
+  const result = await runDoctor({ DATA_DIR: dataDir, WORKSPACE_ROOT: workspaceFile }, ['--json']);
+
+  assert.equal(result.code, 1, result.stderr || result.stdout);
+  const report = parseDoctorJson(result);
+  assert.equal(report.ok, false);
+  assert.ok(report.checks.some(check => check.required && !check.ok));
+  assert.equal(report.checks.find(check => check.id === 'workspace_root')?.ok, false);
+});
+
+test('doctor --json does not claim a live GetNote read when the required CLI check fails', async t => {
+  const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-json-getnote-'));
+  t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
+  const { dataDir, workspaceRoot } = await prepareEnabledStore(tempRoot);
+  const emptyBin = path.join(tempRoot, 'empty-bin');
+  await fsp.mkdir(emptyBin, { recursive: true });
+
+  const result = await runDoctor({
+    DATA_DIR: dataDir,
+    WORKSPACE_ROOT: workspaceRoot,
+    PATH: emptyBin,
+    GETNOTE_RUNTIME_MODE: 'local_cli'
+  }, ['--json']);
+
+  assert.equal(result.code, 1, result.stderr || result.stdout);
+  const report = parseDoctorJson(result);
+  assert.deepEqual(report.checks.find(check => check.id === 'getnote_runtime'), {
+    id: 'getnote_runtime',
+    required: true,
+    ok: false,
+    mode: 'local_cli',
+    liveRead: false
+  });
+  assert.deepEqual(report.checks.find(check => check.id === 'lark_cli'), {
+    id: 'lark_cli',
+    required: false,
+    ok: true,
+    mode: 'disabled',
+    liveRead: false
+  });
 });
