@@ -15,6 +15,7 @@ function exists(target){return fsp.access(target).then(()=>true,error=>{if(error
 function cleanChildEnv(overrides={}){
   const env={...process.env};
   for(const key of WORKBENCH_ENV_KEYS)delete env[key];
+  delete env.WORKBENCH_ENV_FILE;
   return{...env,...overrides};
 }
 
@@ -113,6 +114,152 @@ test('real environment values, including an empty string, take priority over .en
   assert.equal(env.SESSION_SECRET,'');
   assert.equal(env.HOST,'127.0.0.1');
   assert.deepEqual(result.loaded,['HOST']);
+});
+
+test('an explicit WORKBENCH_ENV_FILE wins and preserves ambient environment priority',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-selected-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const selected=path.join(root,'runtime.env');
+  await fsp.writeFile(path.join(root,'.env'),'PORT=4100\nHOST=from-root\n','utf8');
+  await fsp.writeFile(selected,'PORT=4200\nHOST=from-selected\nSESSION_SECRET=selected-secret\n',{mode:0o600});
+  const env={WORKBENCH_ENV_FILE:selected,PORT:'4300'};
+
+  const result=await loadWorkbenchEnv({root,env});
+
+  assert.equal(result.file,selected);
+  assert.equal(result.found,true);
+  assert.deepEqual(result.loaded,['HOST','SESSION_SECRET']);
+  assert.deepEqual(result.ignored,[]);
+  assert.equal(env.PORT,'4300');
+  assert.equal(env.HOST,'from-selected');
+  assert.equal(env.SESSION_SECRET,'selected-secret');
+});
+
+test('an explicitly selected missing env file never falls back to a valid root .env',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-no-fallback-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const selected=path.join(root,'missing-runtime.env');
+  await fsp.writeFile(path.join(root,'.env'),'PORT=4173\n','utf8');
+  const env={WORKBENCH_ENV_FILE:selected};
+
+  await assert.rejects(loadWorkbenchEnv({root,env}),error=>{
+    assert.equal(error.code,'WORKBENCH_ENV_FILE_MISSING');
+    assert.equal(error.message.includes(root),false);
+    assert.equal(error.message.includes(selected),false);
+    return true;
+  });
+  assert.equal(Object.hasOwn(env,'PORT'),false);
+});
+
+test('WORKBENCH_ENV_FILE rejects empty, non-string, and relative selectors',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-selector-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+
+  for(const selector of ['', '   ', null]){
+    await assert.rejects(loadWorkbenchEnv({root,env:{WORKBENCH_ENV_FILE:selector}}),error=>{
+      assert.equal(error.code,'WORKBENCH_ENV_FILE_INVALID');
+      assert.equal(error.message.includes(root),false);
+      return true;
+    });
+  }
+
+  await assert.rejects(loadWorkbenchEnv({root,env:{WORKBENCH_ENV_FILE:'runtime.env'}}),error=>{
+    assert.equal(error.code,'WORKBENCH_ENV_FILE_NOT_ABSOLUTE');
+    assert.equal(error.message.includes(root),false);
+    assert.equal(error.message.includes('runtime.env'),false);
+    return true;
+  });
+});
+
+test('WORKBENCH_ENV_FILE rejects symlinks, directories, and modes other than exactly 0600',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-file-contract-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const target=path.join(root,'target.env');
+  const linked=path.join(root,'linked.env');
+  const directory=path.join(root,'directory.env');
+  const broad=path.join(root,'broad.env');
+  await fsp.writeFile(target,'PORT=4173\n',{mode:0o600});
+  await fsp.symlink(target,linked);
+  await fsp.mkdir(directory,{mode:0o700});
+  await fsp.writeFile(broad,'PORT=4173\n',{mode:0o600});
+  await fsp.chmod(broad,0o644);
+
+  for(const [file,code] of [
+    [linked,'WORKBENCH_ENV_FILE_SYMLINK'],
+    [directory,'WORKBENCH_ENV_FILE_NOT_REGULAR'],
+    [broad,'WORKBENCH_ENV_FILE_MODE_INVALID']
+  ]){
+    await assert.rejects(loadWorkbenchEnv({root,env:{WORKBENCH_ENV_FILE:file}}),error=>{
+      assert.equal(error.code,code);
+      assert.equal(error.message.includes(root),false);
+      assert.equal(error.message.includes(file),false);
+      return true;
+    });
+  }
+});
+
+test('a formal selected env file fails closed on every ignored assignment without leaking content',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-parse-reject-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const selected=path.join(root,'runtime.env');
+  const secretMarker='do-not-leak-this-env-content';
+  await fsp.writeFile(selected,[
+    'PORT=4173',
+    `UNDECLARED_SECRET=${secretMarker}`,
+    'WORKBENCH_ENV_FILE=/tmp/selector-from-file.env'
+  ].join('\n'),{mode:0o600});
+  const env={WORKBENCH_ENV_FILE:selected};
+
+  await assert.rejects(loadWorkbenchEnv({root,env}),error=>{
+    assert.equal(error.code,'WORKBENCH_ENV_FILE_PARSE_INVALID');
+    assert.equal(error.message.includes(root),false);
+    assert.equal(error.message.includes(selected),false);
+    assert.equal(error.message.includes(secretMarker),false);
+    assert.equal(error.message.includes('UNDECLARED_SECRET'),false);
+    return true;
+  });
+  assert.equal(Object.hasOwn(env,'PORT'),false,'parse rejection must not partially mutate the environment');
+  assert.equal(WORKBENCH_ENV_KEYS.includes('WORKBENCH_ENV_FILE'),false,'the selector is not a loadable config key');
+});
+
+test('the development root .env cannot set the WORKBENCH_ENV_FILE control key',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-control-key-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  await fsp.writeFile(path.join(root,'.env'),'WORKBENCH_ENV_FILE=/tmp/untrusted.env\nPORT=4173\n','utf8');
+  const env={};
+
+  const result=await loadWorkbenchEnv({root,env});
+
+  assert.equal(env.PORT,'4173');
+  assert.equal(Object.hasOwn(env,'WORKBENCH_ENV_FILE'),false);
+  assert.deepEqual(result.ignored,[{line:1,key:'WORKBENCH_ENV_FILE',reason:'undeclared'}]);
+});
+
+test('WORKBENCH_ENV_FILE reports a stable error when the file changes while being read',async t=>{
+  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-env-read-race-'));
+  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const selected=path.join(root,'runtime.env');
+  await fsp.writeFile(selected,'PORT=4173\n',{mode:0o600});
+  const originalOpen=fsp.open.bind(fsp);
+  t.mock.method(fsp,'open',async(...args)=>{
+    const handle=await originalOpen(...args);
+    return{
+      stat:(...statArgs)=>handle.stat(...statArgs),
+      readFile:async(...readArgs)=>{
+        const source=await handle.readFile(...readArgs);
+        await fsp.writeFile(selected,'PORT=4999\nHOST=127.0.0.1\n',{mode:0o600});
+        return source;
+      },
+      close:()=>handle.close()
+    };
+  });
+
+  await assert.rejects(loadWorkbenchEnv({root,env:{WORKBENCH_ENV_FILE:selected}}),error=>{
+    assert.equal(error.code,'WORKBENCH_ENV_FILE_CHANGED_DURING_READ');
+    assert.equal(error.message.includes(root),false);
+    assert.equal(error.message.includes(selected),false);
+    return true;
+  });
 });
 
 test('doctor and server load safe .env values without executing command substitutions',async t=>{

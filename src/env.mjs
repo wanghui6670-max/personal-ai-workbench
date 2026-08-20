@@ -1,3 +1,4 @@
+import {constants as fsConstants} from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,111 @@ export const WORKBENCH_ENV_KEYS=Object.freeze([
 ]);
 
 const ALLOWED_KEYS=new Set(WORKBENCH_ENV_KEYS);
+const SELECTOR_KEY='WORKBENCH_ENV_FILE';
+
+function fail(message,code){
+  throw Object.assign(new Error(message),{code});
+}
+
+function selectedEnvFile(env){
+  if(!Object.hasOwn(env,SELECTOR_KEY))return null;
+  const descriptor=Object.getOwnPropertyDescriptor(env,SELECTOR_KEY);
+  if(!descriptor||!Object.hasOwn(descriptor,'value')||typeof descriptor.value!=='string'||descriptor.value.trim()===''){
+    fail('WORKBENCH_ENV_FILE must be a non-empty string.','WORKBENCH_ENV_FILE_INVALID');
+  }
+  if(!path.isAbsolute(descriptor.value)){
+    fail('WORKBENCH_ENV_FILE must be an absolute path.','WORKBENCH_ENV_FILE_NOT_ABSOLUTE');
+  }
+  return descriptor.value;
+}
+
+function fileMode(stat){
+  return Number(stat.mode&0o7777n);
+}
+
+function sameFileState(left,right){
+  return left.dev===right.dev&&
+    left.ino===right.ino&&
+    left.mode===right.mode&&
+    left.nlink===right.nlink&&
+    left.uid===right.uid&&
+    left.gid===right.gid&&
+    left.size===right.size&&
+    left.mtimeNs===right.mtimeNs&&
+    left.ctimeNs===right.ctimeNs;
+}
+
+function assertSelectedFile(stat){
+  if(stat.isSymbolicLink()){
+    fail('Selected workbench environment file must not be a symbolic link.','WORKBENCH_ENV_FILE_SYMLINK');
+  }
+  if(!stat.isFile()){
+    fail('Selected workbench environment file must be a regular file.','WORKBENCH_ENV_FILE_NOT_REGULAR');
+  }
+  if(fileMode(stat)!==0o600){
+    fail('Selected workbench environment file mode must be exactly 0600.','WORKBENCH_ENV_FILE_MODE_INVALID');
+  }
+}
+
+function selectedFileIoFailure(error,{missing=false,changed=false}={}){
+  if(error?.code==='ELOOP'){
+    fail('Selected workbench environment file must not be a symbolic link.','WORKBENCH_ENV_FILE_SYMLINK');
+  }
+  if(error?.code==='ENOENT'){
+    if(changed)fail('Selected workbench environment file changed while it was being read.','WORKBENCH_ENV_FILE_CHANGED_DURING_READ');
+    if(missing)fail('Selected workbench environment file is missing.','WORKBENCH_ENV_FILE_MISSING');
+  }
+  fail('Selected workbench environment file could not be read safely.','WORKBENCH_ENV_FILE_READ_FAILED');
+}
+
+async function readSelectedEnvFile(file){
+  let initial;
+  try{initial=await fsp.lstat(file,{bigint:true});}
+  catch(error){selectedFileIoFailure(error,{missing:true});}
+  assertSelectedFile(initial);
+
+  if(typeof fsConstants.O_NOFOLLOW!=='number'||fsConstants.O_NOFOLLOW===0){
+    fail('Selected workbench environment file could not be read safely.','WORKBENCH_ENV_FILE_READ_FAILED');
+  }
+
+  let handle;
+  try{handle=await fsp.open(file,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);}
+  catch(error){selectedFileIoFailure(error,{changed:error?.code==='ENOENT'});}
+
+  try{
+    let before;
+    try{before=await handle.stat({bigint:true});}
+    catch(error){selectedFileIoFailure(error);}
+    if(!sameFileState(initial,before)){
+      fail('Selected workbench environment file changed while it was being read.','WORKBENCH_ENV_FILE_CHANGED_DURING_READ');
+    }
+    assertSelectedFile(before);
+
+    let buffer;
+    try{buffer=await handle.readFile();}
+    catch(error){selectedFileIoFailure(error);}
+
+    let after;
+    try{after=await handle.stat({bigint:true});}
+    catch(error){selectedFileIoFailure(error);}
+    if(!sameFileState(before,after)){
+      fail('Selected workbench environment file changed while it was being read.','WORKBENCH_ENV_FILE_CHANGED_DURING_READ');
+    }
+
+    let final;
+    try{final=await fsp.lstat(file,{bigint:true});}
+    catch(error){selectedFileIoFailure(error,{changed:true});}
+    if(!sameFileState(after,final)){
+      fail('Selected workbench environment file changed while it was being read.','WORKBENCH_ENV_FILE_CHANGED_DURING_READ');
+    }
+    return buffer.toString('utf8');
+  }catch(error){
+    if(typeof error?.code==='string'&&error.code.startsWith('WORKBENCH_ENV_FILE_'))throw error;
+    selectedFileIoFailure(error);
+  }finally{
+    try{await handle.close();}catch{}
+  }
+}
 
 function decodeDoubleQuoted(value){
   let decoded='';
@@ -100,14 +206,22 @@ export function parseWorkbenchEnv(source){
 }
 
 export async function loadWorkbenchEnv({root=DEFAULT_ROOT,env=process.env}={}){
-  const file=path.join(root,'.env');
+  const selected=selectedEnvFile(env);
+  const file=selected??path.join(root,'.env');
   let source;
-  try{source=await fsp.readFile(file,'utf8');}
-  catch(error){
-    if(error?.code==='ENOENT')return{file,found:false,loaded:[],ignored:[]};
-    throw error;
+  if(selected){
+    source=await readSelectedEnvFile(file);
+  }else{
+    try{source=await fsp.readFile(file,'utf8');}
+    catch(error){
+      if(error?.code==='ENOENT')return{file,found:false,loaded:[],ignored:[]};
+      throw error;
+    }
   }
   const parsed=parseWorkbenchEnv(source);
+  if(selected&&parsed.ignored.length){
+    fail('Selected workbench environment file contains invalid or unsupported assignments.','WORKBENCH_ENV_FILE_PARSE_INVALID');
+  }
   const loaded=[];
   for(const [key,value] of Object.entries(parsed.values)){
     if(Object.hasOwn(env,key))continue;
