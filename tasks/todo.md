@@ -7,6 +7,11 @@ Tasks are dependency ordered. A checked box requires the listed verification evi
   - Verify: read `CAPABILITY_MAP_R1.md`, `docs/RELEASE_R1_CONTRACT.md`, and `tasks/plan.md`.
   - Files: `CAPABILITY_MAP_R1.md`, `docs/RELEASE_R1_CONTRACT.md`, `tasks/plan.md`, `tasks/todo.md`.
 
+- [ ] Task R1-001B: Remove v2 source-contract drift from formal operations guidance.
+  - Acceptance: README, deployment guidance, doctor, and P0 reports identify Feishu explicit todos as the personal-task source and GetNote only as a confirmed content source.
+  - Verify: task-source documentation tests, doctor JSON contract tests, and a readback of the authoritative documentation tree.
+  - Files: update documentation and diagnostics in <=5-file slices.
+
 - [x] Task R1-002: Add a reproducible root install contract.
   - Acceptance: Node 24 can run `npm ci` from a clean dependency state without creating an untracked lockfile.
   - Verify: `npm ci --ignore-scripts --no-audit --no-fund && npm test`.
@@ -93,7 +98,7 @@ Tasks are dependency ordered. A checked box requires the listed verification evi
   - Files: no source changes; this is a controlled local deployment step requiring the production-change gate.
 
 - [ ] Task R1-018: Run real non-production integration canaries.
-  - Acceptance: every enabled Feishu/GetNote/Provider/DSH/iPhone path has one success and one recovery receipt using non-sensitive test data.
+  - Acceptance: Feishu and every other enabled GetNote/Provider/DSH path have one success and one recovery receipt using non-sensitive test data; iPhone is out of default R1 unless a private-mobile profile is separately approved.
   - Verify: read back actual remote/local effects and safe receipts; replay/mock results do not count.
   - Files: acceptance artifacts only; external writes require the task-specific confirmation gate.
 

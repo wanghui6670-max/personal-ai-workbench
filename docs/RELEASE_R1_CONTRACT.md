@@ -36,12 +36,16 @@ R1 只支持 `local_single_user` 正式画像：
 
 任何 LAN、Tailscale、公网、反向代理或多用户访问都不属于本画像，必须另立发布合同。
 
+因此，默认 R1 不承诺 iPhone 从另一台设备直连 Mac。现有 `/api/capture` 合同继续保留并在本机自动化中回归，但真实 iPhone 接入只有在另立 `local_private_mobile` 画像、补齐认证与可信网络边界后才进入现场验收；未启用时必须显示为不可用，不能把本机 API 测试写成 iPhone 验收。
+
 ## 3. R1 范围
 
 ### 3.1 必须完成
 
 | Requirement | 必须成立的结果 | 权威证据 |
 |---|---|---|
+| `R1-SCOPE-01` | 正式画像固定为 `local_single_user`，远程/iPhone 接入不混入默认 loopback 发布承诺 | 发布合同、配置与现场监听读回 |
+| `R1-SSOT-01` | 正式文档和 doctor 均服从 v3 来源合同：飞书明确待办是主入口，GetNote 仅为内容来源 | 文档合同测试、doctor JSON 回执 |
 | `R1-RUNTIME-01` | 根依赖可通过 lockfile 和 Node 24 使用 `npm ci` 重建 | lockfile、冷目录安装日志、全量测试 |
 | `R1-RUNTIME-02` | Git HEAD、安装提交、运行提交和静态资产 manifest/hash 一致 | health、安装 manifest、service status、浏览器启动门 |
 | `R1-RUNTIME-03` | 同一 `DATA_DIR` 只能有一个写入进程 | 进程锁测试、并发启动负向测试 |
@@ -54,12 +58,13 @@ R1 只支持 `local_single_user` 正式画像：
 | `R1-EGRESS-01` | DSH/Joycrew 工具按字段级合同最小化出站，敏感 canary 不离开边界 | 合同测试、egress receipt |
 | `R1-OPS-01` | readiness 与外部依赖诊断分离，关键操作有 requestId、阶段、时延和安全错误码 | diagnostics/API/log 读回 |
 | `R1-OPS-02` | 备份范围、RPO/RTO、保留和恢复边界明确；可从空目录恢复本地状态及收据 | 恢复演练报告 |
-| `R1-FIELD-01` | 当前目标 Mac 完成 Feishu/GetNote/Provider/DSH（仅启用项）、浏览器/iPhone、重启恢复 canary | 当前时间戳的现场回执 |
+| `R1-FIELD-01` | 当前目标 Mac 完成 Feishu 主链、浏览器与重启恢复 canary；GetNote/Provider/DSH 仅在启用时验收 | 当前时间戳的现场回执 |
 | `R1-FIELD-02` | 连续至少 72 小时，建议 5–7 个工作日，未发生数据丢失、重复外部写、未解释 fallback 或不可恢复中断 | Pilot 日志与最终发布结论 |
 
 ### 3.2 不进入 R1
 
 - 公网、多用户、RBAC、HA、多实例、Kubernetes；
+- 默认 loopback 画像下的 iPhone 远程接入；
 - 为了未来扩展而重写为 SQLite 或其他数据库；
 - Joycrew 全业务闭环、Evening Checkpoint、Decision Projection、AIHot、四象限；
 - 未经单独确认的真实客户数据、生产外部写入、远端部署、Git push 或托管平台设置变更。
@@ -82,7 +87,7 @@ R1 只有在以下证据全部属于同一候选提交时才可发布：
 1. `npm ci`、`npm test`、`npm run verify` 通过；
 2. 当前 SHA、安装 SHA、运行 SHA、静态资产 hash 完全一致；
 3. 个人主链在 AI/Feishu/Joycrew 不可用时仍可完成；
-4. 启用的真实外部能力各有成功回执和故障恢复回执；
+4. Feishu 主链以及其他已启用的真实外部能力各有成功回执和故障恢复回执；
 5. 重启后 Todo、Today、Capture 幂等和 Harness 持久对象连续；
 6. 从空目录恢复演练达到记录的 RPO/RTO；
 7. 72 小时以上 Pilot 通过；

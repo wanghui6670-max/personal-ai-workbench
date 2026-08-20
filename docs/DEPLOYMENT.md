@@ -1,18 +1,35 @@
 # 部署说明
 
-Personal AI Workbench 必须运行在能访问以下资源的长期主机上：
+> 当前 R1 部署合同以 `RELEASE_R1_CONTRACT.md` 和 `WORKBENCH_V3_SOURCE_CONTRACT.md` 为准。本文后半保留的 GetNote Task Sync、每日工作日记、VPS 和 Docker 内容只用于历史兼容或开发验证，不能覆盖 v3 来源合同。
+
+R1 正式运行画像：`local_single_user`。正式服务运行在一台受信任 Mac、一个 macOS 用户、一个 Node 进程和一个独占 `DATA_DIR` 上，由 LaunchAgent 常驻并默认只监听 loopback。
+
+当前个人事项主链固定为：
+
+```text
+飞书云文档中的明确待办（个人工作事项主入口）
+→ 用户主动同步
+→ Workbench Inbox
+→ AI 建议或人工处理
+→ 用户确认 Todo
+→ 用户决定 Today
+```
+
+GetNote 只作为经用户确认的自媒体内容来源，不再是个人待办来源。Legacy GetNote Task Sync v2 只为历史数据兼容保留，不属于 R1。
+
+R1 主机必须能访问：
 
 - 持久化数据目录；
 - 真实项目工作区；
-- 可用的只读 GetNote 运行时；
-- 可选：飞书项目记录或每日工作日记需要的 `lark-cli`；
-- 私有 ICS 输出目录。
+- 当前飞书明确待办来源；
+- 可选：GetNote 内容来源、飞书项目记录、Provider 或 DSH 的受控运行时；
+- 已启用能力所需的本机 CLI，但不把 CLI 登录态打包进仓库或镜像。
 
 普通无状态云函数不能直接读取真实项目工作区，也不能天然持有得到大脑或飞书 CLI 登录态。
 
-## 1. 两种 GetNote 运行形态
+## 1. 可选 GetNote 内容来源的两种运行形态
 
-业务层统一使用 `GetNoteReader`：
+GetNote 内容同步业务层复用 `GetNoteReader`。其中 `fetchTodos` 只供 Legacy Task Sync 回归，不进入当前交互式个人待办主链：
 
 ```text
 listNotes
@@ -29,7 +46,7 @@ GETNOTE_RUNTIME_MODE=local_cli
 
 工作台进程所在用户必须安装并授权 `getnote`。
 
-### VPS/Docker 推荐：`private_http`
+### 历史 VPS/Docker 兼容：`private_http`
 
 ```text
 VPS 宿主机 getnote CLI
@@ -114,7 +131,9 @@ GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1
 
 不要把 sidecar 直接暴露到公网。
 
-## 4. GetNote Task Sync v2
+## 4. Legacy GetNote Task Sync v2（不属于 R1）
+
+本节只描述保留源码的历史行为，不能作为当前部署入口、doctor 成功标准或 R1 现场验收链。当前运行不得把 `external_tasks_sync`、`external_task_integration_update` 或 `daily_summary_publish` 重新注册到交互式 MCP/AI 工具面。
 
 每次用户主动同步读取：
 
@@ -152,9 +171,9 @@ Asia/Shanghai
 
 因此“下午 3 点”等无 offset 时间不依赖 VPS 系统时区。
 
-## 5. 飞书每日工作日记
+## 5. Legacy 飞书每日工作日记 sink
 
-飞书是可选沉淀 sink，不再是个人待办来源，也不是启用 GetNote Task Sync 的前置条件。
+本节的“每日工作日记”是旧 GetNote Task Sync 的可选沉淀 sink；它与当前作为个人工作事项主入口的“飞书明确待办文档”不是同一个职责。每日工作日记 sink 不属于 R1 主链，也不是启用 GetNote 内容同步的前置条件。
 
 未配置飞书 URL 时：
 
@@ -224,18 +243,18 @@ https://<tenant>.feishu.cn/wiki/<document-token>
 npm run doctor
 ```
 
-启用外部任务管线后：
+doctor 必须按当前启用能力分别报告：
 
 - 检查 Node.js、Git、数据目录与工作区；
-- 检查得到大脑管线配置和 IANA 时区；
+- 检查飞书明确待办主入口的配置与所需 `lark-cli`，但不把配置存在冒充真实读写成功；
+- 仅在启用 GetNote 内容来源时检查其只读 Runtime；
 - `local_cli`：运行 `getnote doctor -o json`；
 - `private_http`：通过 Reader 对 sidecar 做只读连通性和鉴权检查，不要求 Workbench 容器内存在 getnote CLI；
-- 只有配置飞书每日工作日记 sink 时才要求 `lark-cli`；
-- ICS 开启时检查输出路径。
+- Legacy 每日工作日记和 ICS 只能作为兼容检查单独显示，不能成为 v3 主链成功的替代证据。
 
-doctor 不执行得到大脑写入、飞书写入或系统日历导入，因此通过不等于 live 数据验证。
+doctor 不执行得到大脑写入、飞书写入或系统日历导入；普通输出和 `--json` 通过都不等于真实业务现场验收。
 
-## 8. 错误来源配置迁移
+## 8. Legacy 错误来源配置迁移
 
 如果现有配置包含此前误接入产生的：
 
@@ -255,6 +274,8 @@ cliFlavor = ...
 
 ## 9. 局域网 / Tailscale / 内网
 
+本节不属于默认 R1。启用任何非 loopback 绑定前必须另立 `local_private_mobile` 或远程部署合同，并单独完成身份、Origin、Cookie、网络和回滚验收。
+
 ```text
 HOST=0.0.0.0
 WORKBENCH_PASSWORD=<强密码>
@@ -272,6 +293,8 @@ COOKIE_SECURE=1
 
 ## 10. iPhone Shortcut
 
+默认 loopback 的 R1 不承诺另一台 iPhone 可以访问 Mac。本节只保留 Capture 协议说明；真实手机连接必须先批准并完成上一节的安全私网画像。
+
 `POST /api/capture` 是独立快速采集入口，不是得到大脑主来源。
 
 ```text
@@ -283,6 +306,8 @@ CAPTURE_TOKEN=<独立长随机 token>
 详见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
 
 ## 11. Docker
+
+Docker 在 R1 中只作为构建和 CI smoke 面，不是正式运行入口。它必须保持 fail closed，不能使用 `ALLOW_INSECURE_PUBLIC=1` 的结果冒充正式部署证据。
 
 ```bash
 docker compose config
@@ -318,9 +343,9 @@ host.docker.internal:host-gateway
 - 飞书当前可达或有编辑权限；
 - ICS 已被日历客户端成功导入；
 - OpenAI 当前可达；
-- 真实浏览器和 iPhone 已验收。
+- 真实浏览器已验收；默认 R1 不包含 iPhone 远程连接。
 
-GetNote/飞书的部署 readiness 由 `npm run doctor` 补充检查。
+飞书主入口和其他已启用依赖由 `npm run doctor` 的独立诊断补充检查，但只有真实 canary 读回才算现场验收。
 
 ## 13. AI Provider
 
@@ -403,6 +428,8 @@ npm start
 部署者自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
 
 ## 18. 云部署限制
+
+云部署不属于 R1。
 
 无状态 Serverless 环境不能直接读取真实项目目录，也不适合持有个人 CLI 登录态或长期私有数据目录。
 

@@ -52,6 +52,15 @@ test('v3 normative source contract keeps GetNote only as confirmed self-media co
   assert.match(contentTools,/requiresConfirmation:true/);
 });
 
+test('deployment guidance keeps legacy GetNote task sync outside the R1 personal-task source',async()=>{
+  const deployment=await read('docs/DEPLOYMENT.md');
+  assert.match(deployment,/R1 正式运行画像：`local_single_user`/);
+  assert.match(deployment,/飞书云文档中的明确待办.*个人工作事项主入口/s);
+  assert.match(deployment,/GetNote.*自媒体内容来源/s);
+  assert.match(deployment,/Legacy GetNote Task Sync v2.*不属于 R1/s);
+  assert.doesNotMatch(deployment,/飞书是可选沉淀 sink，不再是个人待办来源/);
+});
+
 test('interactive registry exposes Feishu initialization, batch and content tools but not diary extraction or legacy GetNote task tools',async()=>{
   const [contract,registry,legacyTools,taskCli,runtime,diaryTool,batchTool]=await Promise.all([
     read('docs/WORKBENCH_V3_SOURCE_CONTRACT.md'),

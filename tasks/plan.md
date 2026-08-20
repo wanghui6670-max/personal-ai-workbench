@@ -5,10 +5,11 @@ Authority: `docs/RELEASE_R1_CONTRACT.md` and `CAPABILITY_MAP_R1.md`.
 ## Phase 1 — Release contract and reproducible runtime
 
 1. Commit the R1 target, requirement IDs, authority order, and non-goals.
-2. Add a root lockfile and verify clean `npm ci` on Node 24.
-3. Add immutable runtime identity: full Git SHA, build timestamp, and static asset manifest/hash.
-4. Make service status and browser boot fail closed on runtime/artifact mismatch.
-5. Repair the P0 host gate so it consumes structured diagnostics rather than localized output text.
+2. Correct README/deployment/doctor language that still conflicts with the v3 source contract.
+3. Add a root lockfile and verify clean `npm ci` on Node 24.
+4. Add immutable runtime identity: full Git SHA, build timestamp, and static asset manifest/hash.
+5. Make service status and browser boot fail closed on runtime/artifact mismatch.
+6. Repair the P0 host gate so it consumes structured diagnostics rather than localized output text.
 
 Checkpoint: a fresh isolated service can prove exactly which source and static assets it is serving. Do not switch the real LaunchAgent yet.
 
@@ -46,7 +47,7 @@ Checkpoint: an empty-directory restore and failed-upgrade rollback both meet rec
 
 1. Install the exact candidate through the controlled LaunchAgent cutover.
 2. Run non-production canaries for each enabled external integration.
-3. Run the complete browser and iPhone personal flow plus restart recovery.
+3. Run the complete browser personal flow plus restart recovery. iPhone is tested only under a separately approved private-mobile profile.
 4. Run a minimum 72-hour pilot, preferably 5–7 working days.
 5. Produce a requirement-by-requirement release report and rollback decision.
 
