@@ -39,6 +39,7 @@ const stableDoctorCheckIds = [
   'node_runtime',
   'data_dir',
   'workspace_root',
+  'feishu_inbox',
   'getnote_runtime',
   'lark_cli',
   'ai_provider',
@@ -89,8 +90,28 @@ async function prepareEnabledStore(root,{journalDocumentUrl=''}={}){
   return{dataDir,workspaceRoot};
 }
 
+async function prepareFeishuInboxStore(root){
+  const dataDir=path.join(root,'data');
+  const workspaceRoot=path.join(root,'workspace');
+  await fsp.mkdir(workspaceRoot,{recursive:true});
+  const store=new JsonStore(dataDir);
+  await store.ensure();
+  await store.updateConfig(config=>{
+    config.dataSource={
+      provider:'feishu_doc',
+      documentUrl:'https://example.feishu.cn/wiki/r1-inbox',
+      inboxHeading:'收件箱',
+      inboxPrefix:'[INBOX]'
+    };
+    return true;
+  });
+  return{dataDir,workspaceRoot};
+}
+
 async function startPrivateRuntime(token){
+  let requests=0;
   const server=http.createServer((req,res)=>{
+    requests+=1;
     if(req.method!=='GET'||!req.url?.startsWith('/v1/notes')){res.writeHead(404).end();return;}
     if(req.headers.authorization!==`Bearer ${token}`){res.writeHead(401).end();return;}
     res.writeHead(200,{'Content-Type':'application/json'});
@@ -98,10 +119,10 @@ async function startPrivateRuntime(token){
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const address=server.address();
-  return{server,baseUrl:`http://127.0.0.1:${address.port}`};
+  return{server,baseUrl:`http://127.0.0.1:${address.port}`,requestCount:()=>requests};
 }
 
-test('doctor preserves a pre-existing legacy write-test file and reports disabled external pipeline', async t => {
+test('doctor preserves a pre-existing legacy write-test file and reports the R1 source contract', async t => {
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-'));
   t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
 
@@ -115,7 +136,8 @@ test('doctor preserves a pre-existing legacy write-test file and reports disable
   const result = await runDoctor({ DATA_DIR: dataDir, WORKSPACE_ROOT: workspaceRoot });
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /✓ 得到大脑待办管线: 未启用/);
+  assert.match(result.stdout, /✓ 个人事项来源合同: 飞书云文档中的明确待办是个人事项主入口/);
+  assert.match(result.stdout, /✓ GetNote 内容来源: 可选内容来源/);
   assert.equal(await fsp.readFile(legacyProbe, 'utf8'), originalContent);
   const entries = await fsp.readdir(workspaceRoot);
   assert.deepEqual(entries.filter(name => name.startsWith('.workbench-write-test-')), [], 'doctor must clean up its unique probe');
@@ -137,7 +159,7 @@ test('doctor exits non-zero when the workspace target is a file', async t => {
   assert.equal(await fsp.readFile(workspaceFile, 'utf8'), originalContent);
 });
 
-test('doctor requires GetNote runtime but not lark-cli when Feishu sink is not configured', async t => {
+test('doctor does not make legacy GetNote task sync required when Feishu inbox is not configured', async t => {
   const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-doctor-getnote-only-'));
   t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
   const {dataDir,workspaceRoot}=await prepareEnabledStore(tempRoot);
@@ -145,15 +167,13 @@ test('doctor requires GetNote runtime but not lark-cli when Feishu sink is not c
 
   const result=await runDoctor({DATA_DIR:dataDir,WORKSPACE_ROOT:workspaceRoot,PATH:emptyBin,GETNOTE_RUNTIME_MODE:'local_cli'});
 
-  assert.equal(result.code,1,result.stderr||result.stdout);
-  assert.match(result.stdout,/✓ 得到大脑待办管线: 最近 100 篇 \+ 未完成旧笔记追踪/);
-  assert.match(result.stdout,/! GetNote 读取运行时: local_cli 未找到 getnote/);
-  assert.match(result.stdout,/✓ 飞书每日工作日记: 未配置；核心 GetNote → Workbench 同步不依赖 lark-cli/);
-  assert.doesNotMatch(result.stdout,/! 飞书每日工作日记:/);
-  assert.match(result.stdout,/✓ 本机日历路径:/);
+  assert.equal(result.code,0,result.stderr||result.stdout);
+  assert.match(result.stdout,/✓ 飞书明确待办收件箱: 未配置/);
+  assert.match(result.stdout,/✓ GetNote 内容来源: 可选内容来源/);
+  assert.doesNotMatch(result.stdout,/getnote doctor|GetNote 读取运行时|飞书每日工作日记/);
 });
 
-test('doctor requires lark-cli only when the Feishu journal sink is configured', async t => {
+test('doctor ignores legacy GetNote journal sink settings for R1 readiness', async t => {
   const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-doctor-feishu-'));
   t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
   const {dataDir,workspaceRoot}=await prepareEnabledStore(tempRoot,{journalDocumentUrl:'https://example.feishu.cn/wiki/journal'});
@@ -161,12 +181,12 @@ test('doctor requires lark-cli only when the Feishu journal sink is configured',
 
   const result=await runDoctor({DATA_DIR:dataDir,WORKSPACE_ROOT:workspaceRoot,PATH:emptyBin,GETNOTE_RUNTIME_MODE:'local_cli'});
 
-  assert.equal(result.code,1,result.stderr||result.stdout);
-  assert.match(result.stdout,/! GetNote 读取运行时: local_cli 未找到 getnote/);
-  assert.match(result.stdout,/! 飞书每日工作日记: 已配置飞书 sink，但未找到 lark-cli 可执行文件/);
+  assert.equal(result.code,0,result.stderr||result.stdout);
+  assert.match(result.stdout,/✓ 飞书明确待办收件箱: 未配置/);
+  assert.match(result.stdout,/✓ GetNote 内容来源: 可选内容来源/);
 });
 
-test('doctor accepts private_http GetNote Runtime without a local getnote binary or Feishu CLI',async t=>{
+test('doctor leaves a configured legacy GetNote runtime unprobed for R1 readiness',async t=>{
   const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-doctor-private-runtime-'));
   t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
   const {dataDir,workspaceRoot}=await prepareEnabledStore(tempRoot);
@@ -181,10 +201,9 @@ test('doctor accepts private_http GetNote Runtime without a local getnote binary
   });
 
   assert.equal(result.code,0,result.stderr||result.stdout);
-  assert.match(result.stdout,/✓ GetNote 读取运行时: private_http:/);
-  assert.match(result.stdout,/只读连通性与鉴权检查通过/);
-  assert.match(result.stdout,/✓ 飞书每日工作日记: 未配置/);
-  assert.doesNotMatch(result.stdout,/未找到 getnote/);
+  assert.match(result.stdout,/✓ GetNote 内容来源: 可选内容来源；不读取 GetNote/);
+  assert.doesNotMatch(result.stdout,/private_http:|只读连通性与鉴权检查通过|未找到 getnote/);
+  assert.equal(runtime.requestCount(),0,'R1 doctor must not read legacy GetNote content');
 });
 
 test('doctor --json emits only the stable machine-readable contract without sensitive values', async t => {
@@ -225,7 +244,7 @@ test('doctor --json returns a complete report and non-zero exit when a required 
   assert.equal(report.checks.find(check => check.id === 'workspace_root')?.ok, false);
 });
 
-test('doctor --json does not claim a live GetNote read when the required CLI check fails', async t => {
+test('doctor --json keeps legacy GetNote configuration optional and unprobed', async t => {
   const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'workbench-doctor-json-getnote-'));
   t.after(() => fsp.rm(tempRoot, { recursive: true, force: true }));
   const { dataDir, workspaceRoot } = await prepareEnabledStore(tempRoot);
@@ -239,13 +258,13 @@ test('doctor --json does not claim a live GetNote read when the required CLI che
     GETNOTE_RUNTIME_MODE: 'local_cli'
   }, ['--json']);
 
-  assert.equal(result.code, 1, result.stderr || result.stdout);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
   const report = parseDoctorJson(result);
   assert.deepEqual(report.checks.find(check => check.id === 'getnote_runtime'), {
     id: 'getnote_runtime',
-    required: true,
-    ok: false,
-    mode: 'local_cli',
+    required: false,
+    ok: true,
+    mode: 'optional_content',
     liveRead: false
   });
   assert.deepEqual(report.checks.find(check => check.id === 'lark_cli'), {
@@ -254,5 +273,61 @@ test('doctor --json does not claim a live GetNote read when the required CLI che
     ok: true,
     mode: 'disabled',
     liveRead: false
+  });
+});
+
+test('doctor --json makes configured Feishu explicit inbox the required R1 source check',async t=>{
+  const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-doctor-feishu-inbox-'));
+  t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
+  const {dataDir,workspaceRoot}=await prepareFeishuInboxStore(tempRoot);
+  const emptyBin=path.join(tempRoot,'empty-bin');
+  await fsp.mkdir(emptyBin,{recursive:true});
+
+  const result=await runDoctor({DATA_DIR:dataDir,WORKSPACE_ROOT:workspaceRoot,PATH:emptyBin},['--json']);
+
+  assert.equal(result.code,1,result.stderr||result.stdout);
+  const report=parseDoctorJson(result);
+  assert.deepEqual(report.checks.find(check=>check.id==='feishu_inbox'),{
+    id:'feishu_inbox',required:true,ok:false,mode:'configured',liveRead:false
+  });
+  assert.deepEqual(report.checks.find(check=>check.id==='getnote_runtime'),{
+    id:'getnote_runtime',required:false,ok:true,mode:'optional_content',liveRead:false
+  });
+});
+
+test('doctor ignores legacy externalTaskPipeline for R1 readiness and treats GetNote as optional content',async t=>{
+  const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),'workbench-doctor-legacy-source-'));
+  t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
+  const {dataDir,workspaceRoot}=await prepareEnabledStore(tempRoot);
+  const emptyBin=path.join(tempRoot,'empty-bin');
+  await fsp.mkdir(emptyBin,{recursive:true});
+
+  const result=await runDoctor({DATA_DIR:dataDir,WORKSPACE_ROOT:workspaceRoot,PATH:emptyBin},['--json']);
+
+  assert.equal(result.code,0,result.stderr||result.stdout);
+  const report=parseDoctorJson(result);
+  assert.equal(report.checks.find(check=>check.id==='feishu_inbox')?.required,false);
+  assert.equal(report.checks.find(check=>check.id==='getnote_runtime')?.required,false);
+  assert.equal(report.checks.find(check=>check.id==='getnote_runtime')?.mode,'optional_content');
+  assert.equal(report.checks.find(check=>check.id==='getnote_runtime')?.liveRead,false);
+});
+
+test('doctor --json emits a complete safe report when AI provider configuration is invalid',async t=>{
+  const secretMarker='doctor-invalid-ai-secret-ef8c9b';
+  const tempRoot=await fsp.mkdtemp(path.join(os.tmpdir(),`workbench-${secretMarker}-`));
+  t.after(()=>fsp.rm(tempRoot,{recursive:true,force:true}));
+  const dataDir=path.join(tempRoot,'data');
+  const workspaceRoot=path.join(tempRoot,'workspace');
+
+  const result=await runDoctor({
+    DATA_DIR:dataDir,WORKSPACE_ROOT:workspaceRoot,
+    AI_PROVIDER_PROFILE:'not-a-real-profile',AI_PROVIDER_API_KEY:secretMarker
+  },['--json']);
+
+  assert.equal(result.code,0,result.stderr||result.stdout);
+  assert.doesNotMatch(result.stdout,new RegExp(secretMarker));
+  const report=parseDoctorJson(result);
+  assert.deepEqual(report.checks.find(check=>check.id==='ai_provider'),{
+    id:'ai_provider',required:false,ok:false,mode:'invalid_config',liveRead:false
   });
 });

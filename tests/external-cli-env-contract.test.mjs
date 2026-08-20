@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 
 async function read(path){return fsp.readFile(path,'utf8');}
 
-test('all GetNote and Lark child-process paths apply the shared environment isolation policy',async()=>{
+test('all active GetNote and Lark child-process paths apply the shared environment isolation policy',async()=>{
   const [runtime,dailyJournal,legacyFeishu,doctor,envModule]=await Promise.all([
     read('src/getnote-runtime.mjs'),
     read('src/feishu-daily-journal.mjs'),
@@ -18,9 +18,7 @@ test('all GetNote and Lark child-process paths apply the shared environment isol
   assert.match(dailyJournal,/larkCliEnv\(processEnv\)/);
   assert.match(legacyFeishu,/larkCliEnv\(process\.env\)/);
 
-  assert.match(doctor,/env:getnoteCliEnv\(process\.env\)/);
   assert.match(doctor,/env:larkCliEnv\(process\.env\)/);
-  assert.doesNotMatch(doctor,/getnote[^\n]{0,200}env:\s*\{\s*\.\.\.process\.env\s*\}/s);
 
   assert.doesNotMatch(envModule,/FEISHU_CLI_PATH/,'Workbench env must not expose an arbitrary Feishu binary path');
 });
