@@ -8,4 +8,4 @@ export { createSessionStore } from './session-store.mjs';
 export { createSessionManager } from './session-manager.mjs';
 export { defineRuntimeAdapter } from './runtime-adapter.mjs';
 export { createDshRuntimeAdapter, contextToRoute } from './dsh-runtime-adapter.mjs';
-export { createContextAwareDriver } from './context-aware-driver.mjs';
+export { createContextAwareDriver, createHarnessRunScope } from './context-aware-driver.mjs';

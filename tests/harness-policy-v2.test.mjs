@@ -51,7 +51,7 @@ test('broker does not call provider when approval is required and unconfirmed',a
   assert.deepEqual(calls,[]);
 });
 
-test('legacy allowlist module still exports the same 21 tools',()=>{
-  assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,21);
+test('legacy allowlist module still exports the same 23 tools',()=>{
+  assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,23);
   assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.includes('todo_create'),false);
 });

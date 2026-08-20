@@ -1,47 +1,149 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+const PRIVATE_DIRECTORY_MODE=0o700;
+const PRIVATE_FILE_MODE=0o600;
+const DEFAULT_MAX_RECORDS=2_000;
 
 function clone(value){
   return JSON.parse(JSON.stringify(value));
 }
 
-export function createExecutionStore({file}={}){
-  if(!file)throw new Error('createExecutionStore requires file');
-  const records=new Map();
+function sortedRecords(source){
+  return [...source.values()]
+    .map(clone)
+    .sort((a,b)=>String(a.startedAt||'').localeCompare(String(b.startedAt||'')));
+}
 
-  async function load(){
-    try{
-      const raw=JSON.parse(await fsp.readFile(file,'utf8'));
-      const items=Array.isArray(raw)?raw:Array.isArray(raw?.executions)?raw.executions:[];
-      records.clear();
-      for(const item of items){
-        if(item&&typeof item.executionId==='string'&&item.executionId)records.set(item.executionId,clone(item));
-      }
-    }catch(error){
-      if(error?.code!=='ENOENT')throw error;
-    }
-    return list();
+function executionItemsFrom(payload){
+  if(Array.isArray(payload))return payload;
+  if(Array.isArray(payload?.executions))return payload.executions;
+  return null;
+}
+
+export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()=>new Date()}={}){
+  if(!file)throw new Error('createExecutionStore requires file');
+  const retention=Number.isInteger(maxRecords)&&maxRecords>0?maxRecords:DEFAULT_MAX_RECORDS;
+  const records=new Map();
+  let queue=Promise.resolve();
+
+  function enqueue(operation){
+    const run=queue.then(operation,operation);
+    queue=run.then(()=>undefined,()=>undefined);
+    return run;
   }
 
-  async function flush(){
-    await fsp.mkdir(path.dirname(file),{recursive:true});
-    const items=await list();
-    await fsp.writeFile(file,JSON.stringify({executions:items},null,2));
-    return items;
+  async function ensureDirectory(){
+    const directory=path.dirname(file);
+    await fsp.mkdir(directory,{recursive:true,mode:PRIVATE_DIRECTORY_MODE});
+    await fsp.chmod(directory,PRIVATE_DIRECTORY_MODE);
+  }
+
+  async function atomicWrite(items){
+    await ensureDirectory();
+    const tmp=`${file}.${process.pid}.${randomUUID()}.tmp`;
+    let created=false;
+    try{
+      await fsp.writeFile(tmp,JSON.stringify({executions:items},null,2),{
+        encoding:'utf8',
+        flag:'wx',
+        mode:PRIVATE_FILE_MODE
+      });
+      created=true;
+      await fsp.rename(tmp,file);
+      created=false;
+      await fsp.chmod(file,PRIVATE_FILE_MODE);
+    }finally{
+      if(created)await fsp.unlink(tmp).catch(()=>{});
+    }
+  }
+
+  function retainedItems(source){
+    const items=sortedRecords(source);
+    const running=items.filter(item=>item.status==='running');
+    const terminal=items.filter(item=>item.status!=='running');
+    const retainedTerminal=terminal.length>retention?terminal.slice(-retention):terminal;
+    return [...running,...retainedTerminal]
+      .sort((a,b)=>String(a.startedAt||'').localeCompare(String(b.startedAt||'')));
+  }
+
+  function replaceRecords(items){
+    records.clear();
+    for(const item of items)records.set(item.executionId,clone(item));
+  }
+
+  async function recoverCorruptFile(){
+    await ensureDirectory();
+    const stamp=now().toISOString().replace(/[:.]/g,'-');
+    const backup=`${file}.corrupt-${stamp}-${randomUUID()}.json`;
+    await fsp.copyFile(file,backup);
+    await fsp.chmod(backup,PRIVATE_FILE_MODE);
+    await atomicWrite([]);
+    records.clear();
+    return [];
+  }
+
+  async function load(){
+    return enqueue(async()=>{
+      let text;
+      try{
+        text=await fsp.readFile(file,'utf8');
+      }catch(error){
+        if(error?.code==='ENOENT'){
+          records.clear();
+          return [];
+        }
+        throw error;
+      }
+      let raw;
+      try{
+        raw=JSON.parse(text);
+      }catch(error){
+        if(error instanceof SyntaxError)return recoverCorruptFile();
+        throw error;
+      }
+      const source=executionItemsFrom(raw);
+      if(source===null)return recoverCorruptFile();
+      const loadedRecords=new Map();
+      let changed=false;
+      for(const item of source){
+        if(!item||typeof item.executionId!=='string'||!item.executionId)continue;
+        const record=clone(item);
+        if(record.status==='running'){
+          record.status='interrupted';
+          record.completedAt=now().toISOString();
+          record.errorCode='HARNESS_EXECUTION_INTERRUPTED';
+          record.resultSummary='interrupted during previous process';
+          changed=true;
+        }
+        loadedRecords.set(record.executionId,record);
+      }
+      const items=retainedItems(loadedRecords);
+      if(items.length!==loadedRecords.size)changed=true;
+      replaceRecords(items);
+      if(changed)await atomicWrite(items);
+      return items.map(clone);
+    });
   }
 
   async function append(record){
     if(!record?.executionId)throw new Error('executionId 必填');
-    records.set(record.executionId,clone(record));
-    await flush();
-    return clone(record);
+    return enqueue(async()=>{
+      const nextRecords=new Map(records);
+      nextRecords.set(record.executionId,clone(record));
+      const items=retainedItems(nextRecords);
+      await atomicWrite(items);
+      replaceRecords(items);
+      return clone(record);
+    });
   }
 
   async function list({sessionRef,limit}={}){
-    let items=[...records.values()].map(clone);
+    let items=sortedRecords(records);
     if(sessionRef)items=items.filter(item=>item.sessionRef===sessionRef);
-    items.sort((a,b)=>String(a.startedAt||'').localeCompare(String(b.startedAt||'')));
-    if(Number.isInteger(limit)&&limit>=0)items=items.slice(-limit);
+    if(limit===0)return [];
+    if(Number.isInteger(limit)&&limit>0)items=items.slice(-limit);
     return items;
   }
 

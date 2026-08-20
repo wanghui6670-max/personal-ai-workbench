@@ -19,6 +19,8 @@ export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'confirmation_list',
   'business_list',
   'project_records_read',
+  'project_overview',
+  'project_knowledge_search',
   'joycrew_workspace_open',
   'joycrew_status_read',
   'joycrew_dashboard_read',

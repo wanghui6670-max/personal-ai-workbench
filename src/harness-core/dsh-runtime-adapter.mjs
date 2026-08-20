@@ -1,10 +1,12 @@
 import { defineRuntimeAdapter } from './runtime-adapter.mjs';
 
 export function contextToRoute(context={}){
-  return {
+  const route={
     view:context.view||context.route?.view||'today',
     id:context.projectId||context.id||context.route?.id||null
   };
+  if(context.working)route.working=context.working;
+  return route;
 }
 
 export function createDshRuntimeAdapter({navigator}={}){

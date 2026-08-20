@@ -9,6 +9,7 @@ export function createSessionManager({store,projectLookup=null,execution=null,au
   const lookup=projectLookup||(async()=>null);
   const readGit=authorities?.readGit||(async()=>null);
   const readFeishu=authorities?.readFeishu||(async()=>null);
+  const openingProjects=new Map();
 
   async function open(input={}){
     if(input.type&&input.type!=='project'){
@@ -21,19 +22,29 @@ export function createSessionManager({store,projectLookup=null,execution=null,au
     if(!projectId)throw new Error('openProject requires projectId');
     const existing=store.list().find(item=>item.type==='project'&&item.projectId===projectId);
     if(existing)return existing;
-    const record={
-      id:`sess_${randomUUID().replaceAll('-','')}`,
-      type:'project',
-      projectId,
-      goal:String(goal||''),
-      checkpoint:null,
-      workingMemory:{},
-      contextRefs:[],
-      decisionRefs:[],
-      executionRefs:[],
-      updatedAt:nowIso()
-    };
-    return store.create(record);
+    if(openingProjects.has(projectId))return openingProjects.get(projectId);
+    const opening=(async()=>{
+      const current=store.list().find(item=>item.type==='project'&&item.projectId===projectId);
+      if(current)return current;
+      return store.create({
+        id:`sess_${randomUUID().replaceAll('-','')}`,
+        type:'project',
+        projectId,
+        goal:String(goal||''),
+        checkpoint:null,
+        workingMemory:{},
+        contextRefs:[],
+        decisionRefs:[],
+        executionRefs:[],
+        updatedAt:nowIso()
+      });
+    })();
+    openingProjects.set(projectId,opening);
+    try{
+      return await opening;
+    }finally{
+      if(openingProjects.get(projectId)===opening)openingProjects.delete(projectId);
+    }
   }
 
   async function checkpoint(sessionId,{note='',facts}={}){

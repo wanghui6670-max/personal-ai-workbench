@@ -165,6 +165,8 @@ journal_read
 confirmation_list
 business_list
 project_records_read
+project_overview
+project_knowledge_search
 
 Joycrew reads
 joycrew_workspace_open

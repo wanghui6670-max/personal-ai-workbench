@@ -4,6 +4,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { createHarnessHttp } from '../src/harness-http.mjs';
 import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from '../src/harness-policy.mjs';
+import { createContextAwareDriver, createHarnessRunScope } from '../src/harness-core/index.mjs';
 
 async function fixture(t){
   const token='h'.repeat(43);
@@ -87,6 +88,7 @@ test('tools/call uses toolBroker when provided and keeps confirmation mapping',a
     list:()=>[],
     call:async()=>{throw new Error('mcpRegistry.call must not be used when toolBroker is provided');}
   };
+  const trustedSessionRef=`sess_${'a'.repeat(32)}`;
   const toolBroker={
     list(options){calls.push({kind:'list',options});return[{name:'project_list'}];},
     async call(input){
@@ -97,7 +99,12 @@ test('tools/call uses toolBroker when provided and keeps confirmation mapping',a
       return {result:[{id:'p1'}]};
     }
   };
-  const handlers=createHarnessHttp({navigator,mcpRegistry,toolBroker});
+  const handlers=createHarnessHttp({
+    navigator,
+    mcpRegistry,
+    toolBroker,
+    sessionRefResolver:()=>trustedSessionRef
+  });
   const server=http.createServer(async(req,res)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;
     if(await handlers.handleBridge(req,res,pathname))return;
@@ -106,9 +113,27 @@ test('tools/call uses toolBroker when provided and keeps confirmation mapping',a
   server.listen(0,'127.0.0.1');await once(server,'listening');
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const base=`http://127.0.0.1:${server.address().port}`;
-  const ok=await rpc(base,token,'tools/call',{name:'project_list',arguments:{}});
+  const ok=await rpc(base,token,'tools/call',{
+    name:'project_list',
+    arguments:{}
+  });
   assert.equal(ok.body.result.structuredContent.readback,true);
   assert.equal(calls[0].kind,'call');
+  assert.equal(calls[0].input.sessionRef,trustedSessionRef);
+  const conflicting=await rpc(base,token,'tools/call',{
+    name:'project_list',
+    arguments:{},
+    _meta:{sessionRef:`sess_${'b'.repeat(32)}`}
+  });
+  assert.equal(conflicting.body.error.code,-32602);
+  assert.equal(calls.length,1,'conflicting session metadata must not reach the broker');
+  const malformed=await rpc(base,token,'tools/call',{
+    name:'project_list',
+    arguments:{},
+    _meta:{sessionRef:'bad'}
+  });
+  assert.equal(malformed.body.error.code,-32602);
+  assert.equal(calls.length,1,'malformed session metadata must not reach the broker');
   const denied=await rpc(base,token,'tools/call',{name:'needs_confirm',arguments:{}});
   assert.equal(denied.body.error.code,-32001);
 });
@@ -139,4 +164,61 @@ test('navigator endpoint uses driver when provided',async t=>{
   const body=await response.json();
   assert.equal(body.navigator.reply,'drv:继续');
   assert.equal(body.navigator.working.project.id,'prj-1');
+});
+
+test('project Navigator run links a real name-and-arguments tool call to its trusted session',async t=>{
+  const token='h'.repeat(43);
+  const projectSessionId=`sess_${'c'.repeat(32)}`;
+  const calls=[];
+  const runScope=createHarnessRunScope();
+  let base='';
+  const navigator={
+    bridgeToken:token,
+    status:()=>({enabled:true,available:true,state:'ready'}),
+    run:async()=>{throw new Error('driver must own the user run');}
+  };
+  const toolBroker={
+    list:()=>[{name:'project_list'}],
+    async call(input){
+      calls.push(input);
+      return{result:[{id:'p1'}]};
+    }
+  };
+  const sessionManager={
+    async openProject(){return{id:projectSessionId,projectId:'p1'};},
+    async hydrate(){return{authority:'live',project:{id:'p1'}};}
+  };
+  const runtime={
+    async run(){
+      const outcome=await rpc(base,token,'tools/call',{name:'project_list',arguments:{}});
+      assert.equal(outcome.body.result.structuredContent.readback,true);
+      return{sessionId:'dsh-1',reply:'ok',trajectory:[],navigation:null,source:'deepseek_harness',readOnly:true};
+    }
+  };
+  const driver=createContextAwareDriver({sessionManager,runtime,runScope});
+  const handlers=createHarnessHttp({
+    navigator,
+    mcpRegistry:{list:()=>[],call:async()=>({result:{}})},
+    toolBroker,
+    driver,
+    sessionRefResolver:()=>runScope.currentSessionRef()
+  });
+  const server=http.createServer(async(req,res)=>{
+    const pathname=new URL(req.url,'http://localhost').pathname;
+    if(await handlers.handleBridge(req,res,pathname))return;
+    if(await handlers.handleUser(req,res,pathname,{rateLimit:()=>false}))return;
+    res.writeHead(404);res.end();
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  base=`http://127.0.0.1:${server.address().port}`;
+
+  const response=await fetch(`${base}/api/harness/navigator`,{
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({message:'继续',view:'project',id:'p1'})
+  });
+  assert.equal(response.status,200);
+  assert.equal(calls[0].sessionRef,projectSessionId);
+  assert.equal(runScope.currentSessionRef(),null);
 });

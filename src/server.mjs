@@ -7,7 +7,7 @@ import { JsonStore } from './store.mjs';
 import { authEnabled,isAuthenticated,login,logoutCookie,captureAuthorized,loginAttemptLimiter } from './auth.mjs';
 import { aiEnabled,aiRuntimeConfig } from './ai.mjs';
 import { sendJson,readJsonBody,serveStatic,securityHeaders,createRequestGuard,parseTrustedOrigins } from './http.mjs';
-import { ensureBusinessDirs, resolveWorkspace } from './projects.mjs';
+import { ensureBusinessDirs, resolveWorkspace, projectPath, readGitAuthority, sanitizeGitRemote } from './projects.mjs';
 import { deriveState,createProject,assignProjectBusiness,syncProject,syncAllProjects,syncFeishuInbox,addInbox,processInbox,morningChat,setToday,updateTodo,updateProject,updateWorkbenchConfig,createBusiness,renameBusiness,deleteBusiness } from './domain.mjs';
 import { captureInbox } from './capture-domain.mjs';
 import { FeishuSourceError } from './feishu.mjs';
@@ -22,9 +22,10 @@ import { createHarnessNavigator, resolveHarnessWebUrl } from './harness-navigato
 import { createHarnessHttp } from './harness-http.mjs';
 import { harnessBridgeBaseUrl } from './harness-auth.mjs';
 import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from './harness-policy.mjs';
-import { createCapabilityRegistry, createLegacyMcpProvider, createToolBroker, createExecutionStore, createExecutionService, createHarnessPolicy, createSessionStore, createSessionManager, createDshRuntimeAdapter, createContextAwareDriver } from './harness-core/index.mjs';
+import { createCapabilityRegistry, createLegacyMcpProvider, createToolBroker, createExecutionStore, createExecutionService, createHarnessPolicy, createSessionStore, createSessionManager, createDshRuntimeAdapter, createContextAwareDriver, createHarnessRunScope } from './harness-core/index.mjs';
 import { createJoycrewClient, JoycrewClientError } from './joycrew-client.mjs';
 import { createJoycrewActionBroker } from './joycrew-actions.mjs';
+import { createCrewCatalog } from './crew-catalog.mjs';
 import { PRODUCT_DISPLAY_NAME, PRODUCT_VERSION } from './product.mjs';
 
 const __filename=fileURLToPath(import.meta.url);const SRC_DIR=path.dirname(__filename);const APP_ROOT=path.dirname(SRC_DIR);const PUBLIC_DIR=path.join(APP_ROOT,'public');
@@ -80,6 +81,7 @@ catch(error){refuseStartup(error.message);}
 
 const store=new JsonStore(DATA_DIR);await store.ensure();
 const initialConfig=await store.readConfig();await ensureBusinessDirs(APP_ROOT,initialConfig);
+const crewCatalog=createCrewCatalog({appRoot:APP_ROOT,homeDir:process.env.HOME});
 const joycrewClient=createJoycrewClient({env:process.env});
 const joycrewActions=createJoycrewActionBroker({client:joycrewClient});
 const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store,joycrewClient,joycrewActions});
@@ -100,17 +102,31 @@ const sessionManager=createSessionManager({
   store:sessionStore,
   projectLookup:async projectId=>{
     const state=await store.readState();
-    return (state.projects||[]).find(item=>item.id===projectId)||null;
+    const project=(state.projects||[]).find(item=>item.id===projectId);
+    return project?{...project,git:sanitizeGitRemote(project.git)}:null;
   },
   execution,
   authorities:{
-    async readGit(project){return {head:null,remote:project.git||''};},
+    async readGit(project){
+      const config=await store.readConfig();
+      const dir=project?projectPath(APP_ROOT,config,project):null;
+      if(!dir)return {head:null,remote:sanitizeGitRemote(project?.git),dirty:false};
+      const live=await readGitAuthority(dir);
+      return {head:live.head,remote:live.remote||sanitizeGitRemote(project.git),dirty:!!live.dirty};
+    },
     async readFeishu(project){return {documentUrl:project.feishu||''};}
   }
 });
 const runtime=createDshRuntimeAdapter({navigator:harnessNavigator});
-const driver=createContextAwareDriver({sessionManager,runtime});
-const harnessHttp=createHarnessHttp({navigator:harnessNavigator,mcpRegistry,toolBroker,driver});
+const harnessRunScope=createHarnessRunScope();
+const driver=createContextAwareDriver({sessionManager,runtime,runScope:harnessRunScope});
+const harnessHttp=createHarnessHttp({
+  navigator:harnessNavigator,
+  mcpRegistry,
+  toolBroker,
+  driver,
+  sessionRefResolver:harnessRunScope.currentSessionRef
+});
 const aiPlans=new Map();
 const AI_PLAN_TTL_MS=10*60*1000;
 function pruneAiPlans(){const cutoff=Date.now()-AI_PLAN_TTL_MS;for(const [id,plan] of aiPlans){if(plan.createdAt<cutoff)aiPlans.delete(id);}}
@@ -310,6 +326,12 @@ const server=http.createServer(async(req,rawRes)=>{
     }
 
     if(pathname==='/api/notes'&&req.method==='POST'){await requestBody(req,requestSchemas.note);return sendJson(res,409,{error:'新备忘必须先进入收件箱，再由你明确处理。'});}
+
+    if(pathname==='/api/crew'&&req.method==='GET'){
+      if(rateLimited(req,res,'crew'))return;
+      const data=await crewCatalog.catalog();
+      return sendJson(res,200,{ok:true,...data});
+    }
 
     if(pathname.startsWith('/api/'))return notFound(res);
     if(await serveStatic(PUBLIC_DIR,pathname,res))return;

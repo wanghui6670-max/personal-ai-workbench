@@ -92,6 +92,31 @@ test('Feishu capture adapter writes a marker once and replays the same remote bl
   );
 });
 
+test('Feishu capture passes only the reviewed lark-cli environment',async()=>{
+  const calls=[];
+  const fakeExec=async(_command,_args,options)=>{
+    calls.push(options);
+    return{stdout:JSON.stringify({data:{document:{
+      content:'<title id="doc">日记</title><h1 id="inbox">收件箱</h1>',
+      revision_id:'1',
+      document_id:'doc'
+    }}})};
+  };
+  const client=createFeishuCaptureClient({
+    exec:fakeExec,
+    processEnv:{
+      HOME:'/tmp/home',
+      PATH:'/bin',
+      LARK_APP_ID:'allowed',
+      UNRELATED_SECRET:'blocked'
+    }
+  });
+  await client.fetch({documentUrl:'https://example.feishu.cn/wiki/inbox'});
+  assert.equal(calls[0].env.HOME,'/tmp/home');
+  assert.equal(calls[0].env.LARK_APP_ID,'allowed');
+  assert.equal(calls[0].env.UNRELATED_SECRET,undefined);
+});
+
 test('server capture route uses captureInbox and does not trust body.source as the persisted source',async()=>{
   const server=await fsp.readFile(path.resolve('src/server.mjs'),'utf8');
   assert.match(server,/captureInbox\(\{store,captureId:body\.captureId\?\?null,text:body\.text\}\)/);

@@ -5,9 +5,27 @@ import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from './harness-policy.mjs';
 import { PRODUCT_VERSION } from './product.mjs';
 
 function jsonRpcResult(id,result){return {jsonrpc:'2.0',id,result};}
+function jsonRpcErrorCode(error){
+  switch(error?.code){
+    case 'MCP_CONFIRMATION_REQUIRED':
+      return -32001;
+    case 'MCP_TOOL_NOT_FOUND':
+      return -32601;
+    case 'MCP_TOOL_NOT_ALLOWED':
+      return -32003;
+    default:
+      return -32602;
+  }
+}
 function jsonRpcError(id,error){
-  const code=error?.code==='MCP_CONFIRMATION_REQUIRED'?-32001:error?.code==='MCP_TOOL_NOT_FOUND'?-32601:error?.code==='MCP_TOOL_NOT_ALLOWED'?-32003:-32602;
-  return {jsonrpc:'2.0',id,error:{code,message:error?.message||'MCP 请求失败'}};
+  return {
+    jsonrpc:'2.0',
+    id,
+    error:{
+      code:jsonRpcErrorCode(error),
+      message:error?.message||'MCP 请求失败'
+    }
+  };
 }
 
 async function requestBody(req,schema){
@@ -18,14 +36,55 @@ function methodNotAllowed(res,allowed){
   return sendJson(res,405,{error:'Method not allowed'},{Allow:allowed});
 }
 
-export function createHarnessHttp({navigator,mcpRegistry,toolBroker=null,driver=null}={}){
+function validatedSessionRef(value){
+  if(value===undefined||value===null)return null;
+  const sessionRef=String(value);
+  if(!/^sess_[a-f0-9]{32}$/.test(sessionRef)){
+    throw Object.assign(new Error('sessionRef 格式无效。'),{code:'MCP_INVALID_PARAMS'});
+  }
+  return sessionRef;
+}
+
+function resolveSessionRef(params={},sessionRefResolver=null){
+  const explicitSessionRef=validatedSessionRef(params?._meta?.sessionRef);
+  const trustedSessionRef=validatedSessionRef(sessionRefResolver?.());
+  if(explicitSessionRef&&trustedSessionRef&&explicitSessionRef!==trustedSessionRef){
+    throw Object.assign(new Error('sessionRef 与当前可信会话不一致。'),{code:'MCP_INVALID_PARAMS'});
+  }
+  return trustedSessionRef||explicitSessionRef;
+}
+
+export function createHarnessHttp({
+  navigator,
+  mcpRegistry,
+  toolBroker=null,
+  driver=null,
+  sessionRefResolver=null
+}={}){
   if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
   // The exposed tools either read external state or create an expiring local
   // preview. Actual Workbench/Joycrew mutations are not callable here.
   const toolOptions={readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST};
-  const checkedStatus=async()=>typeof navigator.checkedStatus==='function'
-    ?navigator.checkedStatus()
-    :navigator.status();
+
+  async function checkedStatus(){
+    if(typeof navigator.checkedStatus==='function')return navigator.checkedStatus();
+    return navigator.status();
+  }
+
+  async function callTool(params){
+    if(typeof params.name!=='string'||!params.name.trim()){
+      throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
+    }
+    const args=params.arguments||{};
+    if(!toolBroker)return mcpRegistry.call(params.name,args,toolOptions);
+    return toolBroker.call({
+      name:params.name,
+      arguments:args,
+      options:toolOptions,
+      trigger:'harness-http',
+      sessionRef:resolveSessionRef(params,sessionRefResolver)
+    });
+  }
 
   async function handleBridge(req,res,pathname){
     if(pathname!=='/api/harness/mcp')return false;
@@ -57,12 +116,7 @@ export function createHarnessHttp({navigator,mcpRegistry,toolBroker=null,driver=
         return true;
       }
       if(body.method==='tools/call'){
-        if(typeof params.name!=='string'||!params.name.trim()){
-          throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
-        }
-        const outcome=toolBroker
-          ?await toolBroker.call({name:params.name,arguments:params.arguments||{},options:toolOptions,trigger:'harness-http'})
-          :await mcpRegistry.call(params.name,params.arguments||{},toolOptions);
+        const outcome=await callTool(params);
         sendJson(res,200,jsonRpcResult(id,{
           content:[{type:'text',text:JSON.stringify(outcome.result)}],
           structuredContent:{result:outcome.result,readback:true}

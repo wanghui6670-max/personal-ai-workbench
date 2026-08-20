@@ -8,6 +8,7 @@ import {
   HARNESS_NAVIGATOR_TOOL_ALLOWLIST,
   HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
 } from './harness-policy.mjs';
+import { sanitizeGitRemote } from './projects.mjs';
 
 export const HARNESS_VERSION='0.1.0-rc.6';
 export const HARNESS_UI_MODE_WORKBENCH='workbench';
@@ -279,7 +280,7 @@ function publicRuntimeError(message,code='HARNESS_UNAVAILABLE',statusCode=503){
 function statusReasonMessage(reason){
   const messages={
     disabled:'Harness Navigator 未启用。',
-    node_unsupported:'Harness Sidecar 需要 Node 22.19+ 或 Node 24+。',
+    node_unsupported:'Harness Sidecar 需要 Node 22.19.x 或 Node 24+。',
     packages_missing:'Harness 依赖尚未安装，请先运行 npm run harness:install。',
     provider_model_missing:'Harness Provider 未配置模型。',
     provider_key_missing:'Harness Provider 未配置 API Key。',
@@ -292,13 +293,55 @@ function statusReasonMessage(reason){
   return messages[reason]||'Harness Navigator 当前不可用。';
 }
 
-function routeContext(route={}){
+function summarizeWorking(working){
+  if(!working||typeof working!=='object')return null;
+  const project=working.project&&typeof working.project==='object'?{
+    id:compactText(working.project.id||'',80),
+    name:compactText(working.project.name||'',120),
+    git:compactText(sanitizeGitRemote(working.project.git),240),
+    feishu:compactText(working.project.feishu||'',240)
+  }:null;
+  const git=working.live?.git&&typeof working.live.git==='object'?working.live.git:{};
+  const executions=Array.isArray(working.live?.executions)
+    ?working.live.executions.slice(0,8).map(item=>({
+      executionId:compactText(item?.executionId||'',80),
+      tool:compactText(item?.tool||'',80),
+      status:compactText(item?.status||'',40),
+      resultSummary:compactText(item?.resultSummary||'',160)
+    }))
+    :[];
+  const conflicts=Array.isArray(working.conflicts)
+    ?working.conflicts.slice(0,8).map(item=>({
+      path:compactText(item?.path||'',80),
+      checkpoint:compactText(item?.checkpoint??'',160),
+      live:compactText(item?.live??'',160)
+    }))
+    :[];
+  return {
+    authority:compactText(working.authority||'live',32),
+    project,
+    live:{
+      gitHead:git.head?compactText(git.head,80):null,
+      gitRemote:compactText(sanitizeGitRemote(git.remote),240),
+      dirty:!!git.dirty,
+      feishuUrl:compactText(working.live?.feishu?.documentUrl||'',240),
+      executions
+    },
+    checkpointNote:compactText(working.session?.checkpoint?.note||working.checkpoint?.note||'',200),
+    conflicts
+  };
+}
+
+export function routeContext(route={}){
   const rawView=typeof route.view==='string'&&route.view?route.view:'today';
   const rawId=typeof route.id==='string'&&route.id?route.id:null;
-  return {
+  const context={
     view:compactText(rawView,80),
     id:rawId?compactText(rawId,160):null
   };
+  const working=summarizeWorking(route.working);
+  if(working)context.working=working;
+  return context;
 }
 
 export class HarnessNavigatorRuntime{

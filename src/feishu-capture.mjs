@@ -3,9 +3,13 @@ import { promisify } from 'node:util';
 import { parseFeishuInboxXml, FeishuSourceError, escapeXml } from './feishu.mjs';
 import { normalizeFeishuProjectDocumentUrl } from './project-record-contract.mjs';
 import { captureMarker, normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
+import { larkCliEnv } from './external-cli-env.mjs';
 
 const execFileAsync=promisify(execFile);
 const DEFAULT_TIMEOUT_MS=30_000;
+const DEFAULT_INBOX_HEADING='收件箱';
+const DEFAULT_INBOX_PREFIX='[INBOX]';
+const SAFE_BLOCK_ID=/^[A-Za-z0-9_-]{1,256}$/;
 
 function extractJson(stdout){
   const raw=String(stdout??'').trim();
@@ -26,9 +30,26 @@ function cliError(error,action){
   return new FeishuSourceError(message,{cause:error});
 }
 
-async function runCli(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
+function normalizeDocumentUrl(documentUrl){
   try{
-    const result=await exec('lark-cli',args,{timeout:timeoutMs,maxBuffer:4*1024*1024,windowsHide:true});
+    return normalizeFeishuProjectDocumentUrl(documentUrl);
+  }catch(error){
+    throw new FeishuSourceError(error.message,{
+      cause:error,
+      code:error.code,
+      statusCode:error.statusCode
+    });
+  }
+}
+
+async function runCli(args,action,{exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
+  try{
+    const result=await exec('lark-cli',args,{
+      timeout:timeoutMs,
+      maxBuffer:4*1024*1024,
+      windowsHide:true,
+      env:larkCliEnv(processEnv)
+    });
     return extractJson(result.stdout);
   }catch(error){throw cliError(error,action);}
 }
@@ -40,9 +61,7 @@ function documentContent(payload){
 }
 
 async function fetchDocument(documentUrl,options){
-  let url;
-  try{url=normalizeFeishuProjectDocumentUrl(documentUrl);}
-  catch(error){throw new FeishuSourceError(error.message,{cause:error,code:error.code,statusCode:error.statusCode});}
+  const url=normalizeDocumentUrl(documentUrl);
   const payload=await runCli([
     'docs','+fetch','--api-version','v2','--as','user','--doc',url,
     '--detail','with-ids','--format','json'
@@ -51,10 +70,8 @@ async function fetchDocument(documentUrl,options){
 }
 
 async function updateDocument(documentUrl,{anchorBlockId,content},options){
-  let url;
-  try{url=normalizeFeishuProjectDocumentUrl(documentUrl);}
-  catch(error){throw new FeishuSourceError(error.message,{cause:error,code:error.code,statusCode:error.statusCode});}
-  if(!/^[A-Za-z0-9_-]{1,256}$/.test(String(anchorBlockId||''))){
+  const url=normalizeDocumentUrl(documentUrl);
+  if(!SAFE_BLOCK_ID.test(String(anchorBlockId||''))){
     throw new FeishuSourceError('飞书文档 block ID 格式无效。',{code:'INVALID_FEISHU_SOURCE',statusCode:400});
   }
   await runCli([
@@ -64,24 +81,28 @@ async function updateDocument(documentUrl,{anchorBlockId,content},options){
   ],'文档写入',options);
 }
 
-export function createFeishuCaptureClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS}={}){
-  const options={exec,timeoutMs};
+function parseCaptureItem(item){
+  const capture=parseCaptureMarker(item.text);
+  return{...item,text:capture.text,captureId:capture.captureId};
+}
+
+export function createFeishuCaptureClient({exec=execFileAsync,timeoutMs=DEFAULT_TIMEOUT_MS,processEnv=process.env}={}){
+  const options={exec,timeoutMs,processEnv};
   async function fetch(config){
+    const heading=config?.inboxHeading||DEFAULT_INBOX_HEADING;
+    const prefix=config?.inboxPrefix||DEFAULT_INBOX_PREFIX;
     const document=await fetchDocument(config?.documentUrl,options);
     const parsed=parseFeishuInboxXml(document.content,{
-      heading:config?.inboxHeading||'收件箱',
-      prefix:config?.inboxPrefix||'[INBOX]'
+      heading,
+      prefix
     });
     if(!parsed.sectionFound){
-      throw new FeishuSourceError(`文档中没有找到“${config?.inboxHeading||'收件箱'}”章节。`,{code:'FEISHU_SOURCE_FORMAT'});
+      throw new FeishuSourceError(`文档中没有找到“${heading}”章节。`,{code:'FEISHU_SOURCE_FORMAT'});
     }
     return{
       ...document,
       ...parsed,
-      items:parsed.items.map(item=>{
-        const capture=parseCaptureMarker(item.text);
-        return{...item,text:capture.text,captureId:capture.captureId};
-      })
+      items:parsed.items.map(parseCaptureItem)
     };
   }
 
@@ -94,18 +115,19 @@ export function createFeishuCaptureClient({exec=execFileAsync,timeoutMs=DEFAULT_
     if(existing.length>1){
       throw new FeishuSourceError('飞书收件箱中存在重复 captureId，需要人工核对。',{code:'CAPTURE_DUPLICATE_REMOTE_ID',statusCode:409});
     }
-    if(existing.length===1){
-      if(existing[0].text!==normalized){
+    const existingItem=existing[0];
+    if(existingItem){
+      if(existingItem.text!==normalized){
         throw new FeishuSourceError('同一 captureId 已用于不同内容，已拒绝覆盖。',{code:'CAPTURE_ID_CONFLICT',statusCode:409});
       }
-      return{...current,item:existing[0],replayed:true,captureId:id};
+      return{...current,item:existingItem,replayed:true,captureId:id};
     }
 
-    const anchor=current.items.at(-1)?.blockId||current.headingBlockId;
-    if(!anchor)throw new FeishuSourceError('飞书文档收件箱章节缺少可写入锚点。',{code:'FEISHU_SOURCE_FORMAT'});
-    const prefix=config?.inboxPrefix||'[INBOX]';
+    const anchorBlockId=current.items.at(-1)?.blockId||current.headingBlockId;
+    if(!anchorBlockId)throw new FeishuSourceError('飞书文档收件箱章节缺少可写入锚点。',{code:'FEISHU_SOURCE_FORMAT'});
+    const prefix=config?.inboxPrefix||DEFAULT_INBOX_PREFIX;
     await updateDocument(config.documentUrl,{
-      anchorBlockId:anchor,
+      anchorBlockId,
       content:`<p>${escapeXml(`${prefix} ${captureMarker(id)} ${normalized}`)}</p>`
     },options);
     const fetched=await fetch(config);
@@ -113,10 +135,11 @@ export function createFeishuCaptureClient({exec=execFileAsync,timeoutMs=DEFAULT_
     if(matches.length!==1){
       throw new FeishuSourceError('飞书采集写入后无法按 captureId 唯一读回。',{code:'CAPTURE_READBACK_FAILED'});
     }
-    if(matches[0].text!==normalized){
+    const writtenItem=matches[0];
+    if(writtenItem.text!==normalized){
       throw new FeishuSourceError('飞书采集读回内容与请求不一致。',{code:'CAPTURE_READBACK_FAILED'});
     }
-    return{...fetched,item:matches[0],replayed:false,captureId:id};
+    return{...fetched,item:writtenItem,replayed:false,captureId:id};
   }
 
   return{fetch,appendAndFetch};

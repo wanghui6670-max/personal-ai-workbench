@@ -194,7 +194,7 @@ function buildChildEnv({env,provider,request}){
 export class EmployeeHarnessPool{
   constructor({root=path.resolve('.'),env=process.env,importModule=specifier=>import(specifier)}={}){this.root=path.resolve(root);this.harnessDir=path.join(this.root,'harness');this.env=env;this.importModule=importModule;this.entries=new Map();this.require=createRequire(path.join(this.harnessDir,'package.json'));}
   async execute(request){
-    if(!harnessNodeSupported())throw publicError('Employee Harness Runtime 需要 Node 22.19+ 或 Node 24+。','EMPLOYEE_RUNTIME_NODE_UNSUPPORTED',503);
+    if(!harnessNodeSupported())throw publicError('Employee Harness Runtime 需要 Node 22.19.x 或 Node 24+。','EMPLOYEE_RUNTIME_NODE_UNSUPPORTED',503);
     const provider=resolveHarnessProviderConfig(this.env);if(!provider.ok)throw publicError(`Harness Provider 未就绪：${provider.reason}`,'EMPLOYEE_RUNTIME_PROVIDER_UNAVAILABLE',503);
     const poolKey=request.resolvedCompositionDigest;let entry=this.entries.get(poolKey);
     if(!entry){entry=await this.startEntry(request,provider);this.entries.set(poolKey,entry);await this.evictIfNeeded(poolKey);}

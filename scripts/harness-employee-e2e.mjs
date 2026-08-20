@@ -12,7 +12,7 @@ import {
   resolvedCompositionDigest
 } from '../harness/employee-runtime-server.mjs';
 
-if(!harnessNodeSupported())throw new Error('Employee Harness E2E requires Node 22.19+ or Node 24+');
+if(!harnessNodeSupported())throw new Error('Employee Harness E2E requires Node 22.19.x or Node 24+');
 const root=path.resolve('.');
 const harnessDir=path.join(root,'harness');
 const require=createRequire(path.join(harnessDir,'package.json'));

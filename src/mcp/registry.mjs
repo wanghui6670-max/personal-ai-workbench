@@ -4,6 +4,7 @@ import { deriveState } from '../domain.mjs';
 import { enforceInboxReviewPlan, inboxReviewPlannerMessage, scopedInboxReviewState, scopedInboxReviewTools } from '../ai-review-scope.mjs';
 import { createWorkbenchTools, contextFrom, findTool, planWorkbenchMessage, publicTool } from './tools.mjs';
 import { createProjectRecordTools, planProjectRecordMessage } from './project-record-tools.mjs';
+import { createProjectKnowledgeTools, planProjectKnowledgeMessage } from './project-knowledge-tools.mjs';
 import { createContentTools, planContentMessage } from './content-tools.mjs';
 import { createJoycrewTools, planJoycrewMessage } from './joycrew-tools.mjs';
 import { createFeishuInitializeTools } from './feishu-initialize-tools.mjs';
@@ -42,7 +43,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
   const workbenchTools=createWorkbenchTools();
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
-  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createContentTools(),...joycrewTools];
+  const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createProjectKnowledgeTools(),...createContentTools(),...joycrewTools];
 
   async function context(){
     const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
@@ -94,6 +95,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     if(!planned)planned=planJoycrewMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planContentMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planProjectRecordMessage({message:plannerMessage,state:modelState});
+    if(!planned)planned=planProjectKnowledgeMessage({message:plannerMessage,state:modelState});
     if(!planned)planned=planWorkbenchMessage({message:plannerMessage,state:modelState});
     planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;

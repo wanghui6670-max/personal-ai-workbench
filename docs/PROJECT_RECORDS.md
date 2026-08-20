@@ -73,7 +73,7 @@ feishuRecordedAt
 feishuOperationId
 ```
 
-同步 API 不返回项目分析正文，只返回机器进度、扫描元数据和飞书记录指针。项目正文需要通过 `project_records_read` 从飞书读回。
+同步 API 不返回项目分析正文，只返回机器进度、扫描元数据和飞书记录指针。项目正文需要通过 `project_records_read` 从飞书读回。项目页的知识索引只展示本地指针；`project_overview` 与 `project_knowledge_search` 同样不返回飞书或备忘正文。
 
 ## 4. 幂等与部分提交恢复
 

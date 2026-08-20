@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
 import { createEndpointRateLimiter,createSyncCoordinator,endpointRateLimitConfig,RATE_LIMIT_CAPS,RATE_LIMIT_DEFAULTS } from '../src/rate-limit.mjs';
+import { parseWorkbenchEnv,WORKBENCH_ENV_KEYS } from '../src/env.mjs';
 
 test('endpoint limiter is deterministic, per-client, and bounded',()=>{
   let at=1_000;
@@ -23,13 +25,25 @@ test('environment settings retain safe upper bounds',()=>{
     WORKBENCH_RATE_LIMIT_MAX_CLIENTS:'999999999',
     WORKBENCH_CAPTURE_RATE_LIMIT:'999999999',
     WORKBENCH_SYNC_RATE_LIMIT:'0',
-    WORKBENCH_MORNING_RATE_LIMIT:'not-a-number'
+    WORKBENCH_MORNING_RATE_LIMIT:'not-a-number',
+    WORKBENCH_CREW_RATE_LIMIT:'999999999'
   });
   assert.equal(config.windowMs,RATE_LIMIT_CAPS.windowMs);
   assert.equal(config.maxClients,RATE_LIMIT_CAPS.maxClients);
   assert.equal(config.limits.capture,RATE_LIMIT_CAPS.limits.capture);
   assert.equal(config.limits.sync,1);
   assert.equal(config.limits.morning,RATE_LIMIT_DEFAULTS.limits.morning);
+  assert.equal(config.limits.crew,RATE_LIMIT_CAPS.limits.crew);
+  assert.equal(RATE_LIMIT_DEFAULTS.limits.crew,30);
+});
+
+test('.env.example documents the Crew rate limit',async()=>{
+  const example=await fsp.readFile('.env.example','utf8');
+  assert.match(example,/^# WORKBENCH_CREW_RATE_LIMIT=30$/m);
+  assert.equal(WORKBENCH_ENV_KEYS.includes('WORKBENCH_CREW_RATE_LIMIT'),true);
+  const parsed=parseWorkbenchEnv('WORKBENCH_CREW_RATE_LIMIT=41');
+  assert.equal(parsed.values.WORKBENCH_CREW_RATE_LIMIT,'41');
+  assert.deepEqual(parsed.ignored,[]);
 });
 
 test('sync coordinator rejects overlapping work on the same project',()=>{

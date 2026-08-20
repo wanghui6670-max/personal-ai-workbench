@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { harnessNodeSupported } from '../src/harness-navigator.mjs';
 import { HARNESS_NAVIGATOR_TOOL_ALLOWLIST } from '../src/harness-policy.mjs';
 
-if(!harnessNodeSupported())throw new Error('Harness E2E requires Node 22.19+ or Node 24+');
+if(!harnessNodeSupported())throw new Error('Harness E2E requires Node 22.19.x or Node 24+');
 const root=path.resolve('.');
 const harnessDir=path.join(root,'harness');
 const require=createRequire(path.join(harnessDir,'package.json'));
@@ -63,7 +63,7 @@ try{
   assert.equal(calls.length,1);
   assert.equal(calls[0].name,'project_list');
   assert.deepEqual(calls[0].args,{});
-  assert.equal(toolNames.length,21,'unified capability catalog must remain explicitly reviewed');
+  assert.equal(toolNames.length,23,'unified capability catalog must remain explicitly reviewed');
   assert.ok(first.events.some(event=>event.type==='tool/call'&&event.data?.name==='mcp__joycrew__project_list'));
   assert.ok(first.events.some(event=>event.type==='tool/result'&&!event.data?.error));
   const second=await harness.run('继续',{sessionId:first.sessionId});

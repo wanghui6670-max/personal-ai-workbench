@@ -24,6 +24,8 @@ Workbench MCP Registry / Joycrew BFF
 ## 可用能力
 
 - 查看今日待办、收件箱、项目、工作日志、待确认事项和业务板块；
+- 盘点单个项目的本地资产、待办计数、Git 与飞书绑定指针；
+- 在项目本地指针中检索知识章节，不读取飞书正文；
 - 读取项目绑定的飞书分析与阶段总结；
 - 读取 Joycrew 的客户、项目、业务任务、AI 员工、Run、Evidence、审批和交付；
 - 在同一个会话中连续追问；
@@ -31,6 +33,12 @@ Workbench MCP Registry / Joycrew BFF
 - 打开左侧或中间的对应页面；
 - 为 Joycrew Run、交付和审批生成 preview-only 操作；
 - Sidecar 或外部 DSH Web 异常时不影响左侧工作台。
+
+## 工作台只读可见面
+
+- `#project/<id>` 的五章知识索引只组织现有项目页和指针级元数据，不读取飞书、备忘或项目文件正文。
+- `#crew` / `#skills` 只盘点本机员工与 Skill 的结构化目录和 DSH localhost 状态；复制派单命令不等于执行，不会自动安装 Skill、创建员工或启动任务。
+- 两个界面都受现有 Workbench 登录门保护，不新增外部写入能力。
 
 ## 固定安全边界
 

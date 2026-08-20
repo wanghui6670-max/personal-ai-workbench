@@ -483,14 +483,44 @@ async function readSmall(file,max=10000){
   }catch{return '';}
 }
 
-function sanitizedRemote(value){
+export function sanitizeGitRemote(value){
   const raw=String(value||'').trim();
-  if(!/^https?:\/\//i.test(raw))return raw;
+  if(!raw||/[\u0000-\u001f\u007f\s]/.test(raw))return '';
+  if(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//i.test(raw)){
+    try{
+      const remote=new URL(raw);
+      remote.username='';
+      remote.password='';
+      remote.search='';
+      remote.hash='';
+      return remote.toString();
+    }catch{return '';}
+  }
+  if(/[?#]/.test(raw))return '';
+  const scpLike=raw.match(/^(?:[^@\s]+@)?([^:@\s]+):(.+)$/);
+  if(scpLike){
+    const [,host,repositoryPath]=scpLike;
+    if(!repositoryPath||/[?#]/.test(repositoryPath))return '';
+    return `${host}:${repositoryPath}`;
+  }
+  if(/[@?#]/.test(raw))return '';
+  return raw;
+}
+
+export async function readGitAuthority(dir){
+  if(!dir)return {head:null,remote:'',dirty:false};
   try{
-    const remote=new URL(raw);
-    remote.username='';remote.password='';remote.search='';remote.hash='';
-    return remote.toString();
-  }catch{return '';}
+    const gitDir=await fsp.lstat(path.join(dir,'.git'));
+    if(!gitDir.isDirectory()&&!gitDir.isFile())return {head:null,remote:'',dirty:false};
+  }catch{
+    return {head:null,remote:'',dirty:false};
+  }
+  const git=await gitInfo(dir);
+  return {
+    head:git.commits[0]?.hash||null,
+    remote:git.remote||'',
+    dirty:!!git.dirty
+  };
 }
 
 async function gitInfo(dir){
@@ -506,8 +536,8 @@ async function gitInfo(dir){
       execFileAsync('git',[...prefix,'status','--porcelain'],options).catch(()=>({stdout:''}))
     ]);
     const commits=String(log.stdout||'').trim().split('\n').filter(Boolean).map(line=>{const [hash,date,...subject]=line.split('|');return{hash,date,subject:subject.join('|')};});
-    const remoteValue=sanitizedRemote(remote.stdout);
-    return {isRepo:!!commits.length||!!remoteValue,commits,remote:remoteValue,dirty:!!String(status.stdout||'').trim()};
+    const gitRemote=sanitizeGitRemote(remote.stdout);
+    return {isRepo:!!commits.length||!!gitRemote,commits,remote:gitRemote,dirty:!!String(status.stdout||'').trim()};
   }catch{return{isRepo:false,commits:[],remote:'',dirty:false};}
 }
 

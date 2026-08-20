@@ -25,3 +25,15 @@ test('creates a project session and refuses other types',async()=>{
     error=>error.code==='HARNESS_SESSION_TYPE_UNSUPPORTED'
   );
 });
+
+test('concurrent openProject calls share one persisted session per project',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'harness-sess-race-'));
+  const store=createSessionStore({file:path.join(dir,'sessions.json')});
+  const manager=createSessionManager({store});
+  const sessions=await Promise.all(
+    Array.from({length:12},()=>manager.openProject({projectId:'p1',goal:'继续 Harness'}))
+  );
+  assert.equal(new Set(sessions.map(session=>session.id)).size,1);
+  assert.equal(store.list().length,1);
+  assert.equal(store.list()[0].projectId,'p1');
+});

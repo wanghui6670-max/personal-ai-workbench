@@ -1,13 +1,13 @@
 const RATE_LIMIT_DEFAULTS=Object.freeze({
   windowMs:60_000,
   maxClients:1_000,
-  limits:Object.freeze({capture:60,sync:12,morning:20,navigator:20,joycrew:30})
+  limits:Object.freeze({capture:60,sync:12,morning:20,navigator:20,joycrew:30,crew:30})
 });
 
 const RATE_LIMIT_CAPS=Object.freeze({
   windowMs:3_600_000,
   maxClients:5_000,
-  limits:Object.freeze({capture:600,sync:120,morning:120,navigator:120,joycrew:180})
+  limits:Object.freeze({capture:600,sync:120,morning:120,navigator:120,joycrew:180,crew:120})
 });
 
 function boundedInteger(value,fallback,{min=1,max}){
@@ -25,7 +25,8 @@ export function endpointRateLimitConfig(env=process.env){
       sync:boundedInteger(env.WORKBENCH_SYNC_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.sync,{max:RATE_LIMIT_CAPS.limits.sync}),
       morning:boundedInteger(env.WORKBENCH_MORNING_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.morning,{max:RATE_LIMIT_CAPS.limits.morning}),
       navigator:boundedInteger(env.WORKBENCH_HARNESS_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.navigator,{max:RATE_LIMIT_CAPS.limits.navigator}),
-      joycrew:boundedInteger(env.WORKBENCH_JOYCREW_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.joycrew,{max:RATE_LIMIT_CAPS.limits.joycrew})
+      joycrew:boundedInteger(env.WORKBENCH_JOYCREW_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.joycrew,{max:RATE_LIMIT_CAPS.limits.joycrew}),
+      crew:boundedInteger(env.WORKBENCH_CREW_RATE_LIMIT,RATE_LIMIT_DEFAULTS.limits.crew,{max:RATE_LIMIT_CAPS.limits.crew})
     }
   };
 }

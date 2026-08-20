@@ -5,6 +5,7 @@ import {
   buildHarnessChildEnv,
   harnessNodeSupported,
   resolveHarnessProviderConfig,
+  routeContext,
   summarizeHarnessEvents
 } from '../src/harness-navigator.mjs';
 
@@ -64,6 +65,29 @@ test('event projection exposes tool facts and navigation but drops reasoning chu
   assert.equal(summary.trajectory.some(item=>JSON.stringify(item).includes('private reasoning')),false);
   assert.equal(summary.trajectory[0].name,'panel_navigate');
   assert.equal(summary.trajectory.at(-1).status,'completed');
+});
+
+test('route context keeps hydrated project working facts for DSH',()=>{
+  const context=routeContext({
+    view:'project',
+    id:'p1',
+    working:{
+      authority:'live',
+      session:{id:'sess_1',checkpoint:{note:'停在 Slice 7'}},
+      project:{id:'p1',name:'Personal AI Workbench',git:'ssh://user:demo-token@example.invalid/workbench.git?token=secret#fragment',feishu:''},
+      live:{git:{head:'live-head',remote:'ssh://user:demo-token@example.invalid/workbench.git?token=secret#fragment',dirty:false},feishu:{documentUrl:''},executions:[{executionId:'ex_1',tool:'project_list',status:'ok',resultSummary:'project_list:1'}]},
+      conflicts:[]
+    }
+  });
+  assert.equal(context.view,'project');
+  assert.equal(context.id,'p1');
+  assert.equal(context.working.authority,'live');
+  assert.equal(context.working.project.id,'p1');
+  assert.equal(context.working.live.gitHead,'live-head');
+  assert.equal(context.working.checkpointNote,'停在 Slice 7');
+  assert.equal(context.working.project.git,'ssh://example.invalid/workbench.git');
+  assert.equal(context.working.live.gitRemote,'ssh://example.invalid/workbench.git');
+  assert.equal(JSON.stringify(context).includes('demo-token'),false);
 });
 
 test('disabled runtime is inert and never attempts to load sidecar packages',async()=>{
