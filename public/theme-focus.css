@@ -27,32 +27,75 @@ html[data-theme="light"]{
   --dsh-user-ink:#1f4f96;
 }
 html[data-theme="dark"]{
-  --bg:#0b1020;
-  --canvas:#11151b;
-  --card:#171c23;
-  --ink:#e7eaf0;
-  --muted:#929caa;
-  --line:rgba(255,255,255,.08);
-  --line-strong:rgba(255,255,255,.14);
+  --bg:#1a1d24;
+  --canvas:#1e2229;
+  --card:#252932;
+  --ink:#e4e7ec;
+  --muted:#a0a8b4;
+  --line:rgba(255,255,255,.10);
+  --line-strong:rgba(255,255,255,.18);
   --accent:#6ea8fe;
-  --accent-soft:rgba(110,168,254,.12);
-  --side:#0c1015;
-  --side2:#171d25;
-  --side-ink:#edf0f4;
-  --side-muted:#929caa;
-  --field:#131820;
-  --soft:#131922;
-  --topbar:rgba(17,21,27,.94);
-  --shadow:0 1px 2px rgba(0,0,0,.16);
-  --dsh-bg:#0e141c;
-  --dsh-surface:#121923;
-  --dsh-surface-2:#18202a;
-  --dsh-ink:#e7eaf0;
-  --dsh-muted:#8e99a8;
-  --dsh-line:rgba(255,255,255,.08);
+  --accent-soft:rgba(110,168,254,.14);
+  --side:#1a1e25;
+  --side2:#2a2f38;
+  --side-ink:#e4e7ec;
+  --side-muted:#a0a8b4;
+  --field:#22262e;
+  --soft:#1e2229;
+  --topbar:rgba(30,34,41,.95);
+  --shadow:0 1px 3px rgba(0,0,0,.20);
+  --dsh-bg:#1a1f26;
+  --dsh-surface:#22272f;
+  --dsh-surface-2:#2a303a;
+  --dsh-ink:#e4e7ec;
+  --dsh-muted:#9ca4b0;
+  --dsh-line:rgba(255,255,255,.10);
   --dsh-user:#1d3a63;
   --dsh-user-ink:#f4f7fb;
 }
+/* Override hardcoded light values from styles.css and workbench-v3.css */
+html[data-theme="dark"] .sidebar{background:var(--side)!important;color:var(--side-ink)!important}
+html[data-theme="dark"] .sidebar .brand{color:var(--side-ink)!important}
+html[data-theme="dark"] .sidebar .brand small{color:var(--side-muted)!important}
+html[data-theme="dark"] .nav-title{color:var(--side-muted)!important}
+html[data-theme="dark"] .nav a{color:var(--side-muted)!important}
+html[data-theme="dark"] .nav a:hover,html[data-theme="dark"] .nav a.active{color:var(--side-ink)!important;background:var(--side2)!important}
+html[data-theme="dark"] .nav .count{background:var(--side2)!important;color:var(--side-muted)!important}
+html[data-theme="dark"] .biz-row{color:var(--side-ink)!important}
+html[data-theme="dark"] .project-link{color:var(--side-muted)!important}
+html[data-theme="dark"] .project-link:hover,html[data-theme="dark"] .project-link.active{color:var(--side-ink)!important;background:var(--side2)!important}
+html[data-theme="dark"] .topbar{background:var(--topbar)!important;border-color:var(--line)!important}
+html[data-theme="dark"] .top-left p{color:var(--muted)!important}
+html[data-theme="dark"] .btn{background:var(--field)!important;color:var(--ink)!important;border-color:var(--line)!important}
+html[data-theme="dark"] .btn:hover{background:var(--soft)!important;border-color:var(--line-strong)!important}
+html[data-theme="dark"] .btn.primary{background:var(--accent)!important;border-color:var(--accent)!important;color:#fff!important}
+html[data-theme="dark"] .btn.danger{color:#e57676!important;border-color:rgba(229,118,118,.35)!important}
+html[data-theme="dark"] .capture input,html[data-theme="dark"] .field,html[data-theme="dark"] input,html[data-theme="dark"] textarea,html[data-theme="dark"] select{background:var(--field)!important;color:var(--ink)!important;border-color:var(--line)!important}
+html[data-theme="dark"] .capture input:focus,html[data-theme="dark"] input:focus,html[data-theme="dark"] textarea:focus,html[data-theme="dark"] select:focus{border-color:color-mix(in srgb,var(--accent) 48%,var(--line))!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)!important}
+html[data-theme="dark"] .card,html[data-theme="dark"] .stat,html[data-theme="dark"] .todo,html[data-theme="dark"] .inbox-item,html[data-theme="dark"] .project-card,html[data-theme="dark"] .activity,html[data-theme="dark"] .candidate,html[data-theme="dark"] .modal{background:var(--card)!important;border-color:var(--line)!important;color:var(--ink)!important;box-shadow:var(--shadow)!important}
+html[data-theme="dark"] .card-title{color:var(--ink)!important}
+html[data-theme="dark"] .section-title,html[data-theme="dark"] .name{color:var(--ink)!important}
+html[data-theme="dark"] .empty{background:var(--soft)!important;border-color:var(--line)!important;color:var(--muted)!important;border-style:dashed!important}
+html[data-theme="dark"] .command-box,html[data-theme="dark"] .kv .box,html[data-theme="dark"] .paths .v,html[data-theme="dark"] .alert{background:var(--soft)!important;border-color:var(--line)!important;color:var(--muted)!important}
+html[data-theme="dark"] .summary,html[data-theme="dark"] .card-desc,html[data-theme="dark"] .activity .time,html[data-theme="dark"] .hint,html[data-theme="dark"] .modal p{color:var(--muted)!important}
+html[data-theme="dark"] .pill{background:color-mix(in srgb,var(--muted) 12%,var(--card))!important;color:var(--muted)!important}
+html[data-theme="dark"] .pill.blue{background:var(--accent-soft)!important;color:color-mix(in srgb,var(--accent) 82%,var(--ink))!important}
+html[data-theme="dark"] .pill.red{background:rgba(229,118,118,.14)!important;color:#e57676!important}
+html[data-theme="dark"] .pill.amber{background:rgba(245,158,11,.14)!important;color:#f5b942!important}
+html[data-theme="dark"] .pill.green{background:rgba(52,180,120,.14)!important;color:#4ec89a!important}
+html[data-theme="dark"] .ring{background:conic-gradient(var(--accent) calc(var(--p)*1%),color-mix(in srgb,var(--line) 76%,var(--card)) 0)!important}
+html[data-theme="dark"] .ring:after,html[data-theme="dark"] .mini-ring:after{background:var(--card)!important}
+html[data-theme="dark"] .mini-ring{background:conic-gradient(var(--accent) calc(var(--p)*1%),color-mix(in srgb,var(--line) 76%,var(--card)) 0)!important}
+html[data-theme="dark"] .bubble.ai{background:var(--soft)!important;color:var(--ink)!important}
+html[data-theme="dark"] .bubble.user{background:var(--accent-soft)!important;color:color-mix(in srgb,var(--accent) 78%,var(--ink))!important}
+html[data-theme="dark"] .overlay{background:rgba(0,0,0,.56)!important}
+html[data-theme="dark"] .modal{background:var(--card)!important}
+html[data-theme="dark"] .toast{background:var(--side2)!important;color:var(--ink)!important}
+html[data-theme="dark"] .toast.error{background:#6b2424!important}
+html[data-theme="dark"] .check{background:var(--field)!important;border-color:var(--line-strong)!important}
+html[data-theme="dark"] .project-card:hover{border-color:color-mix(in srgb,var(--accent) 30%,var(--line))!important}
+html[data-theme="dark"] .login-card{background:var(--card)!important}
+html[data-theme="dark"] .login-card p{color:var(--muted)!important}
 html{color-scheme:light}
 html[data-theme="dark"]{color-scheme:dark}
 html,body{background:var(--bg);color:var(--ink)}
