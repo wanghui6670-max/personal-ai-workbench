@@ -21,6 +21,10 @@ export function createDshRuntimeAdapter({navigator}={}){
         reply:result.reply,
         trajectory:result.trajectory||[],
         navigation:result.navigation??null,
+        thinkBlocks:result.thinkBlocks||[],
+        skillCalls:result.skillCalls||[],
+        contextInjections:result.contextInjections||[],
+        metrics:result.metrics||null,
         source:result.source||'deepseek_harness',
         readOnly:true
       };
