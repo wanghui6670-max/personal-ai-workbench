@@ -57,7 +57,7 @@ export const requestSchemas={
   classify:{fields:{businessId:nonEmptyString},required:['businessId'],allowEmpty:false},
   projectPatch:{fields:{intro:string,git:string,feishu:string,completed:boolean,archived:boolean,endDate:nonEmptyString},allowEmpty:false},
   today:{fields:{todoId:nonEmptyString,add:boolean},required:['todoId','add'],allowEmpty:false},
-  todoPatch:{fields:{title:nonEmptyString,context:string,dueDate:nonEmptyString,done:boolean},allowEmpty:false},
+  todoPatch:{fields:{title:nonEmptyString,context:string,dueDate:nonEmptyString,done:boolean,businessId:nullableNonEmptyString},allowEmpty:false},
   morning:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString},required:['message'],allowEmpty:false},
   confirmationClear:{fields:{id:nonEmptyString},required:['id'],allowEmpty:false},
   note:{fields:{text:nonEmptyString},required:['text'],allowEmpty:false},

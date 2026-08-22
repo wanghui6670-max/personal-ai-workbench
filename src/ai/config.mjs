@@ -20,7 +20,9 @@ export const AI_WORKFLOWS=Object.freeze([
   'morning_dialogue',
   'ai_console',
   'getnote_insight',
-  'mixed_diary_todo_extraction'
+  'mixed_diary_todo_extraction',
+  'feishu_doc_analysis',
+  'inbox_routing'
 ]);
 
 const PROFILE_ALIASES=new Map([

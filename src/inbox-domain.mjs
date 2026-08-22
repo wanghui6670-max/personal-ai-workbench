@@ -1,8 +1,10 @@
 import { addActivity } from './store.mjs';
 import { createFeishuJournalClient, FeishuSourceError, sourceConfigured } from './feishu.mjs';
 import { newId, nowIso, compactText } from './utils.mjs';
+import { isValidDateOnly } from './validation.mjs';
 import { inboxContentHash, normalizeInboxAcks } from './inbox-ack.mjs';
 import { normalizeCaptureId, parseCaptureMarker } from './capture-contract.mjs';
+import { aiEnabled, analyzeFeishuDocument, routeInboxItems } from './ai.mjs';
 
 const defaultFeishuJournalClient=createFeishuJournalClient();
 
@@ -66,7 +68,114 @@ function legacyDiaryBlockId(item){
   return null;
 }
 
-export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,initialize=false}={}){
+function stripXmlTags(xml){
+  return String(xml||'')
+    .replace(/<br\s*\/?>/gi,'\n')
+    .replace(/<\/?(?:h1|h2|h3|p|li|checkbox|task|todo)\b[^>]*>/gi,'\n')
+    .replace(/<[^>]+>/g,'')
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+    .replace(/&#39;|&apos;/g,"'").replace(/&amp;/g,'&')
+    .replace(/\n{3,}/g,'\n\n').trim();
+}
+
+export async function autoRouteInbox({store,env=process.env}={}){
+  if(!aiEnabled(env))return{routed:0,reason:'ai_disabled'};
+  const state=await store.readState();
+  const config=await store.readConfig();
+  const inboxItems=(state.inbox||[]).filter(item=>!item.aiSuggestion).slice(0,20);
+  if(!inboxItems.length)return{routed:0,reason:'no_unrouted_items'};
+  const projects=(state.projects||[]).filter(p=>!p.archived);
+  const businesses=config.businesses||[];
+  const result=await routeInboxItems({inboxItems,projects,businesses});
+  if(!result||!result.routes)return{routed:0,reason:'ai_fallback'};
+  const routesByIndex=new Map(result.routes.map(r=>[r.inboxIndex,r]));
+  const businessIds=new Set(businesses.map(b=>b.id));
+  const projectIds=new Set(projects.map(p=>p.id));
+  let autoCreated=0;
+  await store.updateState(s=>{
+    for(const [index,route] of routesByIndex){
+      const item=s.inbox.find(i=>i.id===inboxItems[index]?.id);
+      if(item){
+        item.aiSuggestion={
+          target:route.target,
+          reason:route.reason,
+          confidence:result.confidence,
+          suggestedAt:nowIso(),
+          ...(route.businessId?{businessId:route.businessId}:{}),
+          ...(route.dueDate?{dueDate:route.dueDate}:{})
+        };
+        if(route.target==='todo'&&route.dueDate&&isValidDateOnly(route.dueDate)){
+          const bizId=route.businessId&&businessIds.has(route.businessId)?route.businessId:null;
+          const existing=s.todos.find(t=>t.context===item.text);
+          if(!existing){
+            const todo={
+              id:newId('td'),
+              title:compactText(item.text,90),
+              context:item.text,
+              dueDate:route.dueDate,
+              projectId:null,
+              businessId:bizId,
+              done:false,
+              createdAt:nowIso()
+            };
+            s.todos.unshift(todo);
+            s.inbox=s.inbox.filter(i=>i.id!==item.id);
+            autoCreated+=1;
+            addActivity(s,{type:'todo_auto_created',todoId:todo.id,text:`AI 自动创建待办「${todo.title}」，截止 ${route.dueDate}${bizId?` · 归入业务板块`:''}`});
+          }
+        }
+        else if(projectIds.has(route.target)&&route.dueDate&&isValidDateOnly(route.dueDate)){
+          const project=projects.find(p=>p.id===route.target);
+          if(project){
+            const existing=s.todos.find(t=>t.context===item.text);
+            if(!existing){
+              const todo={
+                id:newId('td'),
+                title:compactText(item.text,90),
+                context:item.text,
+                dueDate:route.dueDate,
+                projectId:project.id,
+                businessId:project.businessId||null,
+                done:false,
+                createdAt:nowIso()
+              };
+              s.todos.unshift(todo);
+              s.inbox=s.inbox.filter(i=>i.id!==item.id);
+              autoCreated+=1;
+              addActivity(s,{type:'todo_auto_created',projectId:project.id,todoId:todo.id,text:`AI 自动在「${project.name}」创建待办「${todo.title}」，截止 ${route.dueDate}`});
+            }
+          }
+        }
+        else if(businessIds.has(route.target)&&route.dueDate&&isValidDateOnly(route.dueDate)){
+          const biz=businesses.find(b=>b.id===route.target);
+          if(biz){
+            const existing=s.todos.find(t=>t.context===item.text);
+            if(!existing){
+              const todo={
+                id:newId('td'),
+                title:compactText(item.text,90),
+                context:item.text,
+                dueDate:route.dueDate,
+                projectId:null,
+                businessId:biz.id,
+                done:false,
+                createdAt:nowIso()
+              };
+              s.todos.unshift(todo);
+              s.inbox=s.inbox.filter(i=>i.id!==item.id);
+              autoCreated+=1;
+              addActivity(s,{type:'todo_auto_created',todoId:todo.id,text:`AI 自动创建待办「${todo.title}」，截止 ${route.dueDate} · 归入「${biz.name}」`});
+            }
+          }
+        }
+      }
+    }
+    addActivity(s,{type:'inbox_auto_routed',text:`AI 路由建议已生成：${result.routes.length} 条收件箱事项${autoCreated?`，自动创建 ${autoCreated} 条待办`:''}`});
+  });
+  return{routed:result.routes.length,confidence:result.confidence,autoCreated};
+}
+
+export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,initialize=false,autoRoute=false,env=process.env}={}){
   const config=await store.readConfig();
   if(!sourceConfigured(config.dataSource)){
     return feishuSyncSummary(config,{imported:0,removed:0,updated:0,deduped:0,seenSkipped:0,cleanedLegacy:0,initialized:Boolean(initialize),reason:'not_configured'});
@@ -238,6 +347,42 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
     return structuredClone(current);
   });
 
+  let docAnalysis=null;
+  let routingResult=null;
+  if(autoRoute&&aiEnabled(env)){
+    const docText=stripXmlTags(fetched.content);
+    if(docText.length>=20){
+      const existingTodos=(uniqueRemoteItems||[]).map(item=>item.text);
+      try{
+        docAnalysis=await analyzeFeishuDocument({docContent:docText,existingTodos});
+        if(docAnalysis?.hiddenTasks?.length){
+          await store.updateState(state=>{
+            for(const task of docAnalysis.hiddenTasks){
+              const dedupeHash=inboxDedupeHash(task.text);
+              let exists=false;
+              for(const item of state.inbox){
+                if(inboxDedupeHash(item.text)===dedupeHash){exists=true;break;}
+              }
+              if(!exists){
+                state.inbox.unshift({
+                  id:newId('in'),
+                  text:task.text,
+                  source:'feishu_doc_analysis',
+                  createdAt:nowIso(),
+                  aiMeta:{source:task.source||'文档分析'}
+                });
+              }
+            }
+            addActivity(state,{type:'feishu_doc_analyzed',text:`AI 文档分析发现 ${docAnalysis.hiddenTasks.length} 条隐含任务`});
+          });
+        }
+      }catch(e){console.warn('[AI doc analysis error]',e.message);}
+      try{
+        routingResult=await autoRouteInbox({store,env});
+      }catch(e){console.warn('[AI auto-route error]',e.message);}
+    }
+  }
+
   return feishuSyncSummary(await store.readConfig(),{
     imported,
     removed:cleanedLegacy,
@@ -251,7 +396,9 @@ export async function syncFeishuInbox({store,client=defaultFeishuJournalClient,i
     baselined:0,
     firstMixedSync:false,
     cleanedLegacy,
-    initialized:Boolean(initialize)
+    initialized:Boolean(initialize),
+    docAnalysis:docAnalysis?{hiddenTasksFound:docAnalysis.hiddenTasks?.length||0,confidence:docAnalysis.confidence}:null,
+    routingResult
   });
 }
 

@@ -9,6 +9,8 @@ import { aiEnabled,aiRuntimeConfig } from './ai.mjs';
 import { sendJson,readJsonBody,serveStatic,securityHeaders,createRequestGuard,parseTrustedOrigins } from './http.mjs';
 import { ensureBusinessDirs, resolveWorkspace, projectPath, readGitAuthority, sanitizeGitRemote } from './projects.mjs';
 import { deriveState,createProject,assignProjectBusiness,syncProject,syncAllProjects,syncFeishuInbox,addInbox,processInbox,morningChat,setToday,updateTodo,updateProject,updateWorkbenchConfig,createBusiness,renameBusiness,deleteBusiness } from './domain.mjs';
+import { autoRouteInbox } from './inbox-domain.mjs';
+import { analyzeFeishuDocument as aiAnalyzeFeishuDocument, routeInboxItems as aiRouteInboxItems, aiEnabled as aiProviderEnabled } from './ai.mjs';
 import { captureInbox } from './capture-domain.mjs';
 import { FeishuSourceError } from './feishu.mjs';
 import { nowIso,newId } from './utils.mjs';
@@ -294,7 +296,13 @@ const server=http.createServer(async(req,rawRes)=>{
 
     if(pathname==='/api/inbox'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inbox);return sendJson(res,201,{item:await addInbox({store,text:body.text,source:'manual'})});}
     if(pathname==='/api/inbox/sync'&&req.method==='POST'){
-      await requestBody(req,requestSchemas.empty);if(rateLimited(req,res,'sync'))return;return sendJson(res,200,{sync:await syncFeishuInbox({store})});
+      const body=await readJsonBody(req).catch(()=>({}));
+      if(rateLimited(req,res,'sync'))return;
+      return sendJson(res,200,{sync:await syncFeishuInbox({store,autoRoute:body.autoRoute===true})});
+    }
+    if(pathname==='/api/inbox/auto-route'&&req.method==='POST'){
+      await requestBody(req,requestSchemas.empty);if(rateLimited(req,res,'sync'))return;
+      return sendJson(res,200,{result:await autoRouteInbox({store})});
     }
     if(pathname==='/api/inbox/command'&&req.method==='POST'){const body=await requestBody(req,requestSchemas.inboxCommand);return sendJson(res,200,await processInbox({store,itemId:body.itemId,command:body.command,targetProjectId:body.targetProjectId??null}));}
 

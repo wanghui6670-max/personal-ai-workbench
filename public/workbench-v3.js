@@ -32,7 +32,7 @@ function notify(message,error=false){
 }
 function stateSignature(state){
   return JSON.stringify({
-    today:state?.todayPlan||[],inbox:(state?.inbox||[]).map(item=>[item.id,item.text,item.source,item.suggestedDueDate,item.suggestedProjectId]),
+    today:state?.todayPlan||[],todos:(state?.todos||[]).map(todo=>[todo.id,todo.dueDate,todo.done]),inbox:(state?.inbox||[]).map(item=>[item.id,item.text,item.source,item.suggestedDueDate,item.suggestedProjectId]),
     projects:(state?.projects||[]).map(project=>[project.id,project.progress?.percent,project.progress?.lastActivity,project.completed,project.archived]),
     confirmations:(state?.confirmations||[]).map(item=>item.id),sync:state?.config?.dataSource?.lastSyncAt||null,plans:planVersion
   });
@@ -72,7 +72,7 @@ async function refresh(force=false){
 
 function enhanceSidebar(){
   const today=document.querySelector('.nav a[href="#today"]');
-  if(today&&v3State){const wanted=`⌂ 今日与收件箱<span class="count">${Number(v3State.stats?.today||0)+Number(v3State.stats?.inbox||0)}</span>`;if(today.innerHTML!==wanted)today.innerHTML=wanted;}
+  if(today&&v3State){const wanted=`⌂ 首页<span class="count">${Number(v3State.stats?.today||0)+Number(v3State.stats?.inbox||0)}</span>`;if(today.innerHTML!==wanted)today.innerHTML=wanted;}
   const inbox=document.querySelector('.nav a[href="#inbox"]');if(inbox&&!inbox.classList.contains('v3-hidden'))inbox.classList.add('v3-hidden');
   const journal=document.querySelector('.nav a[href="#journal"]');if(journal&&journal.textContent!=='≡ 项目现场')journal.textContent='≡ 项目现场';
   const cleanup=document.querySelector('[data-action="toggle-cleanup"]');let media=document.querySelector('.v3-nav-media');
@@ -130,18 +130,88 @@ function projectLiveHtml(state){
   if(!projects.length)return'<div class="v3-empty">还没有项目。</div>';
   return `<div class="v3-project-live">${projects.map(project=>`<div class="v3-project"><div class="v3-project-top"><div><a class="v3-project-name" href="#project/${routePart(project.id)}">${esc(project.name)}</a><div class="v3-item-meta"><span class="pill">${esc(project.status||project.progress?.status||'未启动')}</span>${project.progress?.hasBlocker?'<span class="pill amber">有卡点</span>':''}</div></div><div class="v3-progress">${Number(project.progress?.percent||0)}%</div></div><div class="v3-project-scene">${esc(latestProjectActivity(project,state))}</div><div class="v3-actions"><a class="btn small" href="#project/${routePart(project.id)}">打开现场</a><button class="btn small" data-action="sync-project" data-id="${attr(project.id)}">刷新进度</button></div></div>`).join('')}</div>`;
 }
+let calMonth=null,calSelectedDate=null;
+function calTodayStr(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function calInit(){if(!calMonth){const d=new Date();calMonth={year:d.getFullYear(),month:d.getMonth()};}if(!calSelectedDate)calSelectedDate=calTodayStr();}
+function calKey(year,month,day){return `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;}
+function buildCalItemsMap(state){
+  const map=new Map();
+  const todayStr=calTodayStr();
+  const todaySet=new Set(state.todayPlan||[]);
+  for(const t of (state.todos||[])){
+    if(!t.dueDate)continue;
+    if(!map.has(t.dueDate))map.set(t.dueDate,{todos:[],projects:[]});
+    map.get(t.dueDate).todos.push(t);
+    if(todaySet.has(t.id)&&t.dueDate!==todayStr){
+      if(!map.has(todayStr))map.set(todayStr,{todos:[],projects:[]});
+      const todayItems=map.get(todayStr);
+      if(!todayItems.todos.find(x=>x.id===t.id))todayItems.todos.push(t);
+    }
+  }
+  for(const p of (state.projects||[])){if(p.archived||!p.endDate)continue;if(!map.has(p.endDate))map.set(p.endDate,{todos:[],projects:[]});map.get(p.endDate).projects.push(p);}
+  return map;
+}
+function calendarHtml(state){
+  calInit();const {year,month}=calMonth;const todayStr=calTodayStr();const itemsMap=buildCalItemsMap(state);
+  const firstDay=new Date(year,month,1).getDay();const daysInMonth=new Date(year,month+1,0).getDate();
+  const offset=(firstDay-1+7)%7;
+  const monthNames=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const weekDays=['一','二','三','四','五','六','日'];
+  let cells='';
+  for(let i=0;i<offset;i++)cells+='<div class="v3-cal-cell empty"></div>';
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=calKey(year,month,d);const items=itemsMap.get(dateStr);
+    const isToday=dateStr===todayStr,isSelected=dateStr===calSelectedDate;
+    const todoCount=items?items.todos.length:0,projCount=items?items.projects.length:0;
+    const hasItems=todoCount+projCount>0;
+    const allDone=items&&items.todos.length>0&&items.todos.every(t=>t.done);
+    cells+=`<div class="v3-cal-cell${isToday?' today':''}${isSelected?' selected':''}${hasItems?' has-items':''}${allDone?' all-done':''}" data-cal-date="${dateStr}"><div class="v3-cal-day">${d}</div>`;
+    if(hasItems){cells+='<div class="v3-cal-badges">';if(todoCount)cells+=`<span class="v3-cal-badge ${allDone?'done':''}">${todoCount}</span>`;if(projCount)cells+=`<span class="v3-cal-badge project">${projCount}</span>`;cells+='</div>';}
+    cells+='</div>';
+  }
+  return `<div class="v3-calendar"><div class="v3-cal-header"><div class="v3-cal-nav"><button class="btn small" data-cal-nav="prev">‹</button><strong>${year}年 ${monthNames[month]}</strong><button class="btn small" data-cal-nav="next">›</button></div><button class="btn small" data-cal-nav="today">回到今天</button></div><div class="v3-cal-weekdays">${weekDays.map(w=>`<span>${w}</span>`).join('')}</div><div class="v3-cal-grid">${cells}</div></div>`;
+}
+function calendarDetailHtml(state){
+  calInit();const dateStr=calSelectedDate||calTodayStr();
+  const items=buildCalItemsMap(state).get(dateStr)||{todos:[],projects:[]};
+  const todos=items.todos,projects=items.projects;
+  let html=`<div class="v3-cal-detail"><div class="v3-cal-detail-head"><h3>${dateStr.replace(/-/g,' / ')}</h3>`;
+  if(!todos.length&&!projects.length)html+=`<span class="v3-cal-detail-empty">这一天没有带截止日期的待办或项目里程碑。</span>`;
+  else html+=`<span class="v3-cal-detail-count">${todos.length} 个待办 · ${projects.length} 个项目里程碑</span>`;
+  html+=`</div>`;
+  for(const t of todos){
+    const inToday=(state.todayPlan||[]).includes(t.id);
+    html+=`<div class="v3-cal-item todo ${t.done?'done':''}"><button class="check ${t.done?'checked':''}" data-action="toggle-todo" data-id="${attr(t.id)}" title="完成/恢复"></button><div class="v3-cal-item-main"><div class="v3-cal-item-title">${esc(t.title)}</div><div class="v3-cal-item-meta">${t.project?`<span class="pill blue">${esc(t.project)}</span>`:'<span class="pill">独立待办</span>'}</div></div><div class="toolbar"><button class="btn small" data-action="edit-todo" data-id="${attr(t.id)}">编辑</button>${!t.done?`<button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(t.id)}" data-add="${inToday?'0':'1'}">${inToday?'移出今日':'加入今日'}</button>`:''}</div></div>`;
+  }
+  for(const p of projects){
+    const percent=Math.max(0,Math.min(100,Math.round(Number(p.progress?.percent||0))));
+    html+=`<a class="v3-cal-item project" href="#project/${routePart(p.id)}"><div class="mini-ring" style="--p:${percent}"><span>${percent}%</span></div><div class="v3-cal-item-main"><div class="v3-cal-item-title">${esc(p.name)}</div><div class="v3-cal-item-meta"><span class="pill">计划结束</span>${p.progress?.hasBlocker?'<span class="pill amber">有卡点</span>':''}</div></div></a>`;
+  }
+  html+=`</div>`;
+  return html;
+}
+function renderCalendar(){const wrap=document.querySelector('.v3-calendar-wrap');if(wrap&&v3State)wrap.innerHTML=calendarHtml(v3State)+calendarDetailHtml(v3State);}
+function handleCalNav(dir){
+  calInit();
+  if(dir==='prev'){calMonth.month--;if(calMonth.month<0){calMonth.month=11;calMonth.year--;}}
+  else if(dir==='next'){calMonth.month++;if(calMonth.month>11){calMonth.month=0;calMonth.year++;}}
+  else if(dir==='today'){const d=new Date();calMonth={year:d.getFullYear(),month:d.getMonth()};calSelectedDate=calTodayStr();}
+  renderCalendar();
+}
+function handleCalSelect(dateStr){calSelectedDate=dateStr;renderCalendar();}
+
 function dashboardHtml(state){
   const today=state.todayTodos||[],inbox=state.inbox||[];
   const aiPending=inbox.filter(item=>item.source==='feishu_todo'&&!inboxPlans.has(item.id)).length+autoAnalyzeQueue.length+autoAnalyzeActive;
   const attention=Number(state.stats?.confirmations||0)+Number(state.stats?.overdue||0)+Number(state.stats?.unclassified||0);
-  return `<div id="v3-dashboard" class="v3-dashboard" data-signature="${attr(stateSignature(state))}"><div class="v3-hero"><div class="v3-metric"><strong>${today.length}</strong><span>今天明确要做</span></div><div class="v3-metric"><strong>${inbox.length}</strong><span>待办待处理</span></div><div class="v3-metric"><strong>${aiPending}</strong><span>AI 待办建议中</span></div><div class="v3-metric"><strong>${attention}</strong><span>需要你拍板/留意</span></div></div><div class="v3-grid"><section class="v3-card"><div class="v3-card-head"><div><h2>今天要做什么</h2><p>Today 仍然只接受你明确确认的任务；AI 可以建议，但不会自动加入。</p></div></div>${today.length?today.map(todo=>todoRow(todo,state)).join(''):'<div class="v3-empty">今天还没有明确安排的任务。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>需要你决定的事</h2><p>真正无法安全处理的待办集中在这里。</p></div></div><div class="v3-attention"><a class="pill amber" href="#confirm">待确认 ${state.stats?.confirmations||0}</a><a class="pill red" href="#overdue">逾期 ${state.stats?.overdue||0}</a><a class="pill" href="#unclassified">待归类 ${state.stats?.unclassified||0}</a></div></section></div><section class="v3-card"><div class="v3-card-head"><div><h2>飞书待办 · AI 处理队列</h2><p>只同步飞书云文档中的明确待办；普通日记、复盘、分析和项目进展不会进入这里。</p></div></div>${sourceHtml(state)}${inbox.length?inbox.map(inboxItemHtml).join(''):'<div class="v3-empty">没有待处理的飞书待办。</div>'}</section><section class="v3-card"><div class="v3-card-head"><div><h2>项目现场与进度</h2><p>每个项目直接看进度、最后活动和卡点。</p></div><button class="btn small" data-action="sync-all">同步所有项目</button></div>${projectLiveHtml(state)}</section></div>`;
+  return `<div id="v3-dashboard" class="v3-dashboard" data-signature="${attr(stateSignature(state))}"><div class="v3-hero"><div class="v3-metric"><strong>${today.length}</strong><span>今天要做</span></div><div class="v3-metric"><strong>${inbox.length}</strong><span>待办待处理</span></div><div class="v3-metric"><strong>${aiPending}</strong><span>AI 建议中</span></div><div class="v3-metric"><strong>${attention}</strong><span>需要留意</span></div></div><section class="v3-card"><div class="v3-card-head"><div><h2>飞书待办 · AI 处理队列</h2><p>只同步飞书云文档中的明确待办；普通日记、复盘、分析和项目进展不会进入这里。</p></div></div>${sourceHtml(state)}${inbox.length?inbox.map(inboxItemHtml).join(''):'<div class="v3-empty">没有待处理的飞书待办。</div>'}</section><section class="v3-card v3-calendar-card"><div class="v3-card-head"><div><h2>月度日历工作台</h2><p>带截止日期的待办和项目结束日期自动出现在日历上；点击日期查看详情。</p></div></div><div class="v3-calendar-wrap">${calendarHtml(state)}${calendarDetailHtml(state)}</div></section></div>`;
 }
 function hideLegacyMain(main,keepCapture=true){
   for(const child of [...main.children]){if(child.id==='v3-dashboard'||child.id==='v3-scene'||child.id==='v3-media-page')continue;if(keepCapture&&child.classList.contains('capture')){if(child.classList.contains('v3-hidden'))child.classList.remove('v3-hidden');continue;}if(!child.classList.contains('v3-hidden'))child.classList.add('v3-hidden');}
 }
 function setTop(title,desc){const h=document.querySelector('.top-left h1');if(h&&h.textContent!==title)h.textContent=title;const p=document.querySelector('.top-left p');if(p&&p.textContent!==desc)p.textContent=desc;}
 function enhanceToday(){
-  if(!v3State)return;const main=document.querySelector('.main');if(!main)return;setTop('今日与收件箱','待办同步只读取飞书云文档中的明确待办；今天做什么仍由你确认。');hideLegacyMain(main,true);
+  if(!v3State)return;const main=document.querySelector('.main');if(!main)return;setTop('首页','月度日历工作台 · 飞书待办同步 · 今天做什么仍由你确认。');hideLegacyMain(main,true);
   const signature=stateSignature(v3State);let dashboard=main.querySelector('#v3-dashboard');if(dashboard?.dataset.signature===signature)return;dashboard?.remove();
   const holder=document.createElement('div');holder.innerHTML=dashboardHtml(v3State);dashboard=holder.firstElementChild;const capture=main.querySelector('.capture');if(capture)capture.insertAdjacentElement('afterend',dashboard);else main.prepend(dashboard);
 }
@@ -209,8 +279,15 @@ async function handleV3Action(event,target){
   if(action==='analyze'){event.preventDefault();const item=v3State?.inbox?.find(candidate=>candidate.id===target.dataset.id);if(item)await analyzeItem(item,{force:true});return;}
   if(action==='confirm-plan'){event.preventDefault();await confirmPlan(target.dataset.id);}
 }
-document.addEventListener('click',event=>{const target=event.target.closest?.('[data-v3-action]');if(target)void handleV3Action(event,target);},true);
+document.addEventListener('click',event=>{
+  const calNav=event.target.closest?.('[data-cal-nav]');
+  if(calNav){event.preventDefault();handleCalNav(calNav.dataset.calNav);return;}
+  const calCell=event.target.closest?.('[data-cal-date]');
+  if(calCell){event.preventDefault();handleCalSelect(calCell.dataset.calDate);return;}
+  const target=event.target.closest?.('[data-v3-action]');
+  if(target)void handleV3Action(event,target);
+},true);
 window.addEventListener('hashchange',()=>{if(currentView()==='inbox'){location.hash='#today';return;}schedule();void refresh(true);});
 const appRoot=document.querySelector('#app')||document.body;new MutationObserver(schedule).observe(appRoot,{childList:true});
-function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;renderEnhancements();});}
+function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;renderEnhancements();void refresh();});}
 loadReviewCache();if(currentView()==='inbox')location.hash='#today';void refresh(true);

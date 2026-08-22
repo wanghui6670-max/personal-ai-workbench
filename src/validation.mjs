@@ -177,6 +177,7 @@ export function validateState(state) {
     validateOptionalString(todo.createdAt,scope,`todos[${index}].createdAt`);
     validateOptionalBoolean(todo.done,scope,`todos[${index}].done`);
     validateOptionalId(todo.projectId,scope,`todos[${index}].projectId`,{nullable:true});
+    validateOptionalId(todo.businessId,scope,`todos[${index}].businessId`,{nullable:true});
     if(todo.dueDateOwner!==undefined&&!GETNOTE_DUE_DATE_OWNERS.has(todo.dueDateOwner)){
       throw invalid(scope,`todos[${index}].dueDateOwner 必须是 source 或 user`);
     }

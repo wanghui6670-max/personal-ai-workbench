@@ -13,20 +13,11 @@ function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=
 
 function polishDashboard(){
   const dashboard=document.querySelector('#v3-dashboard');if(!dashboard)return;
-  const topSections=[...dashboard.children].filter(node=>node.classList?.contains('v3-card'));
-  const queue=topSections[0],projects=topSections[1];
-  const grid=dashboard.querySelector(':scope > .v3-grid');
-  const today=grid?.children?.[0],decisions=grid?.children?.[1];
+  const queue=dashboard.querySelector(':scope > .v3-card');
   setText(queue?.querySelector('.v3-card-head h2'),'待处理工作流');
   setText(queue?.querySelector('.v3-card-head p'),'飞书明确待办 → AI 给处理建议 → 你确认 → Todo；普通日记不进入待办同步。');
-  setText(today?.querySelector('.v3-card-head h2'),'今天已确认');
-  setText(today?.querySelector('.v3-card-head p'),'这里只放你已经明确决定今天要做的事。');
-  setText(decisions?.querySelector('.v3-card-head h2'),'需要你拍板');
-  setText(decisions?.querySelector('.v3-card-head p'),'AI 无法安全决定的待办集中在这里，不打断你。');
-  setText(projects?.querySelector('.v3-card-head h2'),'最近项目现场');
-  setText(projects?.querySelector('.v3-card-head p'),'恢复最近做到哪里、进度和卡点；需要时再打开项目。');
   const labels=dashboard.querySelectorAll('.v3-hero .v3-metric span');
-  ['今天已确认','飞书待办','AI 待办建议中','需要你拍板'].forEach((label,index)=>setText(labels[index],label));
+  ['今天要做','飞书待办','AI 建议中','需要留意'].forEach((label,index)=>setText(labels[index],label));
   const source=dashboard.querySelector('.v3-source');
   const sourcePill=source?.querySelector('.pill.blue');
   if(sourcePill)setText(sourcePill,'飞书待办来源');

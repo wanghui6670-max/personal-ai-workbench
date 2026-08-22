@@ -221,7 +221,7 @@ function requirePatchObject(patch){
   if(!patch||typeof patch!=='object'||Array.isArray(patch))throw badRequest('待办更新内容必须是 JSON 对象。');
   const keys=Object.keys(patch);
   if(!keys.length)throw badRequest('待办更新内容不能为空。');
-  const unknown=keys.find(key=>!['title','context','dueDate','done'].includes(key));
+  const unknown=keys.find(key=>!['title','context','dueDate','done','businessId'].includes(key));
   if(unknown)throw badRequest(`待办更新内容包含不支持的字段：${unknown}。`);
 }
 

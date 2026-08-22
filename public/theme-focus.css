@@ -64,6 +64,9 @@ html[data-theme="dark"] .nav .count{background:var(--side2)!important;color:var(
 html[data-theme="dark"] .biz-row{color:var(--side-ink)!important}
 html[data-theme="dark"] .project-link{color:var(--side-muted)!important}
 html[data-theme="dark"] .project-link:hover,html[data-theme="dark"] .project-link.active{color:var(--side-ink)!important;background:var(--side2)!important}
+html[data-theme="dark"] .todo-link{color:var(--side-muted)!important}
+html[data-theme="dark"] .todo-link:hover,html[data-theme="dark"] .todo-link.active{color:var(--side-ink)!important;background:var(--side2)!important}
+html[data-theme="dark"] .todo-link::before{color:var(--side-muted)!important}
 html[data-theme="dark"] .topbar{background:var(--topbar)!important;border-color:var(--line)!important}
 html[data-theme="dark"] .top-left p{color:var(--muted)!important}
 html[data-theme="dark"] .btn{background:var(--field)!important;color:var(--ink)!important;border-color:var(--line)!important}
@@ -165,6 +168,37 @@ body{font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rend
 .harness-nav-compose-meta{color:var(--dsh-muted)!important}
 .harness-nav-compose-meta span:first-child{background:var(--dsh-surface)!important;border-color:var(--dsh-line)!important;color:var(--dsh-ink)!important}
 .harness-nav-send{background:var(--dsh-ink)!important;color:var(--dsh-bg)!important}
+.harness-nav-stop{background:#f85149!important;color:#fff!important}
+.harness-nav-tabs{border-bottom-color:var(--dsh-line)!important}
+.harness-nav-tabs .nav-tab{color:var(--dsh-muted)!important}
+.harness-nav-tabs .nav-tab.active{color:var(--dsh-ink)!important;border-bottom-color:var(--accent)!important}
+.harness-nav-tabs .nav-tab:hover{color:var(--dsh-ink)!important}
+.harness-nav-trajectory-panel{scrollbar-color:var(--dsh-line) transparent}
+.traj-row{border-color:var(--dsh-line)!important;background:var(--dsh-surface)!important}
+.traj-row strong{color:var(--dsh-ink)!important}
+.traj-row code{color:var(--dsh-muted)!important}
+.harness-nav-metrics{color:var(--dsh-muted)!important;border-top-color:var(--dsh-line)!important}
+.harness-nav-sessions-panel{background:var(--dsh-surface)!important;border-bottom-color:var(--dsh-line)!important}
+.harness-nav-sessions-panel .sessions-header{background:var(--dsh-surface)!important;border-bottom-color:var(--dsh-line)!important;color:var(--dsh-muted)!important}
+.harness-nav-sessions-panel .session-item{color:var(--dsh-ink)!important}
+.harness-nav-sessions-panel .session-item:hover{background:var(--dsh-surface-2)!important}
+.harness-nav-sessions-panel .session-item.active{background:color-mix(in srgb,var(--accent) 10%,var(--dsh-surface-2))!important}
+.harness-nav-think{border-color:var(--dsh-line)!important;background:var(--dsh-surface)!important}
+.harness-nav-think summary{color:var(--dsh-muted)!important}
+.harness-nav-think>div{color:var(--dsh-muted)!important}
+.harness-nav-skills .skill-tag{background:var(--dsh-surface-2)!important;color:var(--dsh-muted)!important;border-color:var(--dsh-line)!important}
+.genui-card{border-color:var(--dsh-line)!important;background:var(--dsh-surface)!important}
+.genui-card .genui-title{color:var(--dsh-ink)!important}
+.genui-stat{background:var(--dsh-surface-2)!important;border-color:var(--dsh-line)!important}
+.genui-stat .label{color:var(--dsh-muted)!important}
+.genui-stat .value{color:var(--dsh-ink)!important}
+.genui-list-item{background:var(--dsh-surface-2)!important;border-color:var(--dsh-line)!important}
+.genui-list-item strong{color:var(--dsh-ink)!important}
+.genui-list-item span{color:var(--dsh-muted)!important}
+.harness-nav-message .md-code-block{background:var(--dsh-surface-2)!important;border-color:var(--dsh-line)!important}
+.harness-nav-message .md-inline-code{background:var(--dsh-surface-2)!important;color:var(--dsh-ink)!important}
+.harness-nav-message .msg-copy,.harness-nav-message .msg-branch{color:var(--dsh-muted)!important}
+.harness-nav-message .msg-copy:hover,.harness-nav-message .msg-branch:hover{background:var(--dsh-surface-2)!important;color:var(--dsh-ink)!important}
 
 /* Today focus: dashboard first, then one primary work surface and lightweight secondary sections. */
 html.today-focus .main{max-width:1180px;padding-top:18px;min-height:calc(100vh - 64px)}

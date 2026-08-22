@@ -14,7 +14,113 @@
 .harness-nav-native-warning{flex:none;margin:8px 14px 0;padding:7px 9px;border:1px solid #5b4321;background:#2b2115;color:#d7b878;border-radius:7px;font-size:9px;line-height:1.45}
 .harness-nav-messages{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:18px;padding:20px 18px 34px;scrollbar-width:thin;scrollbar-color:#343b46 transparent}
 .harness-nav-empty{margin:auto;padding:30px 22px;text-align:center;color:#7d8590;max-width:330px}.harness-nav-empty-mark{width:40px;height:40px;margin:0 auto 14px;display:grid;place-items:center;border-radius:10px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;font-size:19px}.harness-nav-empty strong{display:block;color:#f0f3f6;font-size:16px;font-weight:700}.harness-nav-empty p{font-size:11px;line-height:1.65;margin:8px auto 0;color:#7d8590}
-.harness-nav-message{width:100%;max-width:100%;font-size:12.5px;line-height:1.72;color:#dce3ea}.harness-nav-message>span{display:block;font-size:9px;color:#6e7681;margin-bottom:5px;font-weight:650}.harness-nav-message>div{white-space:pre-wrap;word-break:break-word}.harness-nav-message.user{align-self:flex-end;width:auto;max-width:88%;margin-left:auto}.harness-nav-message.user>span{text-align:right}.harness-nav-message.user>div{padding:8px 11px;border-radius:10px;background:#1f3f70;color:#f5f8ff}.harness-nav-message.assistant{align-self:stretch}.harness-nav-message.assistant>span{display:none}.harness-nav-message.assistant>div{padding:0;background:transparent;border:0;color:#dce3ea}
+.harness-nav-message{width:100%;max-width:100%;font-size:12.5px;line-height:1.72;color:var(--dsh-ink,#dce3ea)}.harness-nav-message>div{white-space:pre-wrap;word-break:break-word}
+
+/* ── Markdown 渲染 ── */
+.harness-nav-message .msg-body{font-size:12.5px;line-height:1.72;color:var(--dsh-ink,#dce3ea)}
+.harness-nav-message.assistant .msg-body{padding:0;background:transparent;border:0;color:var(--dsh-ink,#dce3ea)}
+.harness-nav-message .md-h2{font-size:15px;font-weight:700;margin:12px 0 6px;color:var(--dsh-ink)}
+.harness-nav-message .md-h3{font-size:13.5px;font-weight:650;margin:10px 0 5px;color:var(--dsh-ink)}
+.harness-nav-message .md-h4{font-size:12.5px;font-weight:600;margin:8px 0 4px;color:var(--dsh-ink)}
+.harness-nav-message .md-p{margin:0 0 8px}
+.harness-nav-message .md-p:last-child{margin-bottom:0}
+.harness-nav-message .md-list{margin:4px 0 8px;padding-left:18px}
+.harness-nav-message .md-list li{margin:2px 0}
+.harness-nav-message .md-inline-code{background:var(--dsh-surface-2,#2a303a);padding:1px 5px;border-radius:4px;font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsh-ink)}
+.harness-nav-message .md-code-block{background:var(--dsh-surface-2,#10151b);border:1px solid var(--dsh-line);border-radius:8px;padding:10px 12px;margin:8px 0;overflow:auto;max-height:300px}
+.harness-nav-message .md-code-block code{font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsh-ink);white-space:pre-wrap;word-break:break-word}
+.harness-nav-message .md-link{color:var(--accent,#6ea8fe);text-decoration:none;border-bottom:1px solid currentColor}
+.harness-nav-message strong{font-weight:700;color:var(--dsh-ink)}
+.harness-nav-message em{font-style:italic}
+
+/* ── 消息头 ── */
+.harness-nav-message .msg-header{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.harness-nav-message .msg-label{font-size:9px;color:var(--dsh-muted);font-weight:650}
+.harness-nav-message .msg-time{font-size:8px;color:var(--dsh-muted);opacity:.7}
+.harness-nav-message .msg-copy,.harness-nav-message .msg-branch{appearance:none;border:0;background:transparent;color:var(--dsh-muted);font:inherit;font-size:8px;cursor:pointer;padding:1px 4px;border-radius:4px}
+.harness-nav-message .msg-copy:hover,.harness-nav-message .msg-branch:hover{background:var(--dsh-surface-2);color:var(--dsh-ink)}
+.harness-nav-message .msg-feedback{display:inline-flex;gap:3px;margin-left:auto}
+.harness-nav-message .msg-feedback button{appearance:none;border:0;background:transparent;font-size:9px;cursor:pointer;padding:1px 3px;opacity:.5}
+.harness-nav-message .msg-feedback button:hover{opacity:1}
+.harness-nav-message .msg-feedback button.fb-good[data-fb="good"]{opacity:1;color:#3fb950}
+.harness-nav-message .msg-feedback button.fb-bad[data-fb="bad"]{opacity:1;color:#f85149}
+
+/* ── Think 推理区块 ── */
+.harness-nav-think{flex:none;margin:0 0 8px;border:1px solid var(--dsh-line);border-radius:8px;background:var(--dsh-surface);overflow:hidden}
+.harness-nav-think summary{cursor:pointer;padding:7px 10px;font-size:9px;color:var(--dsh-muted);list-style:none;display:flex;align-items:center;gap:6px}
+.harness-nav-think summary::-webkit-details-marker{display:none}
+.harness-nav-think summary:before{content:"💭";font-size:10px}
+.harness-nav-think[open] summary{border-bottom:1px solid var(--dsh-line)}
+.harness-nav-think>div{padding:8px 10px;font-size:9.5px;line-height:1.6;color:var(--dsh-muted);white-space:pre-wrap;word-break:break-word}
+
+/* ── Skill 标签 ── */
+.harness-nav-skills{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+.harness-nav-skills .skill-tag{font-size:8px;padding:2px 6px;border-radius:5px;background:var(--dsh-surface-2);color:var(--dsh-muted);border:1px solid var(--dsh-line)}
+
+/* ── GenUI 卡片 ── */
+.genui-card{margin:8px 0;padding:12px;border:1px solid var(--dsh-line);border-radius:10px;background:var(--dsh-surface)}
+.genui-title{font-size:13px;font-weight:700;margin-bottom:8px;color:var(--dsh-ink)}
+.genui-body{display:flex;flex-direction:column}
+.genui-callout{padding:8px 10px;border-radius:8px;margin:0}
+.genui-callout.genui-info{background:color-mix(in srgb,var(--accent) 8%,var(--dsh-surface));border:1px solid color-mix(in srgb,var(--accent) 20%,var(--dsh-line))}
+.genui-callout.genui-success{background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.2)}
+.genui-callout.genui-warning{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2)}
+.genui-callout strong{display:block;font-size:11px;font-weight:650;margin-bottom:3px;color:var(--dsh-ink)}
+.genui-callout p{font-size:10px;line-height:1.5;color:var(--dsh-ink);margin:0}
+.genui-grid{display:grid;grid-template-columns:repeat(var(--genui-cols,3),1fr);gap:8px;margin:0}
+.genui-stat{display:flex;flex-direction:column;gap:2px;padding:8px;border-radius:7px;background:var(--dsh-surface-2);border:1px solid var(--dsh-line)}
+.genui-stat .label{font-size:8px;color:var(--dsh-muted);font-weight:600}
+.genui-stat .value{font-size:11px;font-weight:700;color:var(--dsh-ink)}
+.genui-list{display:flex;flex-direction:column;gap:6px;margin:0}
+.genui-list-item{padding:7px 8px;border-radius:7px;background:var(--dsh-surface-2);border:1px solid var(--dsh-line)}
+.genui-list-item strong{display:block;font-size:10px;font-weight:650;color:var(--dsh-ink);margin-bottom:2px}
+.genui-list-item span{font-size:9px;line-height:1.5;color:var(--dsh-muted)}
+.genui-text{font-size:10px;line-height:1.5;color:var(--dsh-ink);margin:0}
+
+/* ── 标签页 ── */
+.harness-nav-tabs{flex:none;display:flex;gap:0;border-bottom:1px solid var(--dsh-line);padding:0 14px}
+.harness-nav-tabs .nav-tab{appearance:none;border:0;background:transparent;color:var(--dsh-muted);font:inherit;font-size:10px;font-weight:600;padding:7px 10px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.harness-nav-tabs .nav-tab.active{color:var(--dsh-ink);border-bottom-color:var(--accent)}
+.harness-nav-tabs .nav-tab:hover{color:var(--dsh-ink)}
+
+/* ── 轨迹面板 ── */
+.harness-nav-trajectory-panel{flex:1;min-height:0;overflow:auto;padding:12px 14px;scrollbar-width:thin;scrollbar-color:var(--dsh-line) transparent}
+.harness-nav-tab-empty{color:var(--dsh-muted);font-size:10px;text-align:center;padding:30px 0}
+.harness-nav-trajectory-list{display:flex;flex-direction:column;gap:5px}
+.traj-row{display:grid;grid-template-columns:auto minmax(70px,auto) minmax(0,1fr);gap:6px;align-items:start;font-size:9px;padding:5px 7px;border:1px solid var(--dsh-line);border-radius:6px;background:var(--dsh-surface)}
+.traj-badge{border-radius:4px;padding:2px 5px;font-weight:800;font-size:8px;text-align:center}
+.traj-badge.call{background:color-mix(in srgb,var(--accent) 15%,var(--dsh-surface-2));color:var(--accent)}
+.traj-badge.ok{background:rgba(63,185,80,.15);color:#3fb950}
+.traj-badge.error{background:rgba(248,81,73,.15);color:#f85149}
+.traj-badge.done{background:rgba(197,184,255,.15);color:#c5b8ff}
+.traj-row strong{font-size:9px;color:var(--dsh-ink);padding-top:1px}
+.traj-row code{font:8px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsh-muted);white-space:pre-wrap;word-break:break-word}
+
+/* ── 性能指标栏 ── */
+.harness-nav-metrics-bar{flex:none;min-height:0;padding:0 14px}
+.harness-nav-metrics{font-size:8px;color:var(--dsh-muted);padding:4px 0;border-top:1px solid var(--dsh-line);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── 停止生成 ── */
+.harness-nav-stop{appearance:none;width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:7px;background:#f85149;color:#fff;font-size:12px;cursor:pointer}
+.harness-nav-stop:hover{background:#da3633}
+
+/* ── 会话列表 ── */
+.harness-nav-sessions-panel{flex:none;max-height:240px;overflow:auto;border-bottom:1px solid var(--dsh-line);background:var(--dsh-surface)}
+.harness-nav-sessions-panel .sessions-header{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;font-size:9px;font-weight:650;color:var(--dsh-muted);position:sticky;top:0;background:var(--dsh-surface);border-bottom:1px solid var(--dsh-line)}
+.harness-nav-sessions-panel .sessions-header button{appearance:none;border:0;background:transparent;color:var(--dsh-muted);font-size:14px;cursor:pointer;padding:0 2px}
+.harness-nav-sessions-panel .session-list{padding:4px 0}
+.harness-nav-sessions-panel .session-item{display:flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;font-size:10px;color:var(--dsh-ink)}
+.harness-nav-sessions-panel .session-item:hover{background:var(--dsh-surface-2)}
+.harness-nav-sessions-panel .session-item.active{background:color-mix(in srgb,var(--accent) 10%,var(--dsh-surface-2));border-left:2px solid var(--accent)}
+.harness-nav-sessions-panel .session-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.harness-nav-sessions-panel .session-time{font-size:8px;color:var(--dsh-muted);white-space:nowrap}
+.harness-nav-sessions-panel .session-del{appearance:none;border:0;background:transparent;color:var(--dsh-muted);font-size:13px;cursor:pointer;padding:0 2px;border-radius:4px}
+.harness-nav-sessions-panel .session-del:hover{color:#f85149;background:rgba(248,81,73,.1)}
+.harness-nav-message.user{align-self:flex-end;width:auto;max-width:88%;margin-left:auto}
+.harness-nav-message.user .msg-header{justify-content:flex-end}
+.harness-nav-message.user .msg-body{padding:8px 11px;border-radius:10px;background:var(--dsh-user);color:var(--dsh-user-ink)}
+.harness-nav-message.assistant{align-self:stretch}
+.harness-nav-message.assistant .msg-body{padding:0;background:transparent;border:0;color:var(--dsh-ink)}
 .harness-nav-unavailable{margin:auto;width:min(330px,92%);text-align:center;color:#8b949e}.harness-nav-unavailable strong{display:block;font-size:15px;color:#f0f3f6}.harness-nav-unavailable p{font-size:10px;line-height:1.6;margin:7px 0 12px}.harness-nav-unavailable button{padding:7px 10px;background:#161b22;border-color:#30363d;color:#c9d1d9}
 .harness-nav-trajectory{flex:none;margin-top:-6px;border:0;background:transparent}.harness-nav-trajectory summary{cursor:pointer;width:max-content;max-width:100%;font-size:9px;color:#6e7681;padding:2px 0;list-style:none}.harness-nav-trajectory summary::-webkit-details-marker{display:none}.harness-nav-trajectory summary:before{content:"› ";color:#7d8590}.harness-nav-trajectory[open] summary:before{content:"⌄ "}.harness-nav-trajectory>div{margin-top:7px;padding:8px 9px;border:1px solid #2a3038;border-radius:7px;background:#10151b;display:grid;gap:5px}.harness-nav-step{display:grid;grid-template-columns:auto minmax(70px,auto) minmax(0,1fr);gap:6px;align-items:start;font-size:8px}.harness-nav-step>span{border-radius:4px;padding:2px 4px;font-weight:800}.harness-nav-step .call{background:#17365f;color:#8fbaff}.harness-nav-step .ok{background:#153a2a;color:#8ed5ae}.harness-nav-step .error{background:#4a2529;color:#ffb4bb}.harness-nav-step .done{background:#302d45;color:#c5b8ff}.harness-nav-step strong{font-size:9px;color:#c9d1d9;padding-top:1px}.harness-nav-step code{font:8px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#7d8590;white-space:pre-wrap;word-break:break-word}
 .harness-nav-error{flex:none;border:1px solid #633039;background:#3a2025;color:#ffd0d5;border-radius:7px;padding:8px 9px;font-size:9px;line-height:1.45}

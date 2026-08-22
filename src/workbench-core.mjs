@@ -40,7 +40,12 @@ export function deriveState(appRoot,state,config,aiEnabled=false){
   const active=projects.filter(project=>!project.archived);
   const overdue=active.filter(project=>!project.completed&&project.endDate&&dueDeltaDays(project.endDate)<0&&project.businessId);
   const unclassified=active.filter(project=>!project.businessId);
-  const todos=state.todos.map(todo=>({...todo,project:projects.find(project=>project.id===todo.projectId)?.name||null}));
+  const todos=state.todos.map(todo=>{
+    const project=todo.projectId?projects.find(p=>p.id===todo.projectId):null;
+    const businessId=todo.businessId||(project?.businessId||null);
+    const business=businessId?businessById(config,businessId):null;
+    return {...todo,project:project?.name||null,businessId,business:business?.name||null};
+  });
   const todayPlan=state.todayPlanDate===today?state.todayPlan:[];
   const todayTodos=todayPlan.map(id=>todos.find(todo=>todo.id===id)).filter(Boolean).filter(todo=>!todo.done);
   return {
@@ -250,6 +255,16 @@ function projectCandidatesByCommand(state,command){
   return{matches:prefix,requiresSelection:prefix.length>0};
 }
 
+function businessCandidatesByCommand(config,command){
+  const normalized=command.replace(/\s/g,'');
+  const businesses=config?.businesses||[];
+  const matches=businesses.filter(biz=>{
+    const name=biz.name.replace(/\s/g,'');
+    return name.length>=2&&normalized.includes(name);
+  });
+  return matches;
+}
+
 function hasNegatedIntent(command,terms){
   return terms.some(term=>new RegExp(`(?:不要|别|不想|不用|不可|不能|禁止)(?:再|把|将|去|要)?[^，。；;！？!?]{0,8}${term}`).test(command));
 }
@@ -290,6 +305,7 @@ export async function processInbox({store,itemId,command,targetProjectId=null}){
   if(typeof command!=='string')throw badRequest('command 必须是字符串。');
   if(targetProjectId!==null&&(typeof targetProjectId!=='string'||!targetProjectId.trim()))throw badRequest('targetProjectId 必须是非空字符串或 null。');
   if(!command.trim())return{needsFollowup:true,question:'告诉我这条内容要怎么处理。'};
+  const config=await store.readConfig();
   let response;
   await store.updateState(state=>{
     const item=state.inbox.find(candidate=>candidate.id===itemId);
@@ -328,10 +344,12 @@ export async function processInbox({store,itemId,command,targetProjectId=null}){
     if(intent.todoIntent){
       clearInboxRoutingConfirmations(state,itemId);
       if(!due){response={needsFollowup:true,question:'这个待办的截止日期是哪一天？'};return;}
-      const todo={id:newId('td'),title:compactText(item.text,90),context:item.text,dueDate:due,projectId:null,done:false,createdAt:nowIso()};
+      const bizMatches=businessCandidatesByCommand(config,instruction);
+      const businessId=bizMatches.length===1?bizMatches[0].id:null;
+      const todo={id:newId('td'),title:compactText(item.text,90),context:item.text,dueDate:due,projectId:null,businessId,done:false,createdAt:nowIso()};
       state.todos.unshift(todo);remove();
-      addActivity(state,{type:'todo_created',todoId:todo.id,text:`创建独立待办「${todo.title}」，截止 ${due}`});
-      response={message:`已创建独立待办，截止 ${due}。`,todo};
+      addActivity(state,{type:'todo_created',todoId:todo.id,text:`创建独立待办「${todo.title}」，截止 ${due}${businessId?` · 归入「${bizMatches[0].name}」`:''}`});
+      response={message:`已创建独立待办，截止 ${due}${businessId?`，已归入「${bizMatches[0].name}」业务板块`:''}。`,todo};
       return;
     }
     if(intent.projectIntent){
@@ -352,7 +370,7 @@ export async function processInbox({store,itemId,command,targetProjectId=null}){
     if(project){
       if(/待办|任务/.test(instruction)){
         if(!due){response={needsFollowup:true,question:'这个待办的截止日期是哪一天？'};return;}
-        const todo={id:newId('td'),title:compactText(item.text,90),context:item.text,dueDate:due,projectId:project.id,done:false,createdAt:nowIso()};
+        const todo={id:newId('td'),title:compactText(item.text,90),context:item.text,dueDate:due,projectId:project.id,businessId:project.businessId||null,done:false,createdAt:nowIso()};
         state.todos.unshift(todo);remove();clearInboxRoutingConfirmations(state,itemId);
         addActivity(state,{type:'todo_created',projectId:project.id,todoId:todo.id,text:`在「${project.name}」创建待办「${todo.title}」，截止 ${due}`});
         response={message:`已放进「${project.name}」并创建待办，截止 ${due}。`,todo};
@@ -443,17 +461,19 @@ export async function setToday({store,todoId,add}){
 
 export async function updateTodo({store,todoId,patch}){
   if(typeof todoId!=='string'||!todoId.trim())throw badRequest('todoId 必须是非空字符串。');
-  requirePatchObject(patch,['title','context','dueDate','done'],'待办更新内容');
+  requirePatchObject(patch,['title','context','dueDate','done','businessId'],'待办更新内容');
   if(Object.hasOwn(patch,'title')&&(typeof patch.title!=='string'||!patch.title.trim()))throw badRequest('title 必须是非空字符串。');
   if(Object.hasOwn(patch,'context')&&typeof patch.context!=='string')throw badRequest('context 必须是字符串。');
   if(Object.hasOwn(patch,'dueDate')&&!isValidDateOnly(patch.dueDate))throw badRequest('dueDate 必须是合法的 YYYY-MM-DD 日期。');
   if(Object.hasOwn(patch,'done')&&typeof patch.done!=='boolean')throw badRequest('done 必须是布尔值。');
+  if(Object.hasOwn(patch,'businessId')&&patch.businessId!==null&&(typeof patch.businessId!=='string'||!patch.businessId.trim()))throw badRequest('businessId 必须是非空字符串或 null。');
   return store.updateState(state=>{
     const todo=state.todos.find(candidate=>candidate.id===todoId);
     if(!todo)throw new Error('待办不存在');
     if(Object.hasOwn(patch,'title'))todo.title=patch.title.trim();
     if(Object.hasOwn(patch,'context'))todo.context=patch.context.trim();
     if(Object.hasOwn(patch,'dueDate'))todo.dueDate=patch.dueDate;
+    if(Object.hasOwn(patch,'businessId'))todo.businessId=patch.businessId;
     if(Object.hasOwn(patch,'done')){
       todo.done=patch.done;
       if(todo.done)state.todayPlan=state.todayPlan.filter(id=>id!==todo.id);
