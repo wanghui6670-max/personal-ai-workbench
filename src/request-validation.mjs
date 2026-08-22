@@ -65,6 +65,7 @@ export const requestSchemas={
   aiExecute:{fields:{planId:nonEmptyString,confirmed:boolean},required:['planId','confirmed'],allowEmpty:false},
   diaryExtractionApply:{fields:{planId:nonEmptyString},required:['planId'],allowEmpty:false},
   harnessNavigator:{fields:{message:nonEmptyString,sessionId:nullableNonEmptyString,view:nonEmptyString,id:nullableNonEmptyString},required:['message'],allowEmpty:false},
+  harnessSwitchModel:{fields:{model:nonEmptyString},required:['model'],allowEmpty:false},
   joycrewActionPrepare:{fields:{type:nonEmptyString,payload:arbitraryObject,source:nonEmptyString},required:['type','payload'],allowEmpty:false},
   joycrewActionExecute:{fields:{confirmed:boolean},required:['confirmed'],allowEmpty:false},
   mcp:{fields:{jsonrpc:nonEmptyString,id:{type:'string',nullable:true},method:nonEmptyString,params:{type:'object',schema:{fields:{},allowUnknown:true},nullable:true}},required:['jsonrpc','method'],allowEmpty:false}

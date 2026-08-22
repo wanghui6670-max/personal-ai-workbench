@@ -81,6 +81,15 @@ export function harnessNodeSupported(version=process.versions.node){
   return (major===22&&minor>=19)||major>=24;
 }
 
+export function resolveHarnessAvailableModels(env=process.env){
+  const primaryModel=firstNonEmpty(env.AI_PROVIDER_MODEL,env.OPENAI_MODEL);
+  const grokModel=firstNonEmpty(env.AI_PROVIDER_GROK_MODEL);
+  const models=[];
+  if(primaryModel)models.push(primaryModel);
+  if(grokModel&&!models.includes(grokModel))models.push(grokModel);
+  return models;
+}
+
 export function resolveHarnessProviderConfig(env=process.env){
   const model=firstNonEmpty(
     env.HARNESS_PROVIDER_MODEL,
@@ -455,6 +464,7 @@ export class HarnessNavigatorRuntime{
         :statusReasonMessage(availability.reason),
       harnessVersion:HARNESS_VERSION,
       model:availability.available?availability.provider.model:null,
+      availableModels:resolveHarnessAvailableModels(this.env),
       providerApi:availability.available?availability.provider.api:null,
       mode:'read_only',
       persistence:'memory_only',
@@ -565,6 +575,35 @@ export class HarnessNavigatorRuntime{
         readOnly:true
       };
     }finally{this.activeSessions.delete(lockKey);}
+  }
+
+  /**
+   * 切换 Harness 模型：修改 env 中的模型和密钥，关闭旧 runtime，下次 run() 时自动重建。
+   * @param {string} model 要切换到的模型 ID（必须在 availableModels 中）
+   */
+  async switchModel(model){
+    const trimmed=String(model||'').trim();
+    if(!trimmed)throw publicRuntimeError('model 不能为空。','INVALID_REQUEST',400);
+    const available=resolveHarnessAvailableModels(this.env);
+    if(!available.includes(trimmed))throw publicRuntimeError(`模型 ${trimmed} 不在可用列表中。`,'INVALID_REQUEST',400);
+    if(trimmed===this.env.HARNESS_PROVIDER_MODEL&&this.runtime)return; // 已经是当前模型
+    // 确定对应 API key
+    const grokModel=firstNonEmpty(this.env.AI_PROVIDER_GROK_MODEL);
+    const isGrok=trimmed===grokModel;
+    const key=isGrok
+      ?firstNonEmpty(this.env.AI_PROVIDER_GROK_API_KEY,this.env.AI_PROVIDER_API_KEY)
+      :firstNonEmpty(this.env.AI_PROVIDER_API_KEY,this.env.AI_PROVIDER_GROK_API_KEY);
+    // 更新 env
+    this.env.HARNESS_PROVIDER_MODEL=trimmed;
+    this.env.HARNESS_PROVIDER_API_KEY=key;
+    // 关闭旧 runtime，下次 ensureRuntime() 会用新配置创建
+    const oldRuntime=this.runtime;
+    this.runtime=null;
+    this.starting=null;
+    this.state='idle';
+    this.lastErrorCode=null;
+    if(oldRuntime&&typeof oldRuntime.close==='function')await oldRuntime.close().catch(()=>undefined);
+    return {model:trimmed,previousState:this.state};
   }
 
   async close(){

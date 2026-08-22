@@ -260,6 +260,10 @@ function cardHtml(){
   const statusMessage=status?.message||'正在检查独立 Harness Sidecar。';
   const embeddedFallback=status?.uiMode==='embedded_experimental'&&status?.embeddedWeb?.enabled&&!status?.embeddedWeb?.verified?`<div class="harness-nav-native-warning">原生 DSH Web 未通过组成校验，当前继续使用受控 DSH Sidecar。${status.embeddedWeb.reason?` · ${escapeHtml(status.embeddedWeb.reason)}`:''}</div>`:'';
   const model=status?.model?escapeHtml(status.model):'DeepSeek Harness';
+  const availableModels=Array.isArray(status?.availableModels)&&status.availableModels.length?status.availableModels:[];
+  const modelSelector=availableModels.length>1
+    ?`<select class="harness-nav-model-select" data-harness-model-switch ${navigatorState.busy?'disabled':''}>${availableModels.map(m=>`<option value="${escapeHtml(m)}" ${m===status.model?'selected':''}>${escapeHtml(m)}</option>`).join('')}</select>`
+    :`<span>${model}</span>`;
   const tabChat=navigatorState.activeTab==='chat'?'active':'';
   const tabTraj=navigatorState.activeTab==='trajectory'?'active':'';
   const showStop=navigatorState.busy;
@@ -295,7 +299,7 @@ function cardHtml(){
     <form class="harness-nav-form" data-harness-form>
       <textarea name="message" rows="1" autocomplete="off" maxlength="12000" placeholder="描述要处理的内容…" aria-label="发送给 DSH" ${!available||navigatorState.busy?'disabled':''}></textarea>
       <div class="harness-nav-formbar">
-        <div class="harness-nav-compose-meta"><span>Agent</span><span>${model}</span></div>
+        <div class="harness-nav-compose-meta"><span>Agent</span>${modelSelector}</div>
         ${showStop?'<button type="button" class="harness-nav-stop" data-harness-stop aria-label="停止生成">■</button>':''}
         <button class="harness-nav-send" aria-label="发送" ${!available||navigatorState.busy?'disabled':''}>${navigatorState.busy?'…':'↑'}</button>
       </div>
@@ -391,6 +395,20 @@ function stopGeneration(){
   navigatorState.busy=false;scheduleMount();
 }
 
+/* ─── 切换模型 ─── */
+async function switchModel(model){
+  if(!model||navigatorState.busy)return;
+  navigatorState.busy=true;scheduleMount();
+  try{
+    const payload=await jsonRequest('/api/harness/switch-model',{method:'POST',body:JSON.stringify({model})});
+    if(payload.status)navigatorState.status=payload.status;
+  }catch(error){
+    navigatorState.error=error.message||'模型切换失败';
+  }finally{
+    navigatorState.busy=false;scheduleMount();
+  }
+}
+
 /* ─── 调整大小 ─── */
 function beginResize(event){
   const handle=event.target.closest?.('[data-harness-resize]');
@@ -449,6 +467,9 @@ document.addEventListener('click',event=>{
   if(event.target.closest?.('[data-harness-refresh]')){void loadStatus(true);return;}
   // 停止生成
   if(event.target.closest?.('[data-harness-stop]')){stopGeneration();return;}
+  // 模型切换
+  const modelSelect=event.target.closest?.('[data-harness-model-switch]');
+  if(modelSelect&&event.type==='change'){void switchModel(modelSelect.value);return;}
   // 标签切换
   const tabBtn=event.target.closest?.('[data-tab]');
   if(tabBtn){

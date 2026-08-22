@@ -147,6 +147,19 @@ export function createHarnessHttp({
       sendJson(res,200,{ok:true,navigator:result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;
     }
+    if(pathname==='/api/harness/switch-model'){
+      if(req.method!=='POST'){methodNotAllowed(res,'POST');return true;}
+      const body=await requestBody(req,requestSchemas.harnessSwitchModel);
+      if(typeof rateLimit==='function'&&rateLimit())return true;
+      try{
+        const result=await navigator.switchModel(body.model);
+        sendJson(res,200,{ok:true,result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
+      }catch(error){
+        const statusCode=error?.statusCode||400;
+        sendJson(res,statusCode,{ok:false,error:String(error?.message||'模型切换失败'),code:String(error?.code||'SWITCH_MODEL_FAILED')});
+      }
+      return true;
+    }
     return false;
   }
 
