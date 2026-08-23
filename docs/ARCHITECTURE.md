@@ -1,15 +1,15 @@
-# 架构说明（v3.0）
+# 架构说明（v3.1）
 
 ## 1. 当前总体边界
 
 ```text
 飞书云文档 [INBOX] ── 个人工作事项主入口
         ↓
-Workbench Inbox     ── 个人待处理事实
+Workbench Inbox     ── 个人待处理事实（按用户隔离）
         ↓
 AI scoped review    ── 只分析目标 item，产生建议，不直接执行
         ↓ 用户确认
-Workbench domain    ── Todo / Today / 项目归属 / 用户决定真源
+Workbench domain    ── Todo / Today / 项目归属 / 用户决定真源（按用户隔离）
 
 得到大脑 GetNote    ── 自媒体内容来源（只读）
         ↓ 用户确认
@@ -23,6 +23,29 @@ Harness             ── 右侧受控 Copilot；固定白名单工具
 ```
 
 系统不替用户安排 Today。所有会改变 Workbench 或外部系统的动作继续受确认门保护。
+
+## 1.1 多用户架构（v3.1 新增）
+
+v3.1 引入多用户支持，部署到云服务器供 5-10 人小团队使用：
+
+```text
+用户登录（用户名/密码）
+        ↓
+JWT Cookie 认证
+        ↓
+storeAdapter.scope(userId)  ── 返回绑定 userId 的 store 代理
+        ↓
+业务层函数（无需改签名）
+        ↓
+SQLite（按 userId 字段隔离）
+```
+
+核心设计：
+
+- **scopedStore 代理模式**：`store-adapter.mjs` 的 `scope(userId)` 返回自动绑定 userId 的 store 代理，业务层函数无需改签名。
+- **DSH Copilot 隔离**：`harnessRunScope.currentUserId()` 获取当前执行用户 ID，使用对应 `scopedStore` 而非 `globalStore`。
+- **存储后端可切换**：`STORE_BACKEND=sqlite`（多用户）/ `json`（单用户 fallback，`LEGACY_USER_ID='__legacy__'`）。
+- **角色权限**：admin 可管理用户 + 查看全员数据；user 仅操作自己的数据。
 
 ## 2. 飞书个人事项入口
 
@@ -181,7 +204,7 @@ backup v2 继续包含：
 
 ## 10. 部署与门禁
 
-当前产品版本：**3.0.0**。
+当前产品版本：**3.1.0**。
 
 CI 最新 HEAD 必须真实执行：
 

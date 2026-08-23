@@ -1,14 +1,16 @@
-# Personal AI Workbench 2.0 产品基线
+# Personal AI Workbench 3.1 产品基线
 
 > 产品名：动觉 AI 工作台  
 > 仓库：`wanghui6670-max/personal-ai-workbench`  
-> 版本：2.0.0  
-> 日期：2026-08-14  
-> 权威顺序：本文件（统一产品）→ `JOYCREW_INTEGRATION.md`（跨服务合同）→ `PRODUCT_SPEC.md` / `ARCHITECTURE.md`（个人工作台子系统合同）
+> 版本：3.1.0  
+> 日期：2026-08-23  
+> 权威顺序：本文件（统一产品）→ `JOYCREW_INTEGRATION.md`（跨服务合同）→ `PRODUCT_SPEC.md` / `ARCHITECTURE.md`（工作台子系统合同）
 
 ## 一句话定义
 
-Personal AI Workbench 是 Chris 的唯一工作入口：用个人今日、收件箱和项目恢复管理注意力，用 Joycrew 管理客户、企业项目、AI 员工、Run、Evidence、审批和交付，用飞书项目文档保存长期项目叙事。
+Personal AI Workbench 是小团队（5-10 人）的统一工作入口：用个人今日、收件箱和项目恢复管理注意力，用 Joycrew 管理客户、企业项目、AI 员工、Run、Evidence、审批和交付，用飞书项目文档保存长期项目叙事。部署在云服务器上，每个成员拥有独立的数据空间和认证身份。
+
+业务场景：金融行业投标业务（银行、券商、保险、金租、消金等招标项目）全流程管理，以及常州地区政企项目与产业园区投标机会跟进。
 
 ## 用户界面
 
@@ -33,6 +35,8 @@ Personal AI Workbench 是 Chris 的唯一工作入口：用个人今日、收件
 ├── 工具轨迹
 └── Joycrew 外部操作预览
 ```
+
+每个用户登录后看到自己的数据空间。管理员可切换到用户管理页查看全团队数据概要。
 
 Joycrew 独立 Web 只作为管理、Pilot 调试和故障入口，不再作为第二套日常工作台。
 
@@ -77,9 +81,19 @@ GetNote / iPhone Capture / 手工输入
 → 用户确认后由 Workbench BFF 调 Joycrew
 ```
 
+## 多用户架构
+
+v3.1 引入多用户支持，部署到云服务器供 5-10 人小团队使用：
+
+- **认证**：JWT Cookie 认证，用户名/密码登录。
+- **存储**：SQLite 单库多表（`STORE_BACKEND=sqlite`），每条数据通过 `userId` 字段隔离。
+- **兼容**：保留 JSON 文件存储作为 fallback（`STORE_BACKEND=json`），可一键回滚。
+- **角色**：admin（管理用户 + 查看全员数据）/ user（仅操作自己的数据）。
+- **DSH 隔离**：右侧 Copilot 通过 `harnessRunScope` 绑定当前登录用户，工具调用使用该用户的 `scopedStore`。
+
 ## 不变原则
 
-1. AI 不替用户安排“我的今日”。
+1. AI 不替用户安排"我的今日"。
 2. 个人收件箱和企业业务 Intake 不自动双向同步。
 3. 本地项目文件夹是真实工作成果源，Git 是版本证据。
 4. 项目分析、阶段总结、复盘和恢复叙事只以飞书项目文档为长期真源。
@@ -87,13 +101,14 @@ GetNote / iPhone Capture / 手工输入
 6. DataWeave 管按需数据读取；Workbench 不直连飞书业务 Token、Local Bridge 或服务器文件适配器。
 7. Harness 不直接调用 Hermes，不拥有 Shell、终端、任意 Web 或文件写入。
 8. 外部改变必须 Preview → Confirm → Execute → Readback。
-9. Joycrew 离线不影响个人工作台启动和使用。
+9. Joycrew 离线不影响工作台启动和使用。
 10. 测试通过不等同于真实外部系统已现场验收。
+11. 每个用户的数据空间相互隔离，管理员可查看但不修改成员数据。
 
-## v2.0 验收标准
+## v3.1 验收标准
 
 - [x] Personal AI Workbench 仍可在 Joycrew 关闭时完整启动。
-- [x] 单一导航中出现“业务执行”，不 iframe Joycrew。
+- [x] 单一导航中出现"业务执行"，不 iframe Joycrew。
 - [x] 浏览器可读取 Joycrew 状态、项目、员工、Run、Evidence、审批和交付。
 - [x] Joycrew Token 只存在于服务端环境变量。
 - [x] Run、交付和审批必须先产生短时操作预览。
@@ -102,7 +117,12 @@ GetNote / iPhone Capture / 手工输入
 - [x] Harness 使用固定 21 工具目录；Joycrew 写能力只以 `*_prepare` 暴露。
 - [x] Joycrew 读取和动作接口受 Workbench 登录与限流保护。
 - [x] 公共健康检查不回显 Joycrew 内部 URL、Workspace 和用户身份。
-- [x] `.env`、Docker、Doctor、README 和 CI 对 v2.0 对齐。
+- [x] `.env`、Docker、Doctor、README 和 CI 对 v3.0 对齐。
+- [x] 多用户认证：JWT Cookie 登录，用户名/密码。
+- [x] 数据隔离：每个用户独立的数据空间，通过 userId 字段隔离。
+- [x] 管理员功能：用户管理（增删改查/改密码）+ 全团队成员数据概要查看。
+- [x] DSH Copilot 隔离：工具调用绑定当前登录用户的 scopedStore。
+- [x] 存储后端可切换：SQLite（多用户）/ JSON（单用户 fallback）。
 
 ## 后续门禁
 

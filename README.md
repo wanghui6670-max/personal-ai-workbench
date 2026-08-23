@@ -1,8 +1,12 @@
-# Personal AI Workbench 3.0
+# Personal AI Workbench 3.1
 
-**动觉 AI 工作台：个人工作连续性 + Joycrew AI 员工业务执行的统一入口。**
+**动觉 AI 工作台：团队工作连续性 + Joycrew AI 员工业务执行的统一入口。**
 
-当前正式产品合同是 v3：
+部署在云服务器上，支持 5-10 人小团队使用。每个成员拥有独立的数据空间和认证身份，管理员可查看全团队工作数据概要。
+
+业务场景：金融行业投标业务（银行、券商、保险、金租、消金等招标项目）全流程管理，以及政企项目与产业园区投标机会跟进。
+
+当前正式产品合同是 v3.1：
 
 ```text
 个人工作事项：飞书云文档 → Workbench Inbox → AI 自动分析 → 用户确认 → Workbench 执行
@@ -86,9 +90,20 @@ Preview → Confirm → Execute → Readback
 
 浏览器不能传入 Joycrew Base URL、Token、任意 URL、Shell 命令或服务端文件路径。Joycrew 离线不能阻塞个人工作台 readiness。
 
+## 多用户与部署
+
+v3.1 引入多用户支持：
+
+- **认证**：JWT Cookie 认证，用户名/密码登录。
+- **数据隔离**：SQLite 单库多表，通过 `userId` 字段隔离，每个用户独立的数据空间。
+- **角色**：admin（管理用户 + 查看全员数据）/ user（仅操作自己的数据）。
+- **存储可切换**：`STORE_BACKEND=sqlite`（多用户）/ `json`（单用户 fallback）。
+- **云端部署**：通过 Docker 部署到云服务器，反向代理 HTTPS。
+
 ## 运行要求
 
 - Node.js 24+
+- SQLite（多用户模式）/ JSON 文件存储（单用户 fallback）
 - Git
 - 飞书收件箱/项目记录启用时需要可用的 `lark-cli`
 - GetNote 自媒体内容同步使用受控只读 `GetNoteReader`（`local_cli` 或 `private_http`）
