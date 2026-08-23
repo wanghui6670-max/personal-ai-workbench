@@ -9,30 +9,12 @@
  * - 当传 userId 时，所有读写操作按用户隔离
  * - updateState/updateConfig 的 mutator 模式保持不变，内部改为 SQLite 事务
  */
-import { nowIso, todayIso } from './utils.mjs';
+import { nowIso, todayIso, newId } from './utils.mjs';
 import fsp from 'node:fs/promises';
 import { validateState, validateConfig, validateStateConfigReferences, validateStateInput } from './validation.mjs';
 import { stripNarrativeProgress } from './project-record-policy.mjs';
 import { normalizeInboxAcks } from './inbox-ack.mjs';
-
-const DEFAULT_CONFIG = {
-  workspaceRoot: './workspace',
-  port: 4173,
-  businesses: [
-    {id:'biz_ai',name:'动觉 AI',folder:'01_动觉AI'},
-    {id:'biz_store',name:'实体门店',folder:'02_实体门店'},
-    {id:'biz_client',name:'客户项目',folder:'03_客户项目'},
-    {id:'biz_personal',name:'个人内容',folder:'04_个人内容'}
-  ],
-  settings: { recentDays: 3, dueSoonDays: 3 },
-  dataSource: null
-};
-
-const DEFAULT_STATE = {
-  schemaVersion: 1,
-  inbox: [], inboxAcks: [], todos: [], todayPlan: [], todayPlanDate: null, projects: [],
-  confirmations: [], notes: [], activities: [], morningSessions: []
-};
+import { DEFAULT_CONFIG, DEFAULT_STATE, normalizeProject, normalizeActivity } from './store-defaults.mjs';
 
 const LEGACY_USER_ID = '__legacy__';
 
@@ -44,20 +26,6 @@ function parseJSON(value, fallback) {
 
 function boolToInt(v) { return v ? 1 : 0; }
 function intToBool(v) { return v === 1 || v === true; }
-
-function normalizeProject(project) {
-  if (!project || typeof project !== 'object' || Array.isArray(project)) return project;
-  const next = { ...project };
-  if (project.progress) next.progress = stripNarrativeProgress(project.progress);
-  if (project.progressBeforeCompletion) next.progressBeforeCompletion = stripNarrativeProgress(project.progressBeforeCompletion);
-  return next;
-}
-
-function normalizeActivity(activity) {
-  if (!activity || typeof activity !== 'object' || Array.isArray(activity)) return activity;
-  if (activity.type !== 'project_synced') return activity;
-  return { ...activity, text: '项目进度已同步；分析与总结正文保存在飞书项目文档。' };
-}
 
 export class SqliteStore {
   constructor(db, dataDir) {
@@ -281,7 +249,7 @@ export class SqliteStore {
   // ========== 单实体增量操作 ==========
   addActivity(userId, activity) {
     this._stmts.insertActivity.run({
-      id: `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
+      id: newId('act'),
       userId,
       at: activity.at || nowIso(),
       type: activity.type || '',
@@ -521,7 +489,7 @@ export class SqliteStore {
     this._stmts.deleteActivities.run(userId);
     for (const activity of activities) {
       this._stmts.insertActivity.run({
-        id: activity.id || `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
+        id: activity.id || newId('act'),
         userId,
         at: activity.at || nowIso(),
         type: activity.type || '',

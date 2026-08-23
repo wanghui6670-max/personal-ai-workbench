@@ -1,8 +1,5 @@
 import { randomUUID } from 'node:crypto';
-
-function nowIso(){
-  return new Date().toISOString();
-}
+import { nowIso } from '../utils.mjs';
 
 export function createSessionManager({store,projectLookup=null,execution=null,authorities=null}={}){
   if(!store)throw new Error('createSessionManager requires store');

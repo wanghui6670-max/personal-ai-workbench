@@ -1,18 +1,15 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { atomicWriteJson } from '../atomic-write.mjs';
 
 const PRIVATE_DIRECTORY_MODE=0o700;
 const PRIVATE_FILE_MODE=0o600;
 const DEFAULT_MAX_RECORDS=2_000;
 
-function clone(value){
-  return JSON.parse(JSON.stringify(value));
-}
-
 function sortedRecords(source){
   return [...source.values()]
-    .map(clone)
+    .map(item=>structuredClone(item))
     .sort((a,b)=>String(a.startedAt||'').localeCompare(String(b.startedAt||'')));
 }
 
@@ -42,21 +39,7 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
 
   async function atomicWrite(items){
     await ensureDirectory();
-    const tmp=`${file}.${process.pid}.${randomUUID()}.tmp`;
-    let created=false;
-    try{
-      await fsp.writeFile(tmp,JSON.stringify({executions:items},null,2),{
-        encoding:'utf8',
-        flag:'wx',
-        mode:PRIVATE_FILE_MODE
-      });
-      created=true;
-      await fsp.rename(tmp,file);
-      created=false;
-      await fsp.chmod(file,PRIVATE_FILE_MODE);
-    }finally{
-      if(created)await fsp.unlink(tmp).catch(()=>{});
-    }
+    await atomicWriteJson(file, {executions:items}, { mode: PRIVATE_FILE_MODE, ensureDir: false });
   }
 
   function retainedItems(source){
@@ -70,7 +53,7 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
 
   function replaceRecords(items){
     records.clear();
-    for(const item of items)records.set(item.executionId,clone(item));
+    for(const item of items)records.set(item.executionId,structuredClone(item));
   }
 
   async function recoverCorruptFile(){
@@ -109,7 +92,7 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
       let changed=false;
       for(const item of source){
         if(!item||typeof item.executionId!=='string'||!item.executionId)continue;
-        const record=clone(item);
+        const record=structuredClone(item);
         if(record.status==='running'){
           record.status='interrupted';
           record.completedAt=now().toISOString();
@@ -123,7 +106,7 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
       if(items.length!==loadedRecords.size)changed=true;
       replaceRecords(items);
       if(changed)await atomicWrite(items);
-      return items.map(clone);
+      return items.map(item=>structuredClone(item));
     });
   }
 
@@ -131,11 +114,11 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
     if(!record?.executionId)throw new Error('executionId 必填');
     return enqueue(async()=>{
       const nextRecords=new Map(records);
-      nextRecords.set(record.executionId,clone(record));
+      nextRecords.set(record.executionId,structuredClone(record));
       const items=retainedItems(nextRecords);
       await atomicWrite(items);
       replaceRecords(items);
-      return clone(record);
+      return structuredClone(record);
     });
   }
 
@@ -149,7 +132,7 @@ export function createExecutionStore({file,maxRecords=DEFAULT_MAX_RECORDS,now=()
 
   function get(executionId){
     const record=records.get(executionId);
-    return record?clone(record):null;
+    return record?structuredClone(record):null;
   }
 
   return Object.freeze({load,append,list,get});

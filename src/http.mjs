@@ -1,16 +1,9 @@
 import fsp from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
+import { normalizeHostname, isLoopbackHostname } from './net-utils.mjs';
 
 const MUTATING_METHODS=new Set(['POST','PATCH','DELETE']);
-
-function normalizeHostname(value){
-  return String(value||'').trim().toLowerCase().replace(/^\[|\]$/g,'').replace(/\.$/,'');
-}
-function isLoopbackHostname(value){
-  const hostname=normalizeHostname(value);
-  return hostname==='localhost'||hostname==='::1'||(isIP(hostname)===4&&hostname.startsWith('127.'))||(isIP(hostname)===6&&hostname.startsWith('::ffff:127.'));
-}
 function parseHostHeader(value){
   const raw=String(value||'').trim();
   if(!raw||raw.length>255||/[\s/\\\0,@?#]/.test(raw))return null;

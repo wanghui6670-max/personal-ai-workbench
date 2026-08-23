@@ -1,3 +1,5 @@
+import { boundedInteger } from './utils.mjs';
+
 const RATE_LIMIT_DEFAULTS=Object.freeze({
   windowMs:60_000,
   maxClients:1_000,
@@ -9,12 +11,6 @@ const RATE_LIMIT_CAPS=Object.freeze({
   maxClients:5_000,
   limits:Object.freeze({capture:600,sync:120,morning:120,navigator:120,joycrew:180,crew:120})
 });
-
-function boundedInteger(value,fallback,{min=1,max}){
-  const parsed=Number(value);
-  if(!Number.isFinite(parsed)||!Number.isInteger(parsed))return fallback;
-  return Math.min(max,Math.max(min,parsed));
-}
 
 export function endpointRateLimitConfig(env=process.env){
   return{

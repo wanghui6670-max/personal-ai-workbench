@@ -8,10 +8,6 @@
  * and execution records are fully isolated.
  */
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 /**
  * Create a SQLite-backed session store matching the interface of createSessionStore.
  * Interface: { load, save, create, get, list, update }
@@ -31,12 +27,12 @@ export function createSqliteSessionStore({ sqliteStore, userId, now = () => new 
   async function create(record) {
     if (!record?.id) throw new Error('session id 必填');
     const saved = sqliteStore.saveHarnessSession({ ...record, userId: uid });
-    return clone(saved);
+    return structuredClone(saved);
   }
 
   function get(id) {
     const record = sqliteStore.getHarnessSession(uid, id);
-    return record ? clone(record) : null;
+    return record ? structuredClone(record) : null;
   }
 
   function list() {
@@ -48,7 +44,7 @@ export function createSqliteSessionStore({ sqliteStore, userId, now = () => new 
     if (!current) throw Object.assign(new Error(`未知 session：${id}`), { code: 'HARNESS_SESSION_NOT_FOUND' });
     const record = { ...current, ...patch, id: current.id, updatedAt: now().toISOString() };
     sqliteStore.saveHarnessSession({ ...record, userId: uid });
-    return clone(record);
+    return structuredClone(record);
   }
 
   return Object.freeze({ load, save, create, get, list, update });
@@ -83,7 +79,7 @@ export function createSqliteExecutionStore({ sqliteStore, userId, now = () => ne
   async function append(record) {
     if (!record?.executionId) throw new Error('executionId 必填');
     sqliteStore.appendHarnessExecution({ ...record, userId: uid });
-    return clone(record);
+    return structuredClone(record);
   }
 
   async function list({ sessionRef, limit } = {}) {
@@ -96,7 +92,7 @@ export function createSqliteExecutionStore({ sqliteStore, userId, now = () => ne
 
   function get(executionId) {
     const record = sqliteStore.getHarnessExecution(uid, executionId);
-    return record ? clone(record) : null;
+    return record ? structuredClone(record) : null;
   }
 
   return Object.freeze({ load, append, list, get });

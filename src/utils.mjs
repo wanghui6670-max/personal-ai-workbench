@@ -56,6 +56,21 @@ export function safeResolve(base, ...parts) {
 
 export function clamp(n,min,max){ return Math.max(min,Math.min(max,n)); }
 
+/**
+ * 将环境变量解析为有上下界的整数。无效时返回 fallback。
+ * 此前在 rate-limit.mjs / joycrew-client.mjs / projects.mjs / harness-navigator.mjs /
+ * ai/config.mjs 中各有独立实现，现已统一。
+ * @param {string|number} value — 输入值（通常是 env var 字符串）
+ * @param {number} fallback — 解析失败时的默认值
+ * @param {object} bounds — { min = 1, max } 上下界
+ * @returns {number}
+ */
+export function boundedInteger(value, fallback, { min = 1, max } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 export function compactText(value, max=160) {
   const s = String(value ?? '').replace(/\s+/g,' ').trim();
   return s.length <= max ? s : s.slice(0,max-1) + '…';

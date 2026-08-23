@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { isIP } from 'node:net';
+import { boundedInteger } from './utils.mjs';
+import { normalizeHostname, isLoopbackHostname, isPrivateHostname } from './net-utils.mjs';
 
 const DEFAULT_TIMEOUT_MS=20_000;
 const DEFAULT_MAX_RESPONSE_BYTES=2_000_000;
@@ -7,42 +9,12 @@ const AUTH_MODES=new Set(['fixture','signed_session','trusted_proxy']);
 const NETWORK_ZONES=new Set(['local_loopback','private_http','public_https']);
 const ROLES=new Set(['admin','member']);
 
-function boundedInteger(value,fallback,{min,max}){
-  const parsed=Number(value);
-  if(!Number.isInteger(parsed))return fallback;
-  return Math.min(max,Math.max(min,parsed));
-}
-
 function firstNonEmpty(...values){
   for(const value of values){
     const text=String(value??'').trim();
     if(text)return text;
   }
   return '';
-}
-
-function normalizeHostname(value){
-  return String(value||'').trim().toLowerCase().replace(/^\[|\]$/g,'').replace(/%.*$/,'');
-}
-
-function isLoopbackHostname(value){
-  const hostname=normalizeHostname(value);
-  if(hostname==='localhost'||hostname==='::1')return true;
-  if(isIP(hostname)===4)return hostname.startsWith('127.');
-  return false;
-}
-
-function isPrivateIpv4(hostname){
-  if(isIP(hostname)!==4)return false;
-  const parts=hostname.split('.').map(Number);
-  return parts[0]===10||parts[0]===127||(parts[0]===172&&parts[1]>=16&&parts[1]<=31)||(parts[0]===192&&parts[1]===168)||(parts[0]===169&&parts[1]===254);
-}
-
-function isPrivateHostname(value){
-  const hostname=normalizeHostname(value);
-  if(isLoopbackHostname(hostname)||isPrivateIpv4(hostname))return true;
-  if(isIP(hostname)===6)return /^(?:fc|fd|fe8|fe9|fea|feb)/i.test(hostname);
-  return !hostname.includes('.')||hostname.endsWith('.local')||hostname.endsWith('.internal');
 }
 
 function normalizedBaseUrl(value,networkZone){

@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createLocalGetnoteReader,GetnoteRuntimeError,normalizeGetnoteNoteId} from './getnote-runtime.mjs';
 import {loadWorkbenchEnv} from './env.mjs';
+import {isLoopbackHostname} from './net-utils.mjs';
 
 const __filename=fileURLToPath(import.meta.url);
 const APP_ROOT=path.dirname(path.dirname(__filename));
@@ -12,11 +13,7 @@ const DEFAULT_PORT=4310;
 
 function clean(value){return typeof value==='string'?value.trim():'';}
 function validToken(value){const token=clean(value);return token.length>=32&&!/[\r\n]/.test(token)?token:null;}
-function isLoopback(host){
-  const value=String(host||'').toLowerCase().replace(/^\[|\]$/g,'');
-  if(value==='localhost'||value==='::1')return true;
-  return net.isIP(value)===4&&value.startsWith('127.');
-}
+
 function portValue(value){
   const raw=String(value??DEFAULT_PORT).trim();
   const port=Number(raw);
@@ -92,7 +89,7 @@ export async function startGetnoteRuntimeServer({env=process.env,reader}={}){
   const port=portValue(env.GETNOTE_RUNTIME_PORT);
   const token=validToken(env.GETNOTE_RUNTIME_SERVICE_TOKEN);
   if(!token)throw new Error('GETNOTE_RUNTIME_SERVICE_TOKEN 至少需要 32 个字符。');
-  if(!isLoopback(host)&&clean(env.GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND)!=='1')throw new Error('GetNote runtime 默认只允许 loopback；私网绑定必须显式设置 GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1。');
+  if(!isLoopbackHostname(host)&&clean(env.GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND)!=='1')throw new Error('GetNote runtime 默认只允许 loopback；私网绑定必须显式设置 GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1。');
   const server=createGetnoteRuntimeServer({reader:reader||createLocalGetnoteReader({processEnv:env}),serviceToken:token});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
   return{server,host,port};

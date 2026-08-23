@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import { aiProviderError } from './errors.mjs';
+import { isLoopbackHostname as _isLoopback } from '../net-utils.mjs';
 
 export const AI_DEFAULT_PROFILE_ID='openai_luna';
 export const OPENAI_DEFAULT_MODEL='gpt-5.6-luna';
@@ -35,6 +36,8 @@ const WORKFLOW_SET=new Set(AI_WORKFLOWS);
 
 function clean(value){return typeof value==='string'?value.trim():'';}
 function enabledFlag(value){return clean(value)==='1';}
+// NOTE: ai/config.mjs 的 boundedInteger 与 utils.mjs 的不同：这里出错会 throw profileError，
+// utils.mjs 的版本静默返回 fallback。保留此实现因为它用于配置验证（fail-fast）。
 function boundedInteger(value,fallback,min,max,label){
   const raw=clean(value);
   if(!raw)return fallback;
@@ -107,10 +110,8 @@ function isPublicAddress(address){
 }
 
 function isLoopbackHost(hostname){
-  const host=normalizeHostname(hostname);
-  if(host==='localhost'||host==='::1'||host==='[::1]')return true;
-  if(net.isIP(host)===4)return host.startsWith('127.');
-  return false;
+  // 统一使用 net-utils.mjs 的实现（含 IPv4-mapped IPv6 支持）
+  return _isLoopback(hostname);
 }
 
 async function lookupWithTimeout(hostname,timeoutMs){

@@ -3,6 +3,7 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { isLoopbackHostname } from './net-utils.mjs';
 import { JsonStore } from './store.mjs';
 import { createDatabase } from './db.mjs';
 import { createStoreAdapter, LEGACY_USER_ID } from './store-adapter.mjs';
@@ -45,10 +46,7 @@ function normalizeHost(value){
   if((host.includes(':')&&isIP(host)!==6)||(/^[\d.]+$/.test(host)&&isIP(host)!==4))refuseStartup('拒绝启动：HOST 格式无效。');
   return host;
 }
-function isLoopbackHost(value){
-  const host=String(value).toLowerCase().replace(/^\[|\]$/g,'');
-  return host==='localhost'||host==='::1'||(isIP(host)===4&&host.startsWith('127.'))||(isIP(host)===6&&host.startsWith('::ffff:127.'));
-}
+// isLoopbackHostname 统一从 net-utils.mjs 导入
 function normalizePort(value){
   const raw=String(value).trim();const port=Number(raw);
   if(!/^\d+$/.test(raw)||!Number.isInteger(port)||port<1||port>65535)refuseStartup('拒绝启动：PORT 必须是 1 到 65535 之间的整数。');
@@ -67,12 +65,12 @@ async function configuredPortBeforeEnsure(){
 
 const host=normalizeHost(process.env.HOST??'127.0.0.1');
 const port=normalizePort(await configuredPortBeforeEnsure());
-const publicBind=!isLoopbackHost(host);
+const publicBind=!isLoopbackHostname(host);
 const configuredTrustedOrigins=process.env.TRUSTED_ORIGINS||'';
 let trustedOrigins;
 try{trustedOrigins=parseTrustedOrigins(configuredTrustedOrigins);}
 catch(error){refuseStartup(error.message);}
-const publicExposure=publicBind||trustedOrigins.some(origin=>!isLoopbackHost(origin.hostname));
+const publicExposure=publicBind||trustedOrigins.some(origin=>!isLoopbackHostname(origin.hostname));
 if(publicExposure&&!authEnabled()&&process.env.ALLOW_INSECURE_PUBLIC!=='1'){
   refuseStartup('拒绝启动：当前绑定到公开接口但未启用认证。请设置 WORKBENCH_PASSWORD 或配置多用户认证。');
 }

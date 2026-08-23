@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { safeResolve, sanitizeFolderName, dueDeltaDays, clamp, compactText, nowIso } from './utils.mjs';
+import { safeResolve, sanitizeFolderName, dueDeltaDays, clamp, compactText, nowIso, boundedInteger } from './utils.mjs';
 import { analyzeProjectWithAI } from './ai.mjs';
 
 const execFileAsync=promisify(execFile);
@@ -17,18 +17,12 @@ const NO_FOLLOW=fsConstants.O_NOFOLLOW||0;
 const SCAN_DEFAULTS=Object.freeze({maxFiles:600,maxDirectories:400,maxDepth:12,maxDurationMs:5_000});
 const SCAN_CAPS=Object.freeze({maxFiles:5_000,maxDirectories:5_000,maxDepth:32,maxDurationMs:30_000});
 
-function boundedScanInteger(value,fallback,{min=1,max}){
-  const parsed=Number(value);
-  if(!Number.isFinite(parsed)||!Number.isInteger(parsed))return fallback;
-  return Math.min(max,Math.max(min,parsed));
-}
-
 export function projectScanBudget(env=process.env){
   return{
-    maxFiles:boundedScanInteger(env.WORKBENCH_SCAN_MAX_FILES,SCAN_DEFAULTS.maxFiles,{max:SCAN_CAPS.maxFiles}),
-    maxDirectories:boundedScanInteger(env.WORKBENCH_SCAN_MAX_DIRECTORIES,SCAN_DEFAULTS.maxDirectories,{max:SCAN_CAPS.maxDirectories}),
-    maxDepth:boundedScanInteger(env.WORKBENCH_SCAN_MAX_DEPTH,SCAN_DEFAULTS.maxDepth,{max:SCAN_CAPS.maxDepth}),
-    maxDurationMs:boundedScanInteger(env.WORKBENCH_SCAN_MAX_DURATION_MS,SCAN_DEFAULTS.maxDurationMs,{min:10,max:SCAN_CAPS.maxDurationMs})
+    maxFiles:boundedInteger(env.WORKBENCH_SCAN_MAX_FILES,SCAN_DEFAULTS.maxFiles,{max:SCAN_CAPS.maxFiles}),
+    maxDirectories:boundedInteger(env.WORKBENCH_SCAN_MAX_DIRECTORIES,SCAN_DEFAULTS.maxDirectories,{max:SCAN_CAPS.maxDirectories}),
+    maxDepth:boundedInteger(env.WORKBENCH_SCAN_MAX_DEPTH,SCAN_DEFAULTS.maxDepth,{max:SCAN_CAPS.maxDepth}),
+    maxDurationMs:boundedInteger(env.WORKBENCH_SCAN_MAX_DURATION_MS,SCAN_DEFAULTS.maxDurationMs,{min:10,max:SCAN_CAPS.maxDurationMs})
   };
 }
 
@@ -444,10 +438,10 @@ export async function uniqueProjectFolder({appRoot,config,projects,name,business
 export async function walkProjectFiles(dir,options={}){
   const configured=projectScanBudget({});
   const budget={
-    maxFiles:boundedScanInteger(options.maxFiles,configured.maxFiles,{max:SCAN_CAPS.maxFiles}),
-    maxDirectories:boundedScanInteger(options.maxDirectories,configured.maxDirectories,{max:SCAN_CAPS.maxDirectories}),
-    maxDepth:boundedScanInteger(options.maxDepth,configured.maxDepth,{max:SCAN_CAPS.maxDepth}),
-    maxDurationMs:boundedScanInteger(options.maxDurationMs,configured.maxDurationMs,{max:SCAN_CAPS.maxDurationMs})
+    maxFiles:boundedInteger(options.maxFiles,configured.maxFiles,{max:SCAN_CAPS.maxFiles}),
+    maxDirectories:boundedInteger(options.maxDirectories,configured.maxDirectories,{max:SCAN_CAPS.maxDirectories}),
+    maxDepth:boundedInteger(options.maxDepth,configured.maxDepth,{max:SCAN_CAPS.maxDepth}),
+    maxDurationMs:boundedInteger(options.maxDurationMs,configured.maxDurationMs,{max:SCAN_CAPS.maxDurationMs})
   };
   const now=typeof options.now==='function'?options.now:Date.now;
   const startedAt=now(),files=[],reasons=new Set();let directoriesVisited=0,maxDepthVisited=0,stop=false;

@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { timingSafeEqualText } from './utils.mjs';
+import { isLoopbackHostname } from './net-utils.mjs';
 
 function normalizeAddress(value){
   let address=String(value||'').trim().toLowerCase();
@@ -11,10 +12,7 @@ function normalizeAddress(value){
 }
 
 export function isLoopbackAddress(value){
-  const address=normalizeAddress(value);
-  if(address==='localhost'||address==='::1')return true;
-  if(isIP(address)===4)return address.startsWith('127.');
-  return false;
+  return isLoopbackHostname(normalizeAddress(value));
 }
 
 /**

@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { nowIso } from './utils.mjs';
+import { atomicWriteJson } from './atomic-write.mjs';
 
 export const GETNOTE_INSIGHT_SCHEMA_VERSION='getnote-insight-v1';
 export const GETNOTE_INSIGHT_INDEX_VERSION='getnote-insight-index-v1';
@@ -227,7 +229,6 @@ function parserShape(insight){
 function emptyIndex(){return{schemaVersion:GETNOTE_INSIGHT_INDEX_VERSION,entries:{},latestByNote:{}};}
 function emptyCandidates(){return{schemaVersion:GETNOTE_CANDIDATE_STORE_VERSION,items:{}};}
 function sameJson(a,b){return JSON.stringify(a)===JSON.stringify(b);}
-function nowIso(){return new Date().toISOString();}
 
 export class GetnoteInsightStore{
   constructor(dataDir){
@@ -254,9 +255,8 @@ export class GetnoteInsightStore{
     try{return JSON.parse(await fsp.readFile(target,'utf8'));}catch(error){throw new GetnoteInsightError(`${label} 无法读取为 JSON。`,{code:'GETNOTE_INSIGHT_STORE_CORRUPT',statusCode:500,cause:error});}
   }
   async _atomicWrite(target,label,value){
-    await this.ensure();await this._stat(target,label,'file');const tmp=`${target}.${process.pid}.${crypto.randomUUID()}.tmp`;let created=false;
-    try{await fsp.writeFile(tmp,JSON.stringify(value,null,2),{encoding:'utf8',flag:'wx',mode:FILE_MODE});created=true;await fsp.chmod(tmp,FILE_MODE);await this._stat(target,label,'file');await fsp.rename(tmp,target);created=false;}
-    catch(error){if(created)await fsp.unlink(tmp).catch(()=>{});throw error;}
+    await this.ensure();await this._stat(target,label,'file');
+    await atomicWriteJson(target, value, { mode: FILE_MODE, ensureDir: false });
   }
   async _writeImmutable(target,label,value){
     await this.ensure();if(await this._stat(target,label,'file'))return false;

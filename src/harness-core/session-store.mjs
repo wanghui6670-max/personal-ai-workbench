@@ -1,13 +1,10 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { atomicWriteJson } from '../atomic-write.mjs';
 
 const PRIVATE_DIRECTORY_MODE=0o700;
 const PRIVATE_FILE_MODE=0o600;
-
-function clone(value){
-  return JSON.parse(JSON.stringify(value));
-}
 
 function sessionItemsFrom(payload){
   if(Array.isArray(payload))return payload;
@@ -34,30 +31,16 @@ export function createSessionStore({file,now=()=>new Date()}={}){
 
   async function atomicWrite(items){
     await ensureDirectory();
-    const tmp=`${file}.${process.pid}.${randomUUID()}.tmp`;
-    let created=false;
-    try{
-      await fsp.writeFile(tmp,JSON.stringify({sessions:items},null,2),{
-        encoding:'utf8',
-        flag:'wx',
-        mode:PRIVATE_FILE_MODE
-      });
-      created=true;
-      await fsp.rename(tmp,file);
-      created=false;
-      await fsp.chmod(file,PRIVATE_FILE_MODE);
-    }finally{
-      if(created)await fsp.unlink(tmp).catch(()=>{});
-    }
+    await atomicWriteJson(file, {sessions:items}, { mode: PRIVATE_FILE_MODE, ensureDir: false });
   }
 
   function itemsFrom(source){
-    return [...source.values()].map(clone);
+    return [...source.values()].map(item=>structuredClone(item));
   }
 
   function replaceRecords(items){
     records.clear();
-    for(const item of items)records.set(item.id,clone(item));
+    for(const item of items)records.set(item.id,structuredClone(item));
   }
 
   async function persistRecords(source){
@@ -100,9 +83,9 @@ export function createSessionStore({file,now=()=>new Date()}={}){
       if(source===null)return recoverCorruptFile();
       const items=source
         .filter(item=>item&&typeof item.id==='string'&&item.id)
-        .map(clone);
+        .map(item=>structuredClone(item));
       replaceRecords(items);
-      return items.map(clone);
+      return items.map(item=>structuredClone(item));
     });
   }
 
@@ -118,30 +101,30 @@ export function createSessionStore({file,now=()=>new Date()}={}){
     if(!record?.id)throw new Error('session id 必填');
     return enqueue(async()=>{
       const nextRecords=new Map(records);
-      nextRecords.set(record.id,clone(record));
+      nextRecords.set(record.id,structuredClone(record));
       await persistRecords(nextRecords);
-      return clone(record);
+      return structuredClone(record);
     });
   }
 
   function get(id){
     const record=records.get(id);
-    return record?clone(record):null;
+    return record?structuredClone(record):null;
   }
 
   function list(){
     return itemsFrom(records);
   }
 
-  async function update(id,patch={}){
+    async function update(id,patch={}){
     return enqueue(async()=>{
       const current=records.get(id);
       if(!current)throw Object.assign(new Error(`未知 session：${id}`),{code:'HARNESS_SESSION_NOT_FOUND'});
       const record={...current,...patch,id:current.id};
       const nextRecords=new Map(records);
-      nextRecords.set(id,clone(record));
+      nextRecords.set(id,structuredClone(record));
       await persistRecords(nextRecords);
-      return clone(record);
+      return structuredClone(record);
     });
   }
 

@@ -153,6 +153,13 @@ export function verifyJwt(token) {
   const parts = String(token).split('.');
   if (parts.length !== 3) return null;
   const [encodedHeader, encodedPayload, sig] = parts;
+  // 防御 alg:none 攻击：校验 header.alg 必须是 HS256
+  try {
+    const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString('utf8'));
+    if (header.alg !== 'HS256') return null;
+  } catch {
+    return null;
+  }
   const data = `${encodedHeader}.${encodedPayload}`;
   const expectedSig = crypto.createHmac('sha256', jwtSecret()).update(data).digest('base64url');
   if (!timingSafeEqualText(sig, expectedSig)) return null;

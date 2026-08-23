@@ -9,6 +9,8 @@ import {
   HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256
 } from './harness-policy.mjs';
 import { sanitizeGitRemote } from './projects.mjs';
+import { boundedInteger, compactText } from './utils.mjs';
+import { isLoopbackHostname } from './net-utils.mjs';
 
 export const HARNESS_VERSION='0.1.0-rc.6';
 export const HARNESS_UI_MODE_WORKBENCH='workbench';
@@ -28,12 +30,6 @@ const PASSTHROUGH_ENV_KEYS=[
   'NO_PROXY','http_proxy','https_proxy','no_proxy'
 ];
 
-function boundedInteger(value,fallback,{min,max}){
-  const parsed=Number(value);
-  if(!Number.isFinite(parsed)||!Number.isInteger(parsed))return fallback;
-  return Math.min(max,Math.max(min,parsed));
-}
-
 function firstNonEmpty(...values){
   for(const value of values){
     const text=String(value??'').trim();
@@ -42,10 +38,7 @@ function firstNonEmpty(...values){
   return '';
 }
 
-function isLoopbackHostname(hostname){
-  const host=String(hostname||'').toLowerCase().replace(/^\[|\]$/g,'');
-  return host==='localhost'||host==='::1'||host.startsWith('127.');
-}
+
 
 function normalizedBaseUrl(value,networkZone){
   let url;
@@ -177,11 +170,6 @@ export function buildHarnessChildEnv({env=process.env,provider,bridgeUrl,bridgeT
     NO_COLOR:'1'
   });
   return child;
-}
-
-function compactText(value,max){
-  const text=String(value??'').trim();
-  return text.length<=max?text:`${text.slice(0,max-1)}…`;
 }
 
 function safeJsonValue(value,depth=0){
