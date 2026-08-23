@@ -12,6 +12,7 @@ export const HARNESS_COMPOSITION_ID='workbench-unified-copilot-v1';
 
 export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'panel_navigate',
+  'config_read',
   'inbox_search',
   'project_list',
   'todo_list',
