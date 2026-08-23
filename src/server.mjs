@@ -153,6 +153,8 @@ const driver=createContextAwareDriver({sessionManager,runtime,runScope:harnessRu
 // 在多用户模式下，为每个用户创建独立的 session/execution 上下文（基于 SQLite）。
 // 共享的 harnessNavigator 和 harnessRunScope 保证同一时刻只有一个 navigator 任务执行。
 const harnessUserContexts=new Map();
+// 用户活跃度追踪节流缓存：userId → lastSeenAt timestamp(ms)
+const userLastSeenCache=new Map();
 function resolveUserHarnessContext(userId){
   if(!isMultiUserMode()||!userId||userId===LEGACY_USER_ID)return null;
   let ctx=harnessUserContexts.get(userId);
@@ -435,6 +437,16 @@ const server=http.createServer(async(req,rawRes)=>{
     const sessionUser=getSessionUser(req, storeAdapter);
     const currentUserId=sessionUser?sessionUser.uid:LEGACY_USER_ID;
     const scopedStore=storeAdapter.scope(currentUserId);
+
+    // 用户活跃度追踪：每用户每分钟最多写一次 lastSeenAt
+    if(sessionUser&&isMultiUserMode()){
+      const now=Date.now();
+      const last=userLastSeenCache.get(currentUserId)||0;
+      if(now-last>60000){
+        userLastSeenCache.set(currentUserId,now);
+        try{storeAdapter.raw.updateLastSeen(currentUserId);}catch{}
+      }
+    }
 
     if(await harnessHttp.handleUser(req,res,pathname,{rateLimit:()=>rateLimited(req,res,'navigator')},currentUserId,scopedStore,sessionUser))return;
 

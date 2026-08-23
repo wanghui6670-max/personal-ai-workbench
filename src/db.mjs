@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   displayName TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'member',
   tokenVersion INTEGER NOT NULL DEFAULT 0,
+  lastSeenAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -211,6 +212,16 @@ export function createDatabase(dataDir) {
     }
   } catch (e) {
     // 首次创建表时无此列也无妨，SCHEMA_SQL 已包含
+  }
+  // 迁移：为已有 users 表添加 lastSeenAt 列（v3.1 新增，用户活跃度追踪）
+  try {
+    const cols = db.pragma('table_info(users)');
+    if (cols.length > 0 && !cols.some(c => c.name === 'lastSeenAt')) {
+      db.exec('ALTER TABLE users ADD COLUMN lastSeenAt TEXT');
+      console.log('[migration] 已为 users 表添加 lastSeenAt 列');
+    }
+  } catch (e) {
+    // 首次创建表时无此列也无妨，后续会在 SCHEMA_SQL 中统一添加
   }
   return db;
 }

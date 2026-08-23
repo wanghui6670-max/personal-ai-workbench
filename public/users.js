@@ -41,7 +41,7 @@ function renderUsers(){
       <div class="user-avatar">${esc(u.username.charAt(0).toUpperCase())}</div>
       <div class="user-info">
         <div class="name">${esc(u.username)}<span class="role-badge ${u.role}">${u.role==='admin'?'管理员':'用户'}</span></div>
-        <div class="meta">${esc(u.displayName||'')} · 创建于 ${esc((u.createdAt||'').slice(0,10))}</div>
+        <div class="meta">${esc(u.displayName||'')} · 创建于 ${esc((u.createdAt||'').slice(0,10))}${u.lastSeenAt?` · 最近活跃 ${esc(u.lastSeenAt.slice(0,16).replace('T',' '))}`:' · 未活跃'}</div>
       </div>
       <div class="user-actions">
         <button class="btn" data-action="view-data" data-uid="${esc(u.id)}" data-uname="${esc(u.username)}" data-dname="${esc(u.displayName||'')}">查看数据</button>

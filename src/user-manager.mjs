@@ -62,7 +62,7 @@ export class UserManager {
    */
   list() {
     return this.store.listUsers().map(u => ({
-      id: u.id, username: u.username, displayName: u.displayName, role: u.role, createdAt: u.createdAt
+      id: u.id, username: u.username, displayName: u.displayName, role: u.role, createdAt: u.createdAt, lastSeenAt: u.lastSeenAt || null
     }));
   }
 

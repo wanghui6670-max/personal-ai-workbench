@@ -73,8 +73,9 @@ export class SqliteStore {
       getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
       getUserByName: db.prepare('SELECT * FROM users WHERE username = ?'),
       createUser: db.prepare(`INSERT INTO users (id, username, passwordHash, displayName, role, tokenVersion, createdAt, updatedAt) VALUES (@id, @username, @passwordHash, @displayName, @role, @tokenVersion, @createdAt, @updatedAt)`),
-      listUsers: db.prepare('SELECT id, username, displayName, role, createdAt FROM users ORDER BY createdAt'),
+      listUsers: db.prepare('SELECT id, username, displayName, role, createdAt, lastSeenAt FROM users ORDER BY createdAt'),
       updateUser: db.prepare(`UPDATE users SET displayName = @displayName, role = @role, passwordHash = @passwordHash, tokenVersion = @tokenVersion, updatedAt = @updatedAt WHERE id = @id`),
+      updateLastSeen: db.prepare('UPDATE users SET lastSeenAt = @lastSeenAt WHERE id = @id'),
       incTokenVersion: db.prepare('UPDATE users SET tokenVersion = tokenVersion + 1, updatedAt = @updatedAt WHERE id = @id'),
       getTokenVersion: db.prepare('SELECT tokenVersion FROM users WHERE id = ?'),
       deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
@@ -157,6 +158,7 @@ export class SqliteStore {
   createUser(user) { this._stmts.createUser.run({...user, tokenVersion: user.tokenVersion || 0}); return user; }
   listUsers() { return this._stmts.listUsers.all(); }
   updateUser(user) { this._stmts.updateUser.run({...user, tokenVersion: user.tokenVersion || 0}); return user; }
+  updateLastSeen(userId) { this._stmts.updateLastSeen.run({id: userId, lastSeenAt: nowIso()}); }
   getTokenVersion(userId) { const row = this._stmts.getTokenVersion.get(userId); return row ? row.tokenVersion : null; }
   incrementTokenVersion(userId) { this._stmts.incTokenVersion.run({id: userId, updatedAt: nowIso()}); }
   deleteUser(userId) { 
