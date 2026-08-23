@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "product": "动觉 AI 工作台",
+  "productVersion": "3.0.0",
+  "acceptanceProfile": "p0_isolated_host_joycrew_disabled",
+  "startedAt": "2026-08-21T05:29:36.467Z",
+  "finishedAt": "2026-08-21T05:29:37.434Z",
+  "status": "passed",
+  "commit": null,
+  "runtime": {
+    "node": "24.18.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "scope": {
+    "realCredentialsUsed": false,
+    "joycrewEnabled": false,
+    "externalWrites": false,
+    "productionDeployment": false
+  },
+  "checks": [
+    {
+      "name": "部署前 doctor",
+      "status": "passed",
+      "details": {
+        "externalPipeline": "disabled",
+        "joycrew": "disabled"
+      }
+    },
+    {
+      "name": "长期进程启动与 readiness",
+      "status": "passed",
+      "details": {
+        "version": "3.0.0",
+        "bind": "loopback"
+      }
+    },
+    {
+      "name": "统一产品静态入口",
+      "status": "passed",
+      "details": {
+        "businessExecutionAsset": true
+      }
+    },
+    {
+      "name": "Joycrew 关闭时故障隔离",
+      "status": "passed",
+      "details": {
+        "personalWorkbenchAvailable": true,
+        "networkCallRequired": false
+      }
+    },
+    {
+      "name": "iPhone Capture 幂等入口",
+      "status": "passed",
+      "details": {
+        "firstStatus": 201,
+        "replayStatus": 200
+      }
+    },
+    {
+      "name": "backup v2 完整性",
+      "status": "passed",
+      "details": {
+        "captureReceipts": 1,
+        "projectRecordReceipts": 0
+      }
+    },
+    {
+      "name": "停止服务后的恢复与恢复前安全备份",
+      "status": "passed",
+      "details": {
+        "restoreSucceeded": true
+      }
+    },
+    {
+      "name": "恢复后 doctor",
+      "status": "passed",
+      "details": {
+        "status": "ready"
+      }
+    },
+    {
+      "name": "状态回滚读回",
+      "status": "passed",
+      "details": {
+        "baselineRestored": true,
+        "postBackupMutationRemoved": true
+      }
+    },
+    {
+      "name": "Capture 收据随 backup v2 恢复",
+      "status": "passed",
+      "details": {
+        "replayPreserved": true
+      }
+    }
+  ],
+  "summary": {
+    "isolatedDataDirectory": true,
+    "isolatedWorkspace": true,
+    "backupVersion": 2,
+    "baselineInboxItems": 2,
+    "restoredInboxItemsVerified": 2,
+    "joycrewDisabledFailIsolation": true,
+    "reportArtifact": "p0-acceptance-report.json"
+  },
+  "error": null,
+  "serverLogs": {
+    "stdout": "\n动觉 AI 工作台 v3.0.0\nhttp://127.0.0.1:50256\nData: /var/folders/yb/xsqh_mcd2mx8s6tmm9hqsm9c0000gp/T/personal-ai-workbench-p0-fPZ9GE/data\nWorkspace: /var/folders/yb/xsqh_mcd2mx8s6tmm9hqsm9c0000gp/T/personal-ai-workbench-p0-fPZ9GE/workspace\nAI: local fallback\nHarness Copilot: disabled (left workbench unaffected)\nJoycrew: disabled\nAuth: disabled (localhost recommended)\n",
+    "stderr": ""
+  }
+}

@@ -68,9 +68,9 @@ export function createHarnessHttp({
   resolveUserDriver=null
 }={}){
   if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
-  // The exposed tools either read external state or create an expiring local
-  // preview. Actual Workbench/Joycrew mutations are not callable here.
-  const toolOptions={readOnlyOnly:true,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST};
+  // inbox_add 是写入工具（requiresConfirmation），需要 confirmed 才能执行；
+  // 其余工具仍为只读。readOnlyOnly=false 让 inbox_add 通过 toolAllowed 过滤。
+  const toolOptions={readOnlyOnly:false,allowedNames:HARNESS_NAVIGATOR_TOOL_ALLOWLIST,confirmed:true};
 
   async function checkedStatus(){
     if(typeof navigator.checkedStatus==='function')return navigator.checkedStatus();

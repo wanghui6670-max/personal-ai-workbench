@@ -362,7 +362,11 @@ const server=http.createServer(async(req,rawRes)=>{
       return sendJson(res,captured.replayed?200:201,{captureId:captured.captureId,replayed:captured.replayed,processed:captured.processed,item:captured.item});
     }
 
-    if(await harnessHttp.handleBridge(req,res,pathname,globalStore))return;
+    // Bridge 调用来自 DSH sidecar 进程，不携带用户 session；
+    // 通过 harnessRunScope 获取当前正在执行的 userId，用对应 scopedStore 写入数据。
+    const bridgeUserId=harnessRunScope.currentUserId();
+    const bridgeStore=bridgeUserId&&storeAdapter?storeAdapter.scope(bridgeUserId):globalStore;
+    if(await harnessHttp.handleBridge(req,res,pathname,bridgeStore))return;
 
     // ========== 认证检查 ==========
     if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);

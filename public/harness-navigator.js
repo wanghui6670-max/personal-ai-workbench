@@ -245,7 +245,7 @@ function sessionListHtml(){
 }
 
 /* ─── 空状态 ─── */
-function emptyStateHtml(){return`<div class="harness-nav-empty"><div class="harness-nav-empty-mark">✦</div><strong>开始一段工作对话</strong><p>DSH 会读取当前 Workbench 上下文，并只使用已经授权的工具。</p><div class="harness-nav-empty-actions"><button type="button" data-harness-suggest="帮我看今天：读取今日任务和临近截止事项，告诉我最需要关注什么。">看今天</button><button type="button" data-harness-suggest="查看收件箱：读取当前收件箱，帮我快速判断哪些事项值得处理。不要修改状态。">看收件箱</button><button type="button" data-harness-suggest="查看项目：读取当前进行中的项目，概括进度、卡点和临近截止项。不要修改状态。">看项目</button></div></div>`;}
+function emptyStateHtml(){return`<div class="harness-nav-empty"><div class="harness-nav-empty-mark">✦</div><strong>开始一段工作对话</strong><p>在这里记下任何新事项，会自动进入收件箱；也可以让我帮你查看和分析。</p><div class="harness-nav-empty-actions"><button type="button" data-harness-suggest="帮我看今天：读取今日任务和临近截止事项，告诉我最需要关注什么。">看今天</button><button type="button" data-harness-suggest="查看收件箱：读取当前收件箱，帮我快速判断哪些事项值得处理。不要修改状态。">看收件箱</button><button type="button" data-harness-suggest="查看项目：读取当前进行中的项目，概括进度、卡点和临近截止项。不要修改状态。">看项目</button></div></div>`;}
 
 /* ─── 不可用状态 ─── */
 function unavailableHtml(status,statusMessage){return`<div class="harness-nav-unavailable"><div class="harness-nav-empty-mark">✦</div><strong>${escapeHtml(statusLabel(status))}</strong><p>${escapeHtml(statusMessage)}</p><button type="button" data-harness-refresh>重新检查</button></div>`;}
@@ -297,7 +297,7 @@ function cardHtml(){
     </div>
     <div class="harness-nav-metrics-bar">${metricsHtml()}</div>
     <form class="harness-nav-form" data-harness-form>
-      <textarea name="message" rows="1" autocomplete="off" maxlength="12000" placeholder="描述要处理的内容…" aria-label="发送给 DSH" ${!available||navigatorState.busy?'disabled':''}></textarea>
+      <textarea name="message" rows="1" autocomplete="off" maxlength="12000" placeholder="记下来或描述要处理的内容…" aria-label="发送给 DSH" ${!available||navigatorState.busy?'disabled':''}></textarea>
       <div class="harness-nav-formbar">
         <div class="harness-nav-compose-meta"><span>Agent</span>${modelSelector}</div>
         ${showStop?'<button type="button" class="harness-nav-stop" data-harness-stop aria-label="停止生成">■</button>':''}

@@ -14,6 +14,7 @@ export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'panel_navigate',
   'config_read',
   'inbox_search',
+  'inbox_add',
   'project_list',
   'todo_list',
   'journal_read',
