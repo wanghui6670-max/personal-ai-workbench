@@ -8,7 +8,8 @@ const navigatorState={
   status:null,statusLoading:false,busy:false,abortController:null,
   error:'',sessionId:null,messages:[],trajectory:[],thinkBlocks:[],skillCalls:[],
   metrics:null,activeTab:'chat',
-  sessions:[],currentSessionId:null
+  sessions:[],currentSessionId:null,
+  recording:false,speechRecognition:null
 };
 const DEFAULT_PANEL_WIDTH=500;
 let scheduled=false;
@@ -301,6 +302,7 @@ function cardHtml(){
       <div class="harness-nav-formbar">
         <div class="harness-nav-compose-meta"><span>Agent</span>${modelSelector}</div>
         ${showStop?'<button type="button" class="harness-nav-stop" data-harness-stop aria-label="停止生成">■</button>':''}
+        <button type="button" class="harness-nav-mic${navigatorState.recording?' recording':''}" data-harness-mic aria-label="${navigatorState.recording?'停止语音输入':'语音输入'}" ${!available||navigatorState.busy?'disabled':''}>${navigatorState.recording?'■':'🎙'}</button>
         <button class="harness-nav-send" aria-label="发送" ${!available||navigatorState.busy?'disabled':''}>${navigatorState.busy?'…':'↑'}</button>
       </div>
     </form>
@@ -395,6 +397,57 @@ function stopGeneration(){
   navigatorState.busy=false;scheduleMount();
 }
 
+/* ─── 语音输入 ─── */
+function toggleVoiceInput(){
+  if(navigatorState.recording){stopVoiceInput();return;}
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){
+    navigatorState.error='当前浏览器不支持语音输入（需要 Chrome 或 Edge）';scheduleMount();
+    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
+    return;
+  }
+  const textarea=document.querySelector('[data-harness-form] textarea[name="message"]');
+  if(!textarea||textarea.disabled)return;
+  const recognition=new SpeechRecognition();
+  recognition.lang='zh-CN';
+  recognition.continuous=true;
+  recognition.interimResults=true;
+  const baseText=textarea.value;
+  let finalBuffer='';
+  recognition.onresult=event=>{
+    let interim='';
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const result=event.results[i];
+      if(result.isFinal){finalBuffer+=result[0].transcript;}
+      else{interim+=result[0].transcript;}
+    }
+    textarea.value=baseText+finalBuffer+interim;
+    textarea.style.height='auto';textarea.style.height=`${Math.min(textarea.scrollHeight,180)}px`;
+  };
+  recognition.onerror=event=>{
+    navigatorState.recording=false;navigatorState.speechRecognition=null;
+    if(event.error==='no-speech'||event.error==='aborted')return;
+    navigatorState.error='语音识别出错：'+event.error;scheduleMount();
+    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
+  };
+  recognition.onend=()=>{
+    if(navigatorState.recording){
+      navigatorState.recording=false;navigatorState.speechRecognition=null;scheduleMount();
+    }
+  };
+  try{
+    recognition.start();
+    navigatorState.recording=true;navigatorState.speechRecognition=recognition;scheduleMount();
+  }catch(e){
+    navigatorState.error='启动语音输入失败';scheduleMount();
+    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
+  }
+}
+function stopVoiceInput(){
+  if(navigatorState.speechRecognition){try{navigatorState.speechRecognition.stop();}catch(e){}}
+  navigatorState.recording=false;navigatorState.speechRecognition=null;scheduleMount();
+}
+
 /* ─── 切换模型 ─── */
 async function switchModel(model){
   if(!model||navigatorState.busy)return;
@@ -467,6 +520,8 @@ document.addEventListener('click',event=>{
   if(event.target.closest?.('[data-harness-refresh]')){void loadStatus(true);return;}
   // 停止生成
   if(event.target.closest?.('[data-harness-stop]')){stopGeneration();return;}
+  // 语音输入
+  if(event.target.closest?.('[data-harness-mic]')){toggleVoiceInput();return;}
   // 模型切换
   const modelSelect=event.target.closest?.('[data-harness-model-switch]');
   if(modelSelect&&event.type==='change'){void switchModel(modelSelect.value);return;}
