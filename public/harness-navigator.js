@@ -9,9 +9,12 @@ const navigatorState={
   error:'',sessionId:null,messages:[],trajectory:[],thinkBlocks:[],skillCalls:[],
   metrics:null,activeTab:'chat',
   sessions:[],currentSessionId:null,
-  recording:false,speechRecognition:null
+  recording:false,speechRecognition:null,
+  crewAgents:[],crewAgentsLoaded:false,crewAgentsLoading:false
 };
 const DEFAULT_PANEL_WIDTH=500;
+/* ─── @ AI 员工提及状态 ─── */
+const mentionState={open:false,query:'',selectedIndex:0,filtered:[],startPos:0,popupEl:null};
 let scheduled=false;
 let lastMountedHtml='';
 
@@ -326,7 +329,7 @@ function mount(){
   let root=panel.querySelector('[data-harness-navigator-mount]');
   if(!root){root=document.createElement('div');root.dataset.harnessNavigatorMount='';const anchor=panel.querySelector('.ai-chat')||panel.querySelector('.ai-foot');if(anchor)panel.insertBefore(root,anchor);else panel.append(root);lastMountedHtml='';}
   const html=webUrl?`<iframe class="harness-embed" src="${escapeHtml(webUrl)}" title="DeepSeek Harness" allow="clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer"></iframe>`:cardHtml();
-  if(lastMountedHtml!==html){root.innerHTML=html;lastMountedHtml=html;autoScroll();}
+  if(lastMountedHtml!==html){closeMention();root.innerHTML=html;lastMountedHtml=html;autoScroll();}
 }
 function scheduleMount(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;mount();});}
 function autoScroll(){requestAnimationFrame(()=>{const el=document.querySelector('[data-tab-content="chat"]');if(el)el.scrollTop=el.scrollHeight;});}
@@ -342,6 +345,100 @@ async function loadStatus(force=false){
     if(String(error.message).includes('请先登录')||error.message==='未登录'){navigatorState.status={enabled:false,available:false,state:'auth',reason:'auth_required',message:'登录后将检查 Harness Navigator。'};return;}
     navigatorState.status={enabled:false,available:false,state:'error',message:'无法读取 Harness 状态。'};navigatorState.error=error.message;
   }finally{navigatorState.statusLoading=false;scheduleMount();}
+}
+
+/* ─── AI 员工列表 ─── */
+async function loadCrewAgents(){
+  if(navigatorState.crewAgentsLoaded||navigatorState.crewAgentsLoading)return;
+  navigatorState.crewAgentsLoading=true;
+  try{
+    const payload=await jsonRequest('/api/crew');
+    navigatorState.crewAgents=Array.isArray(payload.agents)?payload.agents:[];
+    navigatorState.crewAgentsLoaded=true;
+  }catch{
+    navigatorState.crewAgents=[];navigatorState.crewAgentsLoaded=true;
+  }finally{
+    navigatorState.crewAgentsLoading=false;
+  }
+}
+
+/* ─── @ AI 员工提及 ─── */
+function detectMention(textarea){
+  const text=textarea.value;const pos=textarea.selectionStart;
+  const before=text.slice(0,pos);
+  const match=before.match(/(?:^|\s)@([^\s@\n]*)$/);
+  if(!match)return false;
+  mentionState.startPos=match.index+(match[0][0]==='@'?0:1);
+  mentionState.query=match[1];
+  return true;
+}
+function openMention(textarea){
+  mentionState.open=true;
+  if(!navigatorState.crewAgentsLoaded&&!navigatorState.crewAgentsLoading){
+    void loadCrewAgents().then(()=>{if(mentionState.open){updateMentionFilter();renderMentionPopup(textarea);}});
+  }
+  updateMentionFilter();renderMentionPopup(textarea);
+}
+function updateMentionFilter(){
+  const q=mentionState.query.toLowerCase();
+  mentionState.filtered=q?navigatorState.crewAgents.filter(a=>{
+    const title=(a.title||a.name||'').toLowerCase();
+    const dept=(a.dept||'').toLowerCase();
+    return title.includes(q)||dept.includes(q);
+  }):navigatorState.crewAgents.slice();
+  mentionState.selectedIndex=0;
+}
+function closeMention(){
+  mentionState.open=false;mentionState.query='';mentionState.filtered=[];mentionState.selectedIndex=0;
+  if(mentionState.popupEl){mentionState.popupEl.remove();mentionState.popupEl=null;}
+}
+function renderMentionPopup(textarea){
+  if(!mentionState.open)return;
+  let popup=mentionState.popupEl;
+  if(!popup){popup=document.createElement('div');popup.className='harness-mention-popup';popup.setAttribute('role','listbox');document.body.appendChild(popup);mentionState.popupEl=popup;}
+  if(!navigatorState.crewAgentsLoaded){
+    popup.innerHTML='<div class="harness-mention-hint">正在加载 AI 员工列表…</div>';
+  }else if(!navigatorState.crewAgents.length){
+    popup.innerHTML='<div class="harness-mention-hint">没有可用的 AI 员工</div>';
+  }else if(!mentionState.filtered.length){
+    popup.innerHTML='<div class="harness-mention-hint">没有匹配的 AI 员工</div>';
+  }else{
+    popup.innerHTML=mentionState.filtered.slice(0,8).map((a,i)=>{
+      const title=escapeHtml(a.title||a.name||a.id||'');
+      const dept=a.dept?escapeHtml(a.dept):'';
+      const desc=a.description?escapeHtml(compact(a.description,60)):'';
+      return `<div class="harness-mention-item${i===mentionState.selectedIndex?' selected':''}" data-mention-idx="${i}" role="option"><span class="mention-title">${title}</span>${dept?`<span class="mention-dept">${dept}</span>`:''}${desc?`<span class="mention-desc">${desc}</span>`:''}</div>`;
+    }).join('');
+  }
+  positionMentionPopup(textarea);
+}
+function positionMentionPopup(textarea){
+  const popup=mentionState.popupEl;if(!popup)return;
+  const rect=textarea.getBoundingClientRect();
+  const popupHeight=popup.offsetHeight||200;
+  const spaceAbove=rect.top;const spaceBelow=window.innerHeight-rect.bottom;
+  if(spaceAbove>popupHeight+8&&spaceAbove>=spaceBelow){popup.style.top=`${rect.top-popupHeight-4}px`;}
+  else{popup.style.top=`${rect.bottom+4}px`;}
+  popup.style.left=`${rect.left}px`;
+  popup.style.width=`${Math.min(rect.width,320)}px`;
+}
+function selectMention(textarea){
+  const agent=mentionState.filtered[mentionState.selectedIndex];if(!agent)return;
+  const title=agent.title||agent.name||agent.id||'';
+  const insertText=`@${title} `;
+  const before=textarea.value.slice(0,mentionState.startPos);
+  const after=textarea.value.slice(textarea.selectionStart);
+  textarea.value=before+insertText+after;
+  const newCursor=before.length+insertText.length;
+  textarea.setSelectionRange(newCursor,newCursor);
+  textarea.style.height='auto';textarea.style.height=`${Math.min(textarea.scrollHeight,180)}px`;
+  closeMention();textarea.focus();
+}
+function navigateMention(direction){
+  const len=mentionState.filtered.length;if(!len)return;
+  mentionState.selectedIndex=(mentionState.selectedIndex+direction+len)%len;
+  const popup=mentionState.popupEl;
+  if(popup)popup.querySelectorAll('.harness-mention-item').forEach((el,i)=>el.classList.toggle('selected',i===mentionState.selectedIndex));
 }
 
 /* ─── 导航 ─── */
@@ -490,13 +587,23 @@ document.addEventListener('submit',event=>{
   event.preventDefault();
   const input=form.elements.message;
   const message=input?.value||'';
+  closeMention();
   if(input){input.value='';input.style.height='auto';}
   void sendMessage(message);
 });
 
 document.addEventListener('keydown',event=>{
   const input=event.target.closest?.('[data-harness-form] textarea[name="message"]');
-  if(!input||event.key!=='Enter'||event.shiftKey||event.isComposing)return;
+  if(!input)return;
+  if(mentionState.open){
+    if(event.key==='ArrowDown'){event.preventDefault();navigateMention(1);return;}
+    if(event.key==='ArrowUp'){event.preventDefault();navigateMention(-1);return;}
+    if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();selectMention(input);return;}
+    if(event.key==='Escape'){event.preventDefault();closeMention();return;}
+    if(event.key==='Tab'){event.preventDefault();selectMention(input);return;}
+    if(event.key==='ArrowLeft'||event.key==='ArrowRight'){closeMention();return;}
+  }
+  if(event.key!=='Enter'||event.shiftKey||event.isComposing)return;
   event.preventDefault();input.form?.requestSubmit();
 });
 
@@ -504,6 +611,12 @@ document.addEventListener('input',event=>{
   const input=event.target.closest?.('[data-harness-form] textarea[name="message"]');
   if(!input)return;
   input.style.height='auto';input.style.height=`${Math.min(input.scrollHeight,180)}px`;
+  if(detectMention(input)){
+    if(!mentionState.open)openMention(input);
+    else{updateMentionFilter();renderMentionPopup(input);}
+  }else if(mentionState.open){
+    closeMention();
+  }
 });
 
 document.addEventListener('click',event=>{
@@ -568,6 +681,20 @@ document.addEventListener('click',event=>{
     return;
   }
 });
+
+/* ─── @ 提及浮层鼠标交互 ─── */
+document.addEventListener('mousedown',event=>{
+  if(!mentionState.open)return;
+  const mentionItem=event.target.closest?.('[data-mention-idx]');
+  if(mentionItem){
+    event.preventDefault();
+    const textarea=document.querySelector('[data-harness-form] textarea[name="message"]');
+    if(textarea){mentionState.selectedIndex=parseInt(mentionItem.dataset.mentionIdx);selectMention(textarea);}
+    return;
+  }
+  if(!event.target.closest('.harness-mention-popup')&&!event.target.closest('[data-harness-form]'))closeMention();
+});
+window.addEventListener('scroll',()=>{if(mentionState.open){const ta=document.querySelector('[data-harness-form] textarea[name="message"]');if(ta)positionMentionPopup(ta);else closeMention();}},true);
 
 window.addEventListener('resize',()=>applyPanelWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-panel-width'))||DEFAULT_PANEL_WIDTH));
 

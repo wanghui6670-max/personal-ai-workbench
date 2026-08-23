@@ -138,3 +138,16 @@ html[data-ai-panel-mode="rail"] .ai-panel.harness-primary>[data-harness-navigato
 html[data-ai-panel-mode="rail"] .harness-nav-card,html[data-ai-panel-mode="rail"] .harness-embed{display:flex!important}
 @media(min-width:901px){html:not([data-ai-panel-mode="closed"]) .layout:has(.ai-panel.harness-primary){grid-template-columns:minmax(0,1fr) var(--dsh-panel-width,500px)}}
 @media(max-width:900px){.ai-panel.harness-primary,html[data-ai-panel-mode="rail"] .ai-panel.harness-primary{position:relative;height:620px;padding:0;align-items:stretch}.harness-nav-resize{display:none}.harness-nav-head{height:46px}.harness-nav-messages{padding:18px 14px 24px}.harness-nav-message.user{max-width:92%}.harness-nav-form{margin:0 9px 9px}.harness-nav-compose-meta span:last-child{max-width:150px}}
+
+/* ── @ AI 员工提及浮层 ── */
+.harness-mention-popup{position:fixed;z-index:9999;max-height:280px;overflow:auto;background:#161b22;border:1px solid #30363d;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);scrollbar-width:thin;scrollbar-color:#343b46 transparent}
+.harness-mention-popup::-webkit-scrollbar{width:6px}
+.harness-mention-popup::-webkit-scrollbar-thumb{background:#343b46;border-radius:3px}
+.harness-mention-hint{padding:10px 12px;font-size:11px;color:#7d8590;text-align:center}
+.harness-mention-item{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:7px 12px;cursor:pointer;border-bottom:1px solid #21262d;transition:background .1s}
+.harness-mention-item:last-child{border-bottom:0}
+.harness-mention-item:hover,.harness-mention-item.selected{background:rgba(88,166,255,.1)}
+.harness-mention-item.selected{border-left:2px solid #58a6ff;padding-left:10px}
+.harness-mention-item .mention-title{font-size:12px;font-weight:600;color:#e6edf3;white-space:nowrap}
+.harness-mention-item .mention-dept{font-size:9px;color:#7d8590;padding:1px 5px;border-radius:4px;background:#1f2630;border:1px solid #303842;white-space:nowrap}
+.harness-mention-item .mention-desc{font-size:9px;color:#6e7681;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-basis:100%;line-height:1.4}
