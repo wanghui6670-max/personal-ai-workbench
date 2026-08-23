@@ -285,6 +285,65 @@ const server=http.createServer(async(req,rawRes)=>{
     }
     if(pathname==='/api/auth/logout'&&req.method==='POST'){await readJsonBody(req).catch(()=>{});return sendJson(res,200,{ok:true},{'Set-Cookie':logoutCookie()});}
 
+    // ========== 管理员：查看所有员工数据 ==========
+    if(isMultiUserMode()&&pathname.startsWith('/api/admin/')){
+      if(!isAuthenticated(req))return unauthorized(res);
+      if(!requireAdmin(req))return forbidden(res);
+
+      // GET /api/admin/all-state — 返回所有用户的数据概要
+      if(pathname==='/api/admin/all-state'&&req.method==='GET'){
+        const userManager=createUserManager(storeAdapter);
+        const users=userManager.list();
+        const allData=await Promise.all(users.map(async u=>{
+          const userStore=storeAdapter.scope(u.id);
+          const state=await userStore.readState();
+          const config=await userStore.readConfig();
+          const derived=deriveState(APP_ROOT,state,config,aiEnabled());
+          return {
+            userId:u.id,
+            username:u.username,
+            displayName:u.displayName,
+            role:u.role,
+            summary:{
+              todos:derived.todos.length,
+              inbox:derived.inbox.length,
+              projects:derived.projects.length,
+              todayTodos:(derived.todayTodos||[]).length,
+              activities:(derived.activities||[]).length,
+              confirmations:(derived.confirmations||[]).length,
+              overdue:derived.stats?.overdue||0,
+              businesses:(derived.businesses||[]).length
+            },
+            todos:derived.todos.map(t=>({id:t.id,title:t.title,dueDate:t.dueDate,done:t.done,project:t.project})),
+            inbox:derived.inbox.map(i=>({id:i.id,text:i.text,source:i.source,createdAt:i.createdAt})),
+            projects:derived.projects.map(p=>({id:p.id,name:p.name,status:p.status,progress:p.progress?.percent,endDate:p.endDate})),
+            recentActivities:(derived.activities||[]).slice(0,20).map(a=>({at:a.at,type:a.type,text:a.text})),
+            businesses:(derived.businesses||[]).map(b=>({id:b.id,name:b.name}))
+          };
+        }));
+        return sendJson(res,200,{users:allData});
+      }
+
+      // GET /api/admin/users/:userId/state — 返回单个用户的完整数据
+      const adminUserMatch=pathname.match(/^\/api\/admin\/users\/([^/]+)\/state$/);
+      if(adminUserMatch&&req.method==='GET'){
+        const targetUserId=adminUserMatch[1];
+        const userManager=createUserManager(storeAdapter);
+        const targetUser=userManager.get(targetUserId);
+        if(!targetUser)return sendJson(res,404,{error:'用户不存在'});
+        const userStore=storeAdapter.scope(targetUserId);
+        const state=await userStore.readState();
+        const config=await userStore.readConfig();
+        const derived=deriveState(APP_ROOT,state,config,aiEnabled());
+        return sendJson(res,200,{
+          user:{id:targetUser.id,username:targetUser.username,displayName:targetUser.displayName,role:targetUser.role},
+          state:derived
+        });
+      }
+
+      return notFound(res);
+    }
+
     // ========== 用户管理端点（需要管理员权限）==========
     if(isMultiUserMode()&&pathname.startsWith('/api/users')){
       if(!isAuthenticated(req))return unauthorized(res);
