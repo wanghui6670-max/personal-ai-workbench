@@ -3,9 +3,6 @@ import { aiRuntimeConfig, morningConversation } from './ai.mjs';
 import { prepareBusinessDirs, stageBusinessDirectoryRename, projectPath, resolveWorkspace, businessById } from './projects.mjs';
 import { newId, nowIso, todayIso, parseDateLike, dueDeltaDays, compactText, sanitizeFolderName } from './utils.mjs';
 import { isValidDateOnly } from './validation.mjs';
-import { createFeishuJournalClient, FeishuSourceError, sourceConfigured } from './feishu.mjs';
-
-const defaultFeishuJournalClient=createFeishuJournalClient();
 
 function badRequest(message){
   return Object.assign(new Error(message),{statusCode:400,code:'INVALID_REQUEST'});
@@ -141,106 +138,6 @@ export async function configureDataSource({store,dataSource}){
     lastImportedCount:0
   };
   return store.updateConfig(config=>{config.dataSource=next;return structuredClone(config);});
-}
-
-function feishuSyncSummary(config,extra={}){
-  const source=config?.dataSource;
-  return {
-    configured:sourceConfigured(source),
-    provider:source?.provider||null,
-    documentUrl:source?.documentUrl||null,
-    revisionId:source?.lastRevisionId??null,
-    syncedAt:source?.lastSyncAt??null,
-    status:source?.lastSyncStatus||'not_configured',
-    importedCount:Number.isInteger(source?.lastImportedCount)?source.lastImportedCount:0,
-    ...extra
-  };
-}
-
-export async function syncFeishuInbox({store,client=defaultFeishuJournalClient}={}){
-  const config=await store.readConfig();
-  if(!sourceConfigured(config.dataSource))return feishuSyncSummary(config,{imported:0,removed:0,reason:'not_configured'});
-  let fetched;
-  try{
-    fetched=await client.fetch(config.dataSource);
-  }catch(error){
-    await store.updateConfig(current=>{
-      if(current.dataSource){
-        current.dataSource.lastSyncAt=nowIso();
-        current.dataSource.lastSyncStatus='error';
-        current.dataSource.lastSyncError=error instanceof FeishuSourceError?error.message:'飞书文档读取失败';
-      }
-      return structuredClone(current);
-    }).catch(()=>{});
-    throw error;
-  }
-
-  const remoteByBlock=new Map(fetched.items.map(item=>[item.blockId,item]));
-  let imported=0,removed=0,updated=0;
-  await store.updateState(state=>{
-    state.inboxAcks=Array.isArray(state.inboxAcks)?state.inboxAcks:[];
-    const ackByBlock=new Map(state.inboxAcks.map(item=>[item.blockId,item]));
-    const localByBlock=new Map(state.inbox.filter(item=>item.feishuBlockId).map(item=>[item.feishuBlockId,item]));
-    for(const remote of fetched.items){
-      const local=localByBlock.get(remote.blockId);
-      if(local){
-        if(local.text!==remote.text){local.text=remote.text;updated+=1;}
-        const ack=ackByBlock.get(remote.blockId);
-        if(ack)ack.text=remote.text;
-        continue;
-      }
-      const priorAck=ackByBlock.get(remote.blockId);
-      if(priorAck&&priorAck.text===remote.text)continue;
-      const item={id:newId('in'),text:remote.text,source:'feishu_doc',feishuBlockId:remote.blockId,createdAt:nowIso()};
-      state.inbox.unshift(item);
-      if(priorAck)Object.assign(priorAck,{text:remote.text,acknowledgedAt:nowIso()});
-      else state.inboxAcks.push({blockId:remote.blockId,text:remote.text,acknowledgedAt:nowIso()});
-      imported+=1;
-      addActivity(state,{type:'inbox_synced',inboxId:item.id,text:`从飞书收件箱同步：${compactText(remote.text,80)}`});
-    }
-    for(const local of state.inbox.filter(item=>item.source==='feishu_doc'&&item.feishuBlockId)){
-      if(!remoteByBlock.has(local.feishuBlockId)){
-        state.inbox=state.inbox.filter(item=>item.id!==local.id);
-        state.confirmations=state.confirmations.filter(item=>item.inboxId!==local.id);
-        removed+=1;
-        addActivity(state,{type:'inbox_removed_remote',inboxId:local.id,text:'飞书收件箱已删除一个未处理事项。'});
-      }
-    }
-  });
-  await store.updateConfig(current=>{
-    if(current.dataSource){
-      current.dataSource.lastRevisionId=fetched.revisionId===null?null:String(fetched.revisionId);
-      current.dataSource.lastSyncAt=nowIso();
-      current.dataSource.lastSyncStatus='ok';
-      current.dataSource.lastSyncError=null;
-      current.dataSource.lastImportedCount=fetched.items.length;
-    }
-    return structuredClone(current);
-  });
-  return feishuSyncSummary(await store.readConfig(),{imported,removed,updated,remoteCount:fetched.items.length,sectionFound:fetched.sectionFound});
-}
-
-export async function addInbox({store,text,source='manual',client=defaultFeishuJournalClient}){
-  if(!text?.trim())throw new Error('请输入内容');
-  const normalized=text.trim();
-  const config=await store.readConfig();
-  let remote=null;
-  if(source!=='feishu_doc'&&sourceConfigured(config.dataSource)){
-    remote=await client.appendAndFetch(config.dataSource,normalized);
-    source='feishu_doc';
-  }
-  const item={id:newId('in'),text:normalized,source,createdAt:nowIso(),...(remote?.item?.blockId?{feishuBlockId:remote.item.blockId}:{})};
-  await store.updateState(state=>{
-    const existing=remote?.item?.blockId&&state.inbox.find(candidate=>candidate.feishuBlockId===remote.item.blockId);
-    if(existing){Object.assign(existing,item,{id:existing.id});return;}
-    state.inbox.unshift(item);
-    if(item.feishuBlockId){
-      state.inboxAcks=Array.isArray(state.inboxAcks)?state.inboxAcks:[];
-      if(!state.inboxAcks.some(ack=>ack.blockId===item.feishuBlockId))state.inboxAcks.push({blockId:item.feishuBlockId,text:item.text,acknowledgedAt:nowIso()});
-    }
-    addActivity(state,{type:'inbox_captured',text:`收件箱新增：${compactText(item.text,80)}`,inboxId:item.id});
-  });
-  return item;
 }
 
 function projectCandidatesByCommand(state,command){
@@ -442,21 +339,6 @@ export async function morningChat({store,message,sessionId}){
     addActivity(current,{type:'morning_chat',text:'完成一次早晨工作对焦对话'});
   });
   return{sessionId:session.id,reply,candidates,mentionedIds:result?.mentionedIds||[]};
-}
-
-export async function setToday({store,todoId,add}){
-  if(typeof todoId!=='string'||!todoId.trim())throw badRequest('todoId 必须是非空字符串。');
-  if(typeof add!=='boolean')throw badRequest('add 必须是布尔值。');
-  return store.updateState(state=>{
-    const todo=state.todos.find(candidate=>candidate.id===todoId);
-    if(!todo)throw new Error('待办不存在');
-    const date=todayIso();
-    if(state.todayPlanDate!==date){state.todayPlan=[];state.todayPlanDate=date;}
-    if(add){if(!state.todayPlan.includes(todoId))state.todayPlan.push(todoId);}
-    else state.todayPlan=state.todayPlan.filter(id=>id!==todoId);
-    addActivity(state,{type:add?'today_added':'today_removed',todoId,text:`${add?'加入':'移出'}今日工作台：「${todo.title}」`});
-    return state.todayPlan;
-  });
 }
 
 export async function updateTodo({store,todoId,patch}){

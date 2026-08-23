@@ -1,6 +1,19 @@
 import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
-import * as core from './domain-core.mjs';
+import {
+  projectStatus,
+  deriveState as coreDeriveState,
+  updateWorkbenchConfig,
+  configureDataSource,
+  morningCandidates,
+  morningChat,
+  createBusiness,
+  renameBusiness,
+  deleteBusiness
+} from './workbench-core.mjs';
+import { processInbox, updateTodo } from './external-task-routing.mjs';
+import { setToday } from './today-domain.mjs';
+import { syncFeishuInbox, addInbox } from './inbox-domain.mjs';
 import { addActivity } from './store.mjs';
 import { classifyProjectDescription } from './ai.mjs';
 import {
@@ -26,19 +39,21 @@ import {
 } from './project-record-contract.mjs';
 import { withProjectSyncLease, withAllProjectSyncLease } from './project-sync-coordinator.mjs';
 
-export const projectStatus=core.projectStatus;
-export const updateWorkbenchConfig=core.updateWorkbenchConfig;
-export const configureDataSource=core.configureDataSource;
-export const syncFeishuInbox=core.syncFeishuInbox;
-export const addInbox=core.addInbox;
-export const processInbox=core.processInbox;
-export const morningCandidates=core.morningCandidates;
-export const morningChat=core.morningChat;
-export const setToday=core.setToday;
-export const updateTodo=core.updateTodo;
-export const createBusiness=core.createBusiness;
-export const renameBusiness=core.renameBusiness;
-export const deleteBusiness=core.deleteBusiness;
+export {
+  projectStatus,
+  updateWorkbenchConfig,
+  configureDataSource,
+  syncFeishuInbox,
+  addInbox,
+  processInbox,
+  morningCandidates,
+  morningChat,
+  setToday,
+  updateTodo,
+  createBusiness,
+  renameBusiness,
+  deleteBusiness
+};
 
 const defaultProjectRecordClient=createFeishuProjectRecordClient();
 const PROJECT_RECORD_CONFIRMATION_TYPES=new Set([
@@ -75,7 +90,7 @@ async function rollbackStage(stage,scope,error){
 }
 
 export function deriveState(appRoot,state,config,aiEnabled=false){
-  const derived=core.deriveState(appRoot,state,config,aiEnabled);
+  const derived=coreDeriveState(appRoot,state,config,aiEnabled);
   derived.projects=derived.projects.map(project=>{
     const machine=project.progress||{};
     const bound=projectRecordConfigured(project);

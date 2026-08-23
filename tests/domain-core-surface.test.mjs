@@ -5,12 +5,14 @@ import path from 'node:path';
 
 const root=path.resolve('.');
 
-test('domain-core explicitly exposes safe workbench and hash-only inbox functions',async()=>{
-  const core=await fsp.readFile(path.join(root,'src','domain-core.mjs'),'utf8');
-  assert.match(core,/from '\.\/workbench-core\.mjs'/);
-  assert.match(core,/export \{ syncFeishuInbox, addInbox \} from '\.\/inbox-domain\.mjs'/);
-  assert.doesNotMatch(core,/export \* from/);
-  assert.doesNotMatch(core,/function syncProject|function createProject|function updateProject|writeProjectMd|prepareProjectDir|analyzeProject/);
+test('domain.mjs imports directly from workbench-core, external-task-routing, today-domain and inbox-domain',async()=>{
+  const domain=await fsp.readFile(path.join(root,'src','domain.mjs'),'utf8');
+  assert.match(domain,/from '\.\/workbench-core\.mjs'/);
+  assert.match(domain,/from '\.\/external-task-routing\.mjs'/);
+  assert.match(domain,/from '\.\/today-domain\.mjs'/);
+  assert.match(domain,/from '\.\/inbox-domain\.mjs'/);
+  assert.doesNotMatch(domain,/from '\.\/domain-core\.mjs'/);
+  assert.doesNotMatch(domain,/export \* from/);
 });
 
 test('workbench-core contains no project creation, classification, update or sync implementation',async()=>{

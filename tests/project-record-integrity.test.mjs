@@ -403,9 +403,9 @@ test('project creation and later classification write identity-only PROJECT.md f
   assert.doesNotMatch(classifiedMd,/进度说明|当前卡点|上下文恢复|最近同步/);
 });
 
-test('legacy domain-core is not re-exported or imported by production entry points',async()=>{
+test('domain-core barrel file is removed and no production entry point imports it',async()=>{
   const domain=await fsp.readFile(path.join(PROJECT_ROOT,'src','domain.mjs'),'utf8');
-  assert.doesNotMatch(domain,/export\s+\*\s+from\s+['"]\.\/domain-core\.mjs/);
+  assert.doesNotMatch(domain,/domain-core/);
 
   const srcRoot=path.join(PROJECT_ROOT,'src');
   const imports=[];
@@ -422,5 +422,5 @@ test('legacy domain-core is not re-exported or imported by production entry poin
     }
   }
   await walk(srcRoot);
-  assert.deepEqual(imports,['src/domain.mjs']);
+  assert.deepEqual(imports,[]);
 });
