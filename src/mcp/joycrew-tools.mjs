@@ -15,7 +15,8 @@ function string(value,label){
   if(typeof value!=='string'||!value.trim())throw Object.assign(new Error(`${label}必须是非空字符串。`),{code:'MCP_TOOL_INVALID_ARGUMENT',statusCode:400});
   return value.trim();
 }
-function actionResult(action){return{action,message:`已生成操作预览 ${action.id}。请在“业务执行”页面确认；未确认前 Joycrew 不会改变。`,navigation:{view:'operations',id:null,modal:'none'}};}
+function actionResult(action){return{action,message:`已生成操作预览 ${action.id}。请在"业务执行"页面确认；未确认前 Joycrew 不会改变。`,navigation:{view:'operations',id:null,modal:'none'}};}
+function shellEscape(s){return `'${String(s).replace(/'/g,"'\\''")}'`;}
 
 const filterSchema={type:'object',additionalProperties:false,properties:{field:shortString,op:{type:'string',enum:FILTER_OPS},value:{}},required:['field','op','value']};
 const recordSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'records'},sourceId:shortString,entity:shortString,filters:{type:'array',maxItems:20,items:filterSchema}},required:['kind','sourceId','entity']};
@@ -125,7 +126,7 @@ export function createJoycrewTools({client,actions,crewCatalog=null}={}){
     descriptor({
       name:'crew_agent_dispatch',
       description:'向指定 AI 员工派单。当 Joycrew 可用时生成 Run 操作预览（需用户在业务执行页面确认）；当 Joycrew 不可用时返回 codex 派单命令供用户复制执行。',
-      inputSchema:{type:'object',additionalProperties:false,properties:{agentId:shortString,task:{type:'string',minLength:3,maxLength:4000},projectId:optionalString,sources:{type:'array',maxItems:20,items:{anyOf:[recordSourceSchema,fileSourceSchema]}}},required:['agentId','task']},
+      inputSchema:{type:'object',additionalProperties:false,properties:{agentId:{type:'string',minLength:1,maxLength:180,pattern:'^[A-Za-z0-9][A-Za-z0-9_-]*$'},task:{type:'string',minLength:3,maxLength:4000},projectId:optionalString,sources:{type:'array',maxItems:20,items:{anyOf:[recordSourceSchema,fileSourceSchema]}}},required:['agentId','task']},
       execute:async(_context,args)=>{
         const input=object(args);
         const agentId=string(input.agentId,'agentId');
@@ -134,8 +135,8 @@ export function createJoycrewTools({client,actions,crewCatalog=null}={}){
         if(input.projectId&&Array.isArray(input.sources)&&input.sources.length>0){
           return actionResult(actions.prepare('run.create',{projectId:input.projectId,employeeId:agentId,task,sources:input.sources},{source:'harness-navigator'}));
         }
-        // Joycrew 不可用或缺少必填参数时，返回 codex 派单命令
-        return{message:`Joycrew 不可用或缺少 projectId/sources 参数。请在终端执行以下命令派单：`,command:`codex exec --agent ${agentId} "${task.replace(/"/g,'\\"')}"`};
+        // Joycrew 不可用或缺少必填参数时，返回 codex 派单命令（单引号转义防止命令注入）
+        return{message:`Joycrew 不可用或缺少 projectId/sources 参数。请在终端检查并执行以下命令派单：`,command:`codex exec --agent ${shellEscape(agentId)} ${shellEscape(task)}`};
       }
     })
   ];

@@ -109,13 +109,12 @@ function stripGenUI(text){
   return text.replace(/```dsh-ui\n[\s\S]*?```/g,'');
 }
 
-/* ─── 会话持久化 ─── */
-const STORAGE_KEY='dsh-navigator-sessions';
+/* ─── 会话管理（内存模式，不做客户端持久化） ─── */
 function loadSessions(){
-  try{const raw=localStorage.getItem(STORAGE_KEY);if(!raw)return[];const data=JSON.parse(raw);return Array.isArray(data)?data:[];}catch{return[];}
+  return [];
 }
 function saveSessions(){
-  try{const trimmed=navigatorState.sessions.slice(-30);localStorage.setItem(STORAGE_KEY,JSON.stringify(trimmed));}catch{}
+  /* no-op: 会话状态仅保存在模块内存中，不写入客户端存储 */
 }
 function createSession(title){
   const now=Date.now();

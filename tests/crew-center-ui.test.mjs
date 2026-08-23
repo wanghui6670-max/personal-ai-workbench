@@ -15,9 +15,12 @@ test('crew center is wired as a read-only authenticated catalog surface',async()
   assert.doesNotMatch(source,/method:\s*['"](?:POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(source,/document\.cookie|indexedDB/);
   assert.doesNotMatch(source,/process\.env|LARK_|FEISHU_|OPENAI_API_KEY/);
-  const authGate=server.indexOf("if(pathname.startsWith('/api/')&&!isAuthenticated(req))");
+  const authGate=server.indexOf("if(pathname.startsWith('/api/')&&!isAuthenticated(req, storeAdapter))")>=0
+    ?server.indexOf("if(pathname.startsWith('/api/')&&!isAuthenticated(req, storeAdapter))")
+    :server.indexOf("if(pathname.startsWith('/api/')&&!isAuthenticated(req))");
+  assert.ok(authGate>=0,'必须存在 API 登录门');
   const crewRoute=server.indexOf("if(pathname==='/api/crew'&&req.method==='GET')");
-  assert.ok(authGate>=0&&crewRoute>authGate,'Crew API 必须位于现有登录门之后');
+  assert.ok(crewRoute>authGate,'Crew API 必须位于现有登录门之后');
   assert.match(server.slice(crewRoute,crewRoute+240),/rateLimited\(req,res,'crew'\)/);
   assert.doesNotMatch(catalog,/registerCrewCatalogRoutes/);
 });

@@ -165,8 +165,46 @@ test('crew_agent_dispatch 仅传 agentId+task 时返回 codex 命令', async () 
   const result = await tool.execute({}, { agentId: 'daily_coordinator', task: '生成今日工作总结' });
   assert.ok(result.message, '应返回 message');
   assert.ok(result.command, '应返回 command');
-  assert.match(result.command, /codex exec --agent daily_coordinator/);
-  assert.match(result.command, /生成今日工作总结/);
+  assert.match(result.command, /codex exec --agent 'daily_coordinator'/);
+  assert.match(result.command, /'生成今日工作总结'/);
+});
+
+test('crew_agent_dispatch task 含单引号时 shell 转义正确', async () => {
+  const tools = createJoycrewTools({
+    client: mockJoycrewClient(),
+    actions: mockJoycrewActions(),
+    crewCatalog: mockCrewCatalog(sampleAgents),
+  });
+  const tool = tools.find(t => t.name === 'crew_agent_dispatch');
+  const result = await tool.execute({}, { agentId: 'daily_coordinator', task: "it's a test" });
+  // shellEscape 将单引号转义为 '\''，整体用单引号包裹
+  assert.match(result.command, /'it'\\''s a test'/, "单引号应被 shell 转义");
+  // 确保不存在未转义的命令注入点
+  assert.ok(!result.command.includes(';'), '命令中不应含分号');
+  assert.ok(!result.command.includes('`'), '命令中不应含反引号');
+  assert.ok(!result.command.includes('$'), '命令中不应含美元符号');
+});
+
+test('crew_agent_dispatch agentId schema 含 pattern 约束', () => {
+  const tools = createJoycrewTools({
+    client: mockJoycrewClient(),
+    actions: mockJoycrewActions(),
+    crewCatalog: mockCrewCatalog(sampleAgents),
+  });
+  const tool = tools.find(t => t.name === 'crew_agent_dispatch');
+  const agentIdSchema = tool.inputSchema.properties.agentId;
+  assert.ok(agentIdSchema.pattern, 'agentId 应有 pattern 约束');
+  assert.ok(agentIdSchema.pattern.startsWith('^'), 'pattern 应以 ^ 锚定开头');
+  assert.ok(agentIdSchema.pattern.endsWith('$'), 'pattern 应以 $ 锚定结尾');
+  // 验证 pattern 拒绝危险字符
+  const pattern = new RegExp(agentIdSchema.pattern);
+  assert.ok(pattern.test('daily_coordinator'), '合法 ID 应通过');
+  assert.ok(pattern.test('finance-ops'), '含连字符应通过');
+  assert.ok(!pattern.test('foo;bar'), '含分号应拒绝');
+  assert.ok(!pattern.test('foo bar'), '含空格应拒绝');
+  assert.ok(!pattern.test('$(cmd)'), '含命令替换应拒绝');
+  assert.ok(!pattern.test('; rm -rf'), '命令注入应拒绝');
+  assert.ok(!pattern.test('.daily'), '以点开头应拒绝');
 });
 
 test('crew_agent_dispatch 传 projectId+sources 时生成 action 预览', async () => {
