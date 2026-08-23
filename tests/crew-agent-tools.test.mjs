@@ -207,6 +207,24 @@ test('crew_agent_dispatch agentId schema 含 pattern 约束', () => {
   assert.ok(!pattern.test('.daily'), '以点开头应拒绝');
 });
 
+test('crew_agent_dispatch execute 层 defense-in-depth: 恶意 agentId 被拦截', async () => {
+  const tools = createJoycrewTools({
+    client: mockJoycrewClient(),
+    actions: mockJoycrewActions(),
+    crewCatalog: mockCrewCatalog(sampleAgents),
+  });
+  const tool = tools.find(t => t.name === 'crew_agent_dispatch');
+  // 即使绕过 schema 层直接调用 execute，恶意 agentId 仍应被拦截
+  const maliciousIds = ['foo;bar', 'foo bar', '$(cmd)', '; rm -rf', 'foo`whoami`', 'foo$(whoami)'];
+  for (const id of maliciousIds) {
+    await assert.rejects(
+      () => tool.execute({}, { agentId: id, task: 'test task' }),
+      /agentId/,
+      `恶意 agentId "${id}" 应在 execute 层被拦截`,
+    );
+  }
+});
+
 test('crew_agent_dispatch 传 projectId+sources 时生成 action 预览', async () => {
   const actions = mockJoycrewActions();
   const tools = createJoycrewTools({

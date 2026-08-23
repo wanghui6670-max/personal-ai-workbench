@@ -17,6 +17,7 @@ function string(value,label){
 }
 function actionResult(action){return{action,message:`已生成操作预览 ${action.id}。请在"业务执行"页面确认；未确认前 Joycrew 不会改变。`,navigation:{view:'operations',id:null,modal:'none'}};}
 function shellEscape(s){return `'${String(s).replace(/'/g,"'\\''")}'`;}
+const AGENT_ID_PATTERN=/^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 const filterSchema={type:'object',additionalProperties:false,properties:{field:shortString,op:{type:'string',enum:FILTER_OPS},value:{}},required:['field','op','value']};
 const recordSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'records'},sourceId:shortString,entity:shortString,filters:{type:'array',maxItems:20,items:filterSchema}},required:['kind','sourceId','entity']};
@@ -131,6 +132,8 @@ export function createJoycrewTools({client,actions,crewCatalog=null}={}){
         const input=object(args);
         const agentId=string(input.agentId,'agentId');
         const task=string(input.task,'task');
+        // defense-in-depth: execute 层再次校验 agentId pattern，防止绕过 schema 层
+        if(!AGENT_ID_PATTERN.test(agentId))throw Object.assign(new Error('agentId 只允许字母、数字、下划线和连字符，且以字母或数字开头。'),{code:'MCP_TOOL_INVALID_ARGUMENT',statusCode:400});
         // 优先尝试 Joycrew Run（如果提供了 projectId 和 sources）
         if(input.projectId&&Array.isArray(input.sources)&&input.sources.length>0){
           return actionResult(actions.prepare('run.create',{projectId:input.projectId,employeeId:agentId,task,sources:input.sources},{source:'harness-navigator'}));
