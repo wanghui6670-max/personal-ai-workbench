@@ -85,7 +85,7 @@ export function evaluateHostDoctorReport(report){
   });
 }
 
-export function validateHostBinding({appRoot,dataDir,workspaceRoot,host='127.0.0.1',port='4173',joycrewEnabled='0',requireJoycrewDisabled=true}={}){
+export function validateHostBinding({appRoot,dataDir,workspaceRoot,host='127.0.0.1',port='4173',joycrewEnabled='0',requireJoycrewDisabled=true,joycrewNetworkZone='',joycrewBaseUrl=''}={}){
   const app=path.resolve(String(appRoot||''));
   const data=String(dataDir||'').trim();
   const workspace=String(workspaceRoot||'').trim();
@@ -100,8 +100,12 @@ export function validateHostBinding({appRoot,dataDir,workspaceRoot,host='127.0.0
   if(!['127.0.0.1','localhost','::1'].includes(normalizedHost)){
     throw Object.assign(new Error('真实主机 P0 只允许绑定 localhost；远程访问在现场验收后再配置。'),{code:'HOST_P0_LOOPBACK_REQUIRED'});
   }
-  if(requireJoycrewDisabled&&booleanEnabled(joycrewEnabled)){
-    throw Object.assign(new Error('真实主机 P0 必须保持 JOYCREW_ENABLED=0。'),{code:'HOST_P0_JOYCREW_MUST_BE_DISABLED'});
+  // Joycrew 安全策略：仅允许 local_loopback 模式下在本机启用 Joycrew 连接
+  const isLoopbackZone=String(joycrewNetworkZone||'').trim()==='local_loopback';
+  const isLoopbackUrl=/^https?:\/\/(127\.0\.0\.1|localhost|\[?::1\]?)(:\d+)?(\/.*)?$/.test(String(joycrewBaseUrl||'').trim());
+  const joycrewLoopbackSafe=isLoopbackZone&&isLoopbackUrl;
+  if(requireJoycrewDisabled&&booleanEnabled(joycrewEnabled)&&!joycrewLoopbackSafe){
+    throw Object.assign(new Error('真实主机 P0 必须保持 JOYCREW_ENABLED=0，除非 Joycrew 使用 local_loopback 且连接地址为本机回环。'),{code:'HOST_P0_JOYCREW_MUST_BE_DISABLED'});
   }
   return Object.freeze({
     appRoot:app,

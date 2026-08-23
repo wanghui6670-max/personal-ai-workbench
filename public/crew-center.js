@@ -91,10 +91,11 @@ function agentCard(a){
   const fav=favoriteKeys();
   const id=`agent:${a.id}`;
   const star=fav.has(id)?'★':'☆';
+  const displayName=a.title||a.name;
   return `<div class="crew-agent">
-    <div class="crew-agent-top"><div><div class="crew-agent-name">${esc(a.name)}</div><div class="crew-agent-meta">${riskBadge(a.risk)}${sandboxBadge(a.sandbox)}<span class="pill">${esc(a.file)}</span></div></div><button class="crew-star" data-crew-action="fav" data-key="${attr(id)}" title="常用置顶">${star}</button></div>
+    <div class="crew-agent-top"><div><div class="crew-agent-name">${esc(displayName)}</div><div class="crew-agent-meta">${riskBadge(a.risk)}${sandboxBadge(a.sandbox)}<span class="pill">${esc(a.name)}</span></div></div><button class="crew-star" data-crew-action="fav" data-key="${attr(id)}" title="常用置顶">${star}</button></div>
     <div class="crew-agent-desc">${esc(a.description||'（无岗位描述）')}</div>
-    <div class="crew-actions"><button class="btn small" data-crew-action="copy-path" data-path="${attr(a.path)}">复制岗位文件路径</button><button class="btn small" data-crew-action="copy-dispatch" data-name="${attr(a.name)}" data-id="${attr(a.id)}">复制派单命令</button></div>
+    <div class="crew-actions"><button class="btn small" data-crew-action="copy-path" data-path="${attr(a.path)}">复制岗位文件路径</button><button class="btn small" data-crew-action="copy-dispatch" data-name="${attr(displayName)}" data-id="${attr(a.id)}">复制派单命令</button></div>
   </div>`;
 }
 function agentsByDept(agents){

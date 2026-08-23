@@ -88,7 +88,9 @@ async function currentBinding({requireJoycrewDisabled=false}={}){
     host:process.env.HOST||'127.0.0.1',
     port:process.env.PORT||'4173',
     joycrewEnabled:process.env.JOYCREW_ENABLED||'0',
-    requireJoycrewDisabled
+    requireJoycrewDisabled,
+    joycrewNetworkZone:process.env.JOYCREW_NETWORK_ZONE||'',
+    joycrewBaseUrl:process.env.JOYCREW_BASE_URL||''
   });
   const [realApp,realData,realWorkspace]=await Promise.all([fsp.realpath(binding.appRoot),fsp.realpath(binding.dataDir),fsp.realpath(binding.workspaceRoot)]);
   return{...binding,appRoot:realApp,dataDir:realData,workspaceRoot:realWorkspace};

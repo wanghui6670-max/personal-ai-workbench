@@ -34,12 +34,18 @@ function parseFrontmatter(text) {
 }
 
 // 从 TOML 提取字段：name / description / sandbox_mode 为单行引号；dept / risk 从 developer_instructions 中文段取
+// title 从 description 开头提取（第一个句号前的内容），即岗位名
 function parseAgentToml(text) {
   const field = (key) => (text.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, 'm')) || [])[1]?.trim() || '';
   const line = (key) => (text.match(new RegExp(`${key}[:：]\\s*([^\\n]+)`, 'm')) || [])[1]?.trim() || '';
+  const description = field('description');
+  // 岗位名 = description 第一个句号前的内容（如"AI日终复盘与任务推进助理"）
+  const titleMatch = description.match(/^([^。]+)。/);
+  const title = titleMatch ? titleMatch[1].trim() : '';
   return {
     name: field('name'),
-    description: field('description'),
+    title,  // 岗位名（从 description 提取）
+    description,
     sandbox: field('sandbox_mode'),
     dept: line('部门') || '未标部门',
     risk: line('风险等级') || '未标风险',

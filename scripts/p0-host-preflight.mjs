@@ -111,7 +111,9 @@ try{
     workspaceRoot:process.env.WORKSPACE_ROOT,
     host:process.env.HOST||'127.0.0.1',
     port:process.env.PORT||'4173',
-    joycrewEnabled:process.env.JOYCREW_ENABLED||'0'
+    joycrewEnabled:process.env.JOYCREW_ENABLED||'0',
+    joycrewNetworkZone:process.env.JOYCREW_NETWORK_ZONE||'',
+    joycrewBaseUrl:process.env.JOYCREW_BASE_URL||''
   });
   if(!relativeInside(binding.dataDir,reportPath))throw new Error('P0 报告必须保存在 DATA_DIR 内，避免误提交到 Git。');
   await fsp.mkdir(binding.dataDir,{recursive:true,mode:0o700});

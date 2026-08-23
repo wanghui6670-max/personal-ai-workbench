@@ -21,7 +21,13 @@ test('real-host binding requires explicit separate paths, localhost, and Joycrew
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/same',workspaceRoot:'/same'}),/彼此独立/);
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/data/work'}),/彼此独立/);
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',host:'0.0.0.0'}),/只允许绑定 localhost/);
+  // Joycrew enabled without loopback safety → rejected
   assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',joycrewEnabled:'1'}),/JOYCREW_ENABLED=0/);
+  // Joycrew enabled with local_loopback + loopback URL → allowed
+  assert.doesNotThrow(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',joycrewEnabled:'1',joycrewNetworkZone:'local_loopback',joycrewBaseUrl:'http://127.0.0.1:4000'}));
+  // Joycrew enabled with local_loopback but non-loopback URL → rejected
+  assert.throws(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',joycrewEnabled:'1',joycrewNetworkZone:'local_loopback',joycrewBaseUrl:'http://192.168.1.100:4000'}),/JOYCREW_ENABLED=0/);
+  // requireJoycrewDisabled=false always allows
   assert.doesNotThrow(()=>validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',joycrewEnabled:'1',requireJoycrewDisabled:false}));
   assert.deepEqual(validateHostBinding({appRoot:'/app',dataDir:'/data',workspaceRoot:'/work',host:'localhost',port:'44173',joycrewEnabled:'0'}),{
     appRoot:path.resolve('/app'),dataDir:path.resolve('/data'),workspaceRoot:path.resolve('/work'),host:'127.0.0.1',port:44173
