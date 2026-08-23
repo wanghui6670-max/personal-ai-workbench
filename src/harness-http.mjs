@@ -164,8 +164,8 @@ export function createHarnessHttp({
         if(userCtx?.driver)activeDriver=userCtx.driver;
       }
       const result=activeDriver
-        ?await activeDriver.run({message:body.message,sessionId:body.sessionId??null,route})
-        :await navigator.run({message:body.message,sessionId:body.sessionId??null,route});
+        ?await activeDriver.run({message:body.message,sessionId:body.sessionId??null,route,userId})
+        :await navigator.run({message:body.message,sessionId:body.sessionId??null,route,userId});
       sendJson(res,200,{ok:true,navigator:result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;
     }

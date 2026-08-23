@@ -283,10 +283,21 @@ export class JoycrewClient{
   }
 
   async overview(){
-    const [health,meta,bootstrap,dashboard,customers,tasks]=await Promise.all([
+    const [health,meta,bootstrap,dashboard,customers,tasks]=await Promise.allSettled([
       this.health(),this.meta(),this.bootstrap(),this.dashboard(),this.customers(),this.tasks()
     ]);
-    return {health,meta,bootstrap,dashboard,customers:customers.customers||[],tasks:tasks.tasks||[],fetchedAt:new Date(this.now()).toISOString()};
+    return {
+      health:health.status==='fulfilled'?health.value:null,
+      meta:meta.status==='fulfilled'?meta.value:null,
+      bootstrap:bootstrap.status==='fulfilled'?bootstrap.value:null,
+      dashboard:dashboard.status==='fulfilled'?dashboard.value:null,
+      customers:customers.status==='fulfilled'?(customers.value?.customers||[]):[],
+      tasks:tasks.status==='fulfilled'?(tasks.value?.tasks||[]):[],
+      errors:[health,meta,bootstrap,dashboard,customers,tasks]
+        .filter(r=>r.status==='rejected')
+        .map(r=>String(r.reason?.message||r.reason||'unknown')),
+      fetchedAt:new Date(this.now()).toISOString()
+    };
   }
 }
 

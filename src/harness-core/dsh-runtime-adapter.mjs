@@ -16,11 +16,11 @@ export function createDshRuntimeAdapter({navigator}={}){
   return defineRuntimeAdapter({
     name:'dsh',
     status:()=>navigator.status(),
-    async run({message,sessionId=null,context={},route=null}={}){
+    async run({message,sessionId=null,context={},route=null,userId=null}={}){
       // contextAwareDriver 传的是 context（已包含 route 展开的字段）；
       // harness-http 直接传 route 的情况也兼容。
       const finalRoute=route||contextToRoute(context);
-      const result=await navigator.run({message,sessionId,route:finalRoute});
+      const result=await navigator.run({message,sessionId,route:finalRoute,userId});
       return {
         sessionId:String(result.sessionId||''),
         reply:result.reply,

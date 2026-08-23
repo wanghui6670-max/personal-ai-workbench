@@ -10,6 +10,7 @@
  * - updateState/updateConfig 的 mutator 模式保持不变，内部改为 SQLite 事务
  */
 import { nowIso, todayIso } from './utils.mjs';
+import fsp from 'node:fs/promises';
 import { validateState, validateConfig, validateStateConfigReferences, validateStateInput } from './validation.mjs';
 import { stripNarrativeProgress } from './project-record-policy.mjs';
 import { normalizeInboxAcks } from './inbox-ack.mjs';
@@ -128,6 +129,7 @@ export class SqliteStore {
       // Activities
       listActivities: db.prepare('SELECT at, type, text, projectId, todoId, inboxId FROM activities WHERE userId = ? ORDER BY at DESC LIMIT 2000'),
       insertActivity: db.prepare(`INSERT INTO activities (id, userId, at, type, text, projectId, todoId, inboxId) VALUES (@id, @userId, @at, @type, @text, @projectId, @todoId, @inboxId)`),
+      deleteActivities: db.prepare('DELETE FROM activities WHERE userId = ?'),
       pruneActivitiesBefore: db.prepare('DELETE FROM activities WHERE at < ?'),
 
       // Notes
@@ -515,11 +517,11 @@ export class SqliteStore {
   }
 
   _replaceActivities(userId, activities) {
-    // Activities 用追加模式，这里只在迁移时全量写入
-    // 运行时通过 addActivity 增量插入
+    // 先删除当前用户的所有活动，再插入，避免每次 writeState 导致活动表指数增长
+    this._stmts.deleteActivities.run(userId);
     for (const activity of activities) {
       this._stmts.insertActivity.run({
-        id: `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
+        id: activity.id || `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,
         userId,
         at: activity.at || nowIso(),
         type: activity.type || '',
@@ -682,9 +684,12 @@ export class SqliteStore {
       config
     };
     const backupPath = `${this.backupDir}/user-${userId}-${todayIso()}.json`;
-    const fsp = require('fs').promises;
-    fsp.mkdir(this.backupDir, { recursive: true }).catch(() => {});
-    fsp.writeFile(backupPath, JSON.stringify(backupPayload, null, 2)).catch(() => {});
+    fsp.mkdir(this.backupDir, { recursive: true }).catch(err => {
+      console.error('[backupNow] mkdir failed:', err);
+    });
+    fsp.writeFile(backupPath, JSON.stringify(backupPayload, null, 2)).catch(err => {
+      console.error('[backupNow] writeFile failed:', err);
+    });
     return backupPath;
   }
 

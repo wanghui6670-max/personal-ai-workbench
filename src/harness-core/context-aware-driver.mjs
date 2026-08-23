@@ -43,7 +43,7 @@ export function createContextAwareDriver({sessionManager,runtime,runScope=null,u
     }
     const scopeToken=runScope?.enter(trustedSessionRef,userId)??null;
     try{
-      const result=await runtime.run({message,sessionId,context});
+      const result=await runtime.run({message,sessionId,context,userId});
       return {...result,readOnly:true,working};
     }finally{
       if(scopeToken)runScope.leave(scopeToken);
