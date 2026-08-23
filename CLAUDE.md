@@ -79,6 +79,14 @@ getnote auth status
 - 合同测试覆盖：GetNote 命令与分页、稳定 ID、日期/完成语义、dida 迁移、飞书读回/冲突、ICS、MCP 确认门、doctor、既有 Capture/项目/备份。
 - 不在 PR 里声称 live GetNote / 飞书 / 日历客户端 / 模型供应商 / iPhone 已验收，除非这次真的接了真实凭证并跑过。
 
+### MCP 工具安全规则
+
+- 工具参数如拼入 shell 命令（如 `codex exec --agent <id> <task>`），必须用 `shellEscape()` 单引号转义，禁止用双引号 `replace(/"/g,'\\"')`（双引号内 `$()`、反引号、`!` 仍可注入）。
+- 工具的 `inputSchema` 中用户可控字符串字段应加 `pattern` 约束（如 `^[A-Za-z0-9][A-Za-z0-9_-]*$`），不要只限制长度。
+- 修改 `HARNESS_NAVIGATOR_TOOL_ALLOWLIST` 后，必须同步更新所有引用白名单长度的测试断言（`harness-static-contract.test.mjs`、`harness-policy-v2.test.mjs` 等）。
+- 浏览器端 `public/harness-navigator.js` 禁止使用 `localStorage`/`sessionStorage`/`indexedDB`——会话状态只保存在模块内存中。
+- 新增工具需在 `crew-agent-tools.test.mjs` 补充测试：正常路径 + 安全边界（特殊字符、空值、注入尝试）。
+
 ## 红线
 
 - 不自动分类 Inbox、不自动改截止日期、不自动加入今日。
