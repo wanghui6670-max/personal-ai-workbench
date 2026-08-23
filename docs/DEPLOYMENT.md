@@ -167,7 +167,18 @@ git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-数据库 schema 通过 `CREATE TABLE IF NOT EXISTS` 自动迁移，无需额外操作。
+数据库 schema 通过 `_schema_version` 版本管理自动迁移，启动时自动执行未完成的迁移，无需额外操作。可用 `node scripts/db-info.mjs` 查看数据库状态和版本。
+
+## 7. Joycrew 部署（可选）
+
+Joycrew 是企业级 AI 员工业务执行服务，与 Workbench 联合部署。详细部署指南见 [Joycrew 部署指南](./JOYCREW_DEPLOYMENT.md)。
+
+快速启动：
+
+```bash
+# 确保 .env 中 JOYCREW_ENABLED=1 + Token 配置
+docker compose -f docker-compose.yml -f docker-compose.joycrew.yml up -d --build
+```
 
 ## 6. 故障排查
 

@@ -1,0 +1,97 @@
+# Joycrew 服务编排 — PostgreSQL + Joycrew API
+#
+# 使用方式：
+#   1. 确认 .env 中 Joycrew 配置已填写（JOYCREW_TRUSTED_PROXY_TOKEN 等）
+#   2. docker compose -f docker-compose.joycrew.yml up -d
+#   3. 等待 PostgreSQL 初始化完成（首次约 10-30 秒）
+#   4. 访问 http://127.0.0.1:4000/health 验证 Joycrew API 健康
+#   5. 在 Workbench .env 中设置 JOYCREW_ENABLED=1 并重启 Workbench
+#
+# 与 Workbench 联合部署（推荐）：
+#   docker compose -f docker-compose.yml -f docker-compose.joycrew.yml up -d --build
+#
+# 网络：
+#   - joycrew-net 内部网络，Workbench 通过 host.docker.internal 或 service name 访问
+#   - PostgreSQL 不直接暴露端口，仅 Joycrew API 可访问
+
+services:
+  # ── PostgreSQL 数据库 ──
+  # Joycrew 的所有业务数据（Project/Employee/Run/Evidence/Approval/Deliverable）
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${JOYCREW_DB_NAME:-joycrew}
+      POSTGRES_USER: ${JOYCREW_DB_USER:-joycrew}
+      POSTGRES_PASSWORD: ${JOYCREW_DB_PASSWORD:-joycrew_secret_change_me}
+    volumes:
+      - joycrew-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${JOYCREW_DB_USER:-joycrew} -d ${JOYCREW_DB_NAME:-joycrew}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    restart: unless-stopped
+    networks:
+      - joycrew-net
+
+  # ── Joycrew API 服务 ──
+  # 企业业务执行服务：项目管理、AI 员工、Run 生命周期、审批与交付
+  # Dockerfile.joycrew 需由 Joycrew 仓库提供（见 docs/JOYCREW_DEPLOYMENT.md）
+  joycrew-api:
+    build:
+      context: ${JOYCREW_SOURCE_PATH:-../joycrew}
+      dockerfile: Dockerfile
+    environment:
+      # 数据库连接
+      DATABASE_URL: postgresql://${JOYCREW_DB_USER:-joycrew}:${JOYCREW_DB_PASSWORD:-joycrew_secret_change_me}@postgres:5432/${JOYCREW_DB_NAME:-joycrew}
+      # 服务监听
+      HOST: 0.0.0.0
+      PORT: 4000
+      # 认证模式：trusted_proxy 模式下，Workbench 通过 x-joycrew-proxy-token 调用
+      JOYCREW_AUTH_MODE: trusted_proxy
+      JOYCREW_PROXY_TOKEN: ${JOYCREW_TRUSTED_PROXY_TOKEN}
+      # 工作空间（首次启动时自动创建）
+      JOYCREW_DEFAULT_WORKSPACE_ID: ${JOYCREW_WORKSPACE_ID:-ws-dongjue}
+      # DataWeave 配置（按需）
+      # JOYCREW_DATAWEAVE_URL=http://host.docker.internal:4400
+      # JOYCREW_DATAWEAVE_TOKEN=
+      # AI Runtime 配置（按需，Mock 或真实）
+      # JOYCREW_RUNTIME_MODE=mock
+      # JOYCREW_HERMES_URL=
+      # JOYCREW_HERMES_TOKEN=
+    ports:
+      - "${JOYCREW_BIND_ADDRESS:-127.0.0.1}:${JOYCREW_PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    restart: unless-stopped
+    networks:
+      - joycrew-net
+    # 允许容器内访问宿主机上的 DataWeave 或其他服务
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  joycrew-pgdata:
+    driver: local
+
+networks:
+  joycrew-net:
+    driver: bridge

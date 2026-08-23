@@ -152,19 +152,18 @@ DSH Copilot：harnessRunScope 绑定当前用户 → scopedStore
 
 ---
 
-## 阶段四：Joycrew 部署规划（P3 后续）
+## 阶段四：Joycrew 部署（P3 进行中）
 
 > 目标：在投标业务流程跑通后，引入企业级 AI 员工业务执行能力。
-> 前置条件：阶段一~三完成，团队在云部署环境下稳定运行至少 2 周。
+> 前置条件：阶段一~三完成 ✅，团队在云部署环境下稳定运行至少 2 周。
 
-### 4.1 Joycrew 服务部署
+### 4.1 Joycrew 服务部署 ✅
 
-- PostgreSQL 部署（Docker）
-- DataWeave 部署
-- Joycrew API 部署（Docker）
-- `JOYCREW_ENABLED=1` + 认证配置
-- **新建**：`docker-compose.joycrew.yml`、`docs/JOYCREW_DEPLOYMENT.md`
-- **复杂度**：XL
+- PostgreSQL 16 部署（Docker）— `docker-compose.joycrew.yml` ✅
+- Joycrew API 部署（Docker）— `docker-compose.joycrew.yml` ✅
+- `JOYCREW_ENABLED=1` + 认证配置 — `.env.example` 已文档化 ✅
+- **已创建**：`docker-compose.joycrew.yml`、`docs/JOYCREW_DEPLOYMENT.md`
+- **复杂度**：XL → 已完成编排与文档，实际部署需 Joycrew 源码
 
 ### 4.2 投标业务流程建模
 
@@ -172,15 +171,16 @@ DSH Copilot：harnessRunScope 绑定当前用户 → scopedStore
 - 建立企业项目（招标项目）
 - 配置 AI 员工和 Skill
 - 定义 Run 流程（商机调研 → 评分分析 → 竞品分析 → 方案起草）
-- **复杂度**：XL（业务设计 + 技术实现）
+- **状态**：已在 `docs/JOYCREW_DEPLOYMENT.md` 中规划典型流程
+- **复杂度**：XL（业务设计 + 技术实现）— 待实际 Joycrew 实例后执行
 
 ### 4.3 Joycrew 与工作台联调
 
-- `/api/joycrew/status` 实时探测
-- 业务执行页联调
-- Harness Copilot Joycrew 工具联调
-- Pilot 验证（Mock Runtime → 真实 Run）
-- **复杂度**：L
+- `/api/joycrew/status` 实时探测 ✅（已实现）
+- 业务执行页联调 — 已实现前端 `joycrew-integration.js` ✅
+- Harness Copilot Joycrew 工具联调 — 已实现 MCP 工具桥接 ✅
+- Pilot 验证（Mock Runtime → 真实 Run）— 待实际 Joycrew 实例后执行
+- **复杂度**：L — 客户端集成已完成，联调待部署
 
 ---
 
