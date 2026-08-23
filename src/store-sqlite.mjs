@@ -128,6 +128,7 @@ export class SqliteStore {
       // Activities
       listActivities: db.prepare('SELECT at, type, text, projectId, todoId, inboxId FROM activities WHERE userId = ? ORDER BY at DESC LIMIT 2000'),
       insertActivity: db.prepare(`INSERT INTO activities (id, userId, at, type, text, projectId, todoId, inboxId) VALUES (@id, @userId, @at, @type, @text, @projectId, @todoId, @inboxId)`),
+      pruneActivitiesBefore: db.prepare('DELETE FROM activities WHERE at < ?'),
 
       // Notes
       listNotes: db.prepare('SELECT id, text, projectId, createdAt FROM notes WHERE userId = ? ORDER BY createdAt DESC'),
@@ -287,6 +288,24 @@ export class SqliteStore {
       todoId: activity.todoId || null,
       inboxId: activity.inboxId || null
     });
+  }
+
+  /**
+   * 清理过期活动日志（TTL 清理）
+   * @param {string} beforeIso - ISO 时间戳，早于此时间的记录将被删除
+   * @returns {number} 删除的行数
+   */
+  pruneActivities(beforeIso) {
+    const info = this._stmts.pruneActivitiesBefore.run(beforeIso);
+    return info.changes;
+  }
+
+  /**
+   * 执行 VACUUM 回收空间
+   * 注意：VACUUM 会锁定数据库，应在低峰期执行
+   */
+  vacuum() {
+    this.db.exec('VACUUM');
   }
 
   deleteConfirmation(userId, id) {

@@ -600,7 +600,12 @@ const server=http.createServer(async(req,rawRes)=>{
   }
 });
 
-server.on('close',()=>{void harnessNavigator.close();});
+server.on('close',()=>{
+  void harnessNavigator.close();
+  // 清理定时器
+  if(maintenanceTimer)clearInterval(maintenanceTimer);
+  if(vacuumTimer)clearInterval(vacuumTimer);
+});
 
 const config=initialConfig;
 server.listen(port,host,()=>{
@@ -619,5 +624,42 @@ server.listen(port,host,()=>{
   console.log(`Joycrew: ${joycrewStatus.configured?`${joycrewConfig.baseUrl} · ${joycrewStatus.authMode} · configured (not live-verified)`:`${joycrewStatus.reason||'disabled'}`}`);
   console.log(`Auth: ${authEnabled()?(isMultiUserMode()?'multi-user (JWT)':'password enabled'):'disabled (localhost recommended)'}`);
 });
+
+// ========== 数据库维护定时器 ==========
+// 活动日志 TTL 清理：每 6 小时清理 90 天前的记录
+// VACUUM：每 7 天执行一次回收空间
+const ACTIVITY_TTL_DAYS=90;
+const PRUNE_INTERVAL_MS=6*60*60*1000;     // 6 小时
+const VACUUM_INTERVAL_MS=7*24*60*60*1000; // 7 天
+
+function pruneOldActivities(){
+  if(storeAdapter.backend!=='sqlite')return;
+  const cutoff=new Date(Date.now()-ACTIVITY_TTL_DAYS*24*60*60*1000).toISOString();
+  try{
+    const deleted=storeAdapter.raw.pruneActivities(cutoff);
+    if(deleted>0)console.log(`[maintenance] 清理 ${deleted} 条过期活动日志（>${ACTIVITY_TTL_DAYS}天）`);
+  }catch(e){
+    console.error('[maintenance] 活动日志清理失败:',e.message);
+  }
+}
+
+function vacuumDatabase(){
+  if(storeAdapter.backend!=='sqlite')return;
+  try{
+    storeAdapter.raw.vacuum();
+    console.log('[maintenance] VACUUM 完成');
+  }catch(e){
+    console.error('[maintenance] VACUUM 失败:',e.message);
+  }
+}
+
+// 启动后 30 秒执行首次清理（避免与启动竞争）
+setTimeout(()=>{pruneOldActivities();},30_000);
+
+// 每 6 小时清理一次活动日志
+const maintenanceTimer=setInterval(pruneOldActivities,PRUNE_INTERVAL_MS);
+
+// 每 7 天 VACUUM 一次
+const vacuumTimer=setInterval(vacuumDatabase,VACUUM_INTERVAL_MS);
 
 export { server, storeAdapter, APP_ROOT, harnessNavigator, joycrewClient, joycrewActions };
