@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { JsonStore } from './store.mjs';
 import { createDatabase } from './db.mjs';
 import { createStoreAdapter, LEGACY_USER_ID } from './store-adapter.mjs';
-import { authEnabled,isAuthenticated,login,logoutCookie,captureAuthorized,loginAttemptLimiter,getSessionUser,isMultiUserMode } from './auth.mjs';
+import { authEnabled,isAuthenticated,login,logoutCookie,captureAuthorized,loginAttemptLimiter,checkLoginRate,recordLoginFailure,recordLoginSuccess,getSessionUser,isMultiUserMode } from './auth.mjs';
 import { createUserManager } from './user-manager.mjs';
 import { aiEnabled,aiRuntimeConfig } from './ai.mjs';
 import { sendJson,readJsonBody,serveStatic,securityHeaders,createRequestGuard,parseTrustedOrigins } from './http.mjs';
@@ -227,7 +227,7 @@ const harnessFrameSrc=harnessWebUrl?new URL(harnessWebUrl).origin:'';
 
 // ========== 用户管理 API ==========
 function requireAdmin(req){
-  const user=getSessionUser(req);
+  const user=getSessionUser(req, storeAdapter);
   if(!user||user.role!=='admin')return false;
   return true;
 }
@@ -255,11 +255,11 @@ const server=http.createServer(async(req,rawRes)=>{
       }catch{return sendJson(res,503,{ok:false,status:'not_ready'});}
     }
     if(pathname==='/api/auth/status'&&req.method==='GET'){
-      const sessionUser=getSessionUser(req);
+      const sessionUser=getSessionUser(req, storeAdapter);
       return sendJson(res,200,{
         authEnabled:authEnabled(),
         multiUser:isMultiUserMode(),
-        authenticated:isAuthenticated(req),
+        authenticated:isAuthenticated(req, storeAdapter),
         user:sessionUser?{id:sessionUser.uid,name:sessionUser.name,role:sessionUser.role}:null
       });
     }
@@ -271,16 +271,17 @@ const server=http.createServer(async(req,rawRes)=>{
       }else{
         body=await validateRequestBody(await readJsonBody(req),requestSchemas.login);
       }
-      const clientKey=req.socket.remoteAddress||'unknown';
-      const allowed=loginAttemptLimiter.check(clientKey);
+      const clientIp=req.socket.remoteAddress||'unknown';
+      const username=body.username||'';
+      const allowed=checkLoginRate(clientIp, isMultiUserMode()?username:null);
       if(!allowed.allowed)return sendJson(res,429,{error:'登录尝试过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(allowed.retryAfterMs/1000)))});
       const result=await login({...body,store:storeAdapter});
       if(!result.ok){
-        const failure=loginAttemptLimiter.recordFailure(clientKey);
+        const failure=recordLoginFailure(clientIp, isMultiUserMode()?username:null);
         if(!failure.allowed)return sendJson(res,429,{error:'登录尝试过于频繁，请稍后重试。'},{'Retry-After':String(Math.max(1,Math.ceil(failure.retryAfterMs/1000)))});
         return sendJson(res,401,{error:isMultiUserMode()?'用户名或密码错误':'密码错误'});
       }
-      loginAttemptLimiter.recordSuccess(clientKey);
+      recordLoginSuccess(clientIp, isMultiUserMode()?username:null);
       return sendJson(res,200,{ok:true,...(result.user?{user:result.user}:{})},result.cookie?{'Set-Cookie':result.cookie}:{});
     }
     if(pathname==='/api/auth/logout'&&req.method==='POST'){await readJsonBody(req).catch(()=>{});return sendJson(res,200,{ok:true},{'Set-Cookie':logoutCookie()});}
@@ -397,7 +398,7 @@ const server=http.createServer(async(req,rawRes)=>{
       const passwordMatch=pathname.match(/^\/api\/users\/([^/]+)\/password$/);
       if(passwordMatch&&req.method==='POST'){
         const userId=passwordMatch[1];
-        const sessionUser=getSessionUser(req);
+        const sessionUser=getSessionUser(req, storeAdapter);
         // 用户只能改自己的密码，管理员可以改任何人的
         if(sessionUser.uid!==userId&&sessionUser.role!=='admin')return forbidden(res);
         const body=await readJsonBody(req);
@@ -428,10 +429,10 @@ const server=http.createServer(async(req,rawRes)=>{
     if(await harnessHttp.handleBridge(req,res,pathname,bridgeStore))return;
 
     // ========== 认证检查 ==========
-    if(pathname.startsWith('/api/')&&!isAuthenticated(req))return unauthorized(res);
+    if(pathname.startsWith('/api/')&&!isAuthenticated(req, storeAdapter))return unauthorized(res);
 
     // 获取当前登录用户 + 创建 per-request scopedStore
-    const sessionUser=getSessionUser(req);
+    const sessionUser=getSessionUser(req, storeAdapter);
     const currentUserId=sessionUser?sessionUser.uid:LEGACY_USER_ID;
     const scopedStore=storeAdapter.scope(currentUserId);
 

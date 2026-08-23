@@ -72,9 +72,11 @@ export class SqliteStore {
       // Users
       getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
       getUserByName: db.prepare('SELECT * FROM users WHERE username = ?'),
-      createUser: db.prepare(`INSERT INTO users (id, username, passwordHash, displayName, role, createdAt, updatedAt) VALUES (@id, @username, @passwordHash, @displayName, @role, @createdAt, @updatedAt)`),
+      createUser: db.prepare(`INSERT INTO users (id, username, passwordHash, displayName, role, tokenVersion, createdAt, updatedAt) VALUES (@id, @username, @passwordHash, @displayName, @role, @tokenVersion, @createdAt, @updatedAt)`),
       listUsers: db.prepare('SELECT id, username, displayName, role, createdAt FROM users ORDER BY createdAt'),
-      updateUser: db.prepare(`UPDATE users SET displayName = @displayName, role = @role, passwordHash = @passwordHash, updatedAt = @updatedAt WHERE id = @id`),
+      updateUser: db.prepare(`UPDATE users SET displayName = @displayName, role = @role, passwordHash = @passwordHash, tokenVersion = @tokenVersion, updatedAt = @updatedAt WHERE id = @id`),
+      incTokenVersion: db.prepare('UPDATE users SET tokenVersion = tokenVersion + 1, updatedAt = @updatedAt WHERE id = @id'),
+      getTokenVersion: db.prepare('SELECT tokenVersion FROM users WHERE id = ?'),
       deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
       countUsers: db.prepare('SELECT COUNT(*) as count FROM users'),
 
@@ -152,9 +154,11 @@ export class SqliteStore {
   // ========== 用户管理 ==========
   getUser(userId) { return this._stmts.getUser.get(userId); }
   getUserByName(username) { return this._stmts.getUserByName.get(username); }
-  createUser(user) { this._stmts.createUser.run(user); return user; }
+  createUser(user) { this._stmts.createUser.run({...user, tokenVersion: user.tokenVersion || 0}); return user; }
   listUsers() { return this._stmts.listUsers.all(); }
-  updateUser(user) { this._stmts.updateUser.run(user); return user; }
+  updateUser(user) { this._stmts.updateUser.run({...user, tokenVersion: user.tokenVersion || 0}); return user; }
+  getTokenVersion(userId) { const row = this._stmts.getTokenVersion.get(userId); return row ? row.tokenVersion : null; }
+  incrementTokenVersion(userId) { this._stmts.incTokenVersion.run({id: userId, updatedAt: nowIso()}); }
   deleteUser(userId) { 
     const tx = this.db.transaction(() => {
       this._stmts.deleteUser.run(userId);

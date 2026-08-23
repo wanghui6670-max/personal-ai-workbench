@@ -367,6 +367,7 @@ export class HarnessNavigatorRuntime{
     this.bridgeUrl=String(bridgeUrl).replace(/\/$/,'')+'/api/harness/mcp';
     this.bridgeToken=crypto.randomBytes(32).toString('base64url');
     this.env=env;
+    this.userEnvOverrides=new Map(); // userId → { HARNESS_PROVIDER_MODEL, HARNESS_PROVIDER_API_KEY }
     this.importModule=importModule;
     this.fetchImpl=fetchImpl;
     this.runtime=null;
@@ -581,18 +582,24 @@ export class HarnessNavigatorRuntime{
    * 切换 Harness 模型：修改 env 中的模型和密钥，关闭旧 runtime，下次 run() 时自动重建。
    * @param {string} model 要切换到的模型 ID（必须在 availableModels 中）
    */
-  async switchModel(model){
+  async switchModel(model, userId = null){
     const trimmed=String(model||'').trim();
     if(!trimmed)throw publicRuntimeError('model 不能为空。','INVALID_REQUEST',400);
     const available=resolveHarnessAvailableModels(this.env);
     if(!available.includes(trimmed))throw publicRuntimeError(`模型 ${trimmed} 不在可用列表中。`,'INVALID_REQUEST',400);
-    if(trimmed===this.env.HARNESS_PROVIDER_MODEL&&this.runtime)return; // 已经是当前模型
     // 确定对应 API key
     const grokModel=firstNonEmpty(this.env.AI_PROVIDER_GROK_MODEL);
     const isGrok=trimmed===grokModel;
     const key=isGrok
       ?firstNonEmpty(this.env.AI_PROVIDER_GROK_API_KEY,this.env.AI_PROVIDER_API_KEY)
       :firstNonEmpty(this.env.AI_PROVIDER_API_KEY,this.env.AI_PROVIDER_GROK_API_KEY);
+    if(userId){
+      // per-user 模型偏好：存入 userEnvOverrides，不影响全局 env
+      this.userEnvOverrides.set(userId,{HARNESS_PROVIDER_MODEL:trimmed,HARNESS_PROVIDER_API_KEY:key});
+      return {model:trimmed,previousState:this.state,scope:'user'};
+    }
+    // 全局切换（管理员或旧模式）
+    if(trimmed===this.env.HARNESS_PROVIDER_MODEL&&this.runtime)return {model:trimmed,previousState:this.state,scope:'global'};
     // 更新 env
     this.env.HARNESS_PROVIDER_MODEL=trimmed;
     this.env.HARNESS_PROVIDER_API_KEY=key;
@@ -603,7 +610,16 @@ export class HarnessNavigatorRuntime{
     this.state='idle';
     this.lastErrorCode=null;
     if(oldRuntime&&typeof oldRuntime.close==='function')await oldRuntime.close().catch(()=>undefined);
-    return {model:trimmed,previousState:this.state};
+    return {model:trimmed,previousState:this.state,scope:'global'};
+  }
+
+  /**
+   * 获取 per-user env 副本（合并全局 env + 用户覆盖）
+   */
+  getUserEnv(userId){
+    const overrides=this.userEnvOverrides.get(userId);
+    if(!overrides)return this.env;
+    return {...this.env,...overrides};
   }
 
   async close(){

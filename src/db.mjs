@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   passwordHash TEXT NOT NULL,
   displayName TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'member',
+  tokenVersion INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
@@ -201,6 +202,16 @@ export function createDatabase(dataDir) {
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA_SQL);
+  // 迁移：为已有 users 表添加 tokenVersion 列（v3.1 新增）
+  try {
+    const cols = db.pragma('table_info(users)');
+    if (cols.length > 0 && !cols.some(c => c.name === 'tokenVersion')) {
+      db.exec('ALTER TABLE users ADD COLUMN tokenVersion INTEGER NOT NULL DEFAULT 0');
+      console.log('[migration] 已为 users 表添加 tokenVersion 列');
+    }
+  } catch (e) {
+    // 首次创建表时无此列也无妨，SCHEMA_SQL 已包含
+  }
   return db;
 }
 

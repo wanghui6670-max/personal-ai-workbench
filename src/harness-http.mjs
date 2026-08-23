@@ -166,7 +166,8 @@ export function createHarnessHttp({
       const body=await requestBody(req,requestSchemas.harnessSwitchModel);
       if(typeof rateLimit==='function'&&rateLimit())return true;
       try{
-        const result=await navigator.switchModel(body.model);
+        // 多用户模式下，模型切换为 per-user 偏好，不影响其他用户
+        const result=await navigator.switchModel(body.model, userId||null);
         sendJson(res,200,{ok:true,result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       }catch(error){
         const statusCode=error?.statusCode||400;

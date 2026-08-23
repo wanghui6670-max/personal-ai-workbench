@@ -63,6 +63,40 @@ export function createLoginAttemptLimiter(options = {}) {
 }
 
 export const loginAttemptLimiter = createLoginAttemptLimiter();
+export const ipLoginLimiter = createLoginAttemptLimiter({ freeFailures: 10, maxEntries: 10000 });
+
+/**
+ * 双维度登录限流检查
+ * @param {string} ip - 客户端 IP
+ * @param {string} [username] - 登录用户名（多用户模式）
+ * @returns {{allowed: boolean, retryAfterMs: number}}
+ */
+function checkLoginRate(ip, username) {
+  const ipResult = ipLoginLimiter.check(ip);
+  if (!ipResult.allowed) return ipResult;
+  if (username) {
+    const userResult = loginAttemptLimiter.check(`user:${username}`);
+    if (!userResult.allowed) return userResult;
+  }
+  return { allowed: true, retryAfterMs: 0 };
+}
+
+function recordLoginFailure(ip, username) {
+  const ipResult = ipLoginLimiter.recordFailure(ip);
+  if (username) {
+    const userResult = loginAttemptLimiter.recordFailure(`user:${username}`);
+    // 返回更长的等待时间
+    return ipResult.retryAfterMs >= userResult.retryAfterMs ? ipResult : userResult;
+  }
+  return ipResult;
+}
+
+function recordLoginSuccess(ip, username) {
+  ipLoginLimiter.recordSuccess(ip);
+  if (username) loginAttemptLimiter.recordSuccess(`user:${username}`);
+}
+
+export { checkLoginRate, recordLoginFailure, recordLoginSuccess };
 
 // ========== 模式判断 ==========
 export function isMultiUserMode() {
@@ -146,11 +180,12 @@ function parseCookies(req) {
   );
 }
 
-export function createSessionCookie(userId, displayName, role) {
+export function createSessionCookie(userId, displayName, role, tokenVersion = 0) {
   const payload = {
     uid: userId,
     name: displayName || userId,
     role: role || 'member',
+    v: tokenVersion,
     exp: Math.floor(Date.now() / 1000) + MAX_AGE
   };
   const token = signJwt(payload);
@@ -188,13 +223,22 @@ function legacyCookie() {
  * 从请求中提取当前登录用户信息
  * @returns {{uid,name,role}|null}
  */
-export function getSessionUser(req) {
+export function getSessionUser(req, store = null) {
   const token = parseCookies(req)[COOKIE];
   if (!token) return null;
 
   if (isMultiUserMode()) {
     const payload = verifyJwt(token);
     if (!payload) return null;
+    // Token 吊销校验：如果提供了 store，检查 payload 中的 tokenVersion 与数据库是否一致
+    if (store) {
+      const raw = store.raw || store;
+      if (raw.getTokenVersion) {
+        const currentVersion = raw.getTokenVersion(payload.uid);
+        if (currentVersion === null) return null; // 用户已被删除
+        if (payload.v !== currentVersion) return null; // token 已被吊销
+      }
+    }
     return { uid: payload.uid, name: payload.name, role: payload.role };
   } else {
     if (legacyVerify(token)) return { uid: LEGACY_USER_ID, name: 'Admin', role: 'admin' };
@@ -202,8 +246,8 @@ export function getSessionUser(req) {
   }
 }
 
-export function isAuthenticated(req) {
-  return !authEnabled() || !!getSessionUser(req);
+export function isAuthenticated(req, store = null) {
+  return !authEnabled() || !!getSessionUser(req, store);
 }
 
 /**
@@ -222,7 +266,7 @@ export async function login(params) {
     if (!verifyPassword(password, user.passwordHash)) return { ok: false };
     return {
       ok: true,
-      cookie: createSessionCookie(user.id, user.displayName, user.role),
+      cookie: createSessionCookie(user.id, user.displayName, user.role, user.tokenVersion || 0),
       user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role }
     };
   } else {

@@ -24,7 +24,8 @@ export class UserManager {
     if (username.length < 2) throw Object.assign(new Error('用户名至少 2 个字符。'), { statusCode: 400 });
     if (username.length > 32) throw Object.assign(new Error('用户名最多 32 个字符。'), { statusCode: 400 });
     if (!/^[a-zA-Z0-9_\u4e00-\u9fa5.-]+$/.test(username)) throw Object.assign(new Error('用户名只能包含字母、数字、下划线、中文、点号和连字符。'), { statusCode: 400 });
-    if (!password || password.length < 6) throw Object.assign(new Error('密码至少 6 个字符。'), { statusCode: 400 });
+    if (!password || password.length < 8) throw Object.assign(new Error('密码至少 8 个字符。'), { statusCode: 400 });
+    if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) throw Object.assign(new Error('密码必须包含字母和数字。'), { statusCode: 400 });
     if (role && !['admin', 'member'].includes(role)) throw Object.assign(new Error('角色只能是 admin 或 member。'), { statusCode: 400 });
 
     // 检查重名
@@ -39,6 +40,7 @@ export class UserManager {
       passwordHash: hashPassword(password),
       displayName: displayName || username,
       role: role || 'member',
+      tokenVersion: 0,
       createdAt: now,
       updatedAt: now
     };
@@ -74,15 +76,21 @@ export class UserManager {
     if (!user) throw Object.assign(new Error('用户不存在。'), { statusCode: 404 });
 
     if (role && !['admin', 'member'].includes(role)) throw Object.assign(new Error('角色只能是 admin 或 member。'), { statusCode: 400 });
-    if (password !== undefined && password.length < 6) throw Object.assign(new Error('密码至少 6 个字符。'), { statusCode: 400 });
+    if (password !== undefined && password.length < 8) throw Object.assign(new Error('密码至少 8 个字符。'), { statusCode: 400 });
+    if (password !== undefined && (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password))) throw Object.assign(new Error('密码必须包含字母和数字。'), { statusCode: 400 });
 
     const updated = {
       id: userId,
       displayName: displayName !== undefined ? displayName : user.displayName,
       role: role !== undefined ? role : user.role,
       passwordHash: password ? hashPassword(password) : user.passwordHash,
+      tokenVersion: user.tokenVersion || 0,
       updatedAt: nowIso()
     };
+    // 如果修改了密码，递增 tokenVersion 使旧 token 失效
+    if (password) {
+      updated.tokenVersion = (user.tokenVersion || 0) + 1;
+    }
     this.store.updateUser(updated);
     return { id: userId, username: user.username, displayName: updated.displayName, role: updated.role, createdAt: user.createdAt };
   }
@@ -108,12 +116,14 @@ export class UserManager {
     const user = this.store.getUser(userId);
     if (!user) throw Object.assign(new Error('用户不存在。'), { statusCode: 404 });
     if (!verifyPassword(oldPassword, user.passwordHash)) throw Object.assign(new Error('旧密码不正确。'), { statusCode: 403 });
-    if (!newPassword || newPassword.length < 6) throw Object.assign(new Error('新密码至少 6 个字符。'), { statusCode: 400 });
+    if (!newPassword || newPassword.length < 8) throw Object.assign(new Error('新密码至少 8 个字符。'), { statusCode: 400 });
+    if (!/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) throw Object.assign(new Error('新密码必须包含字母和数字。'), { statusCode: 400 });
     this.store.updateUser({
       id: userId,
       displayName: user.displayName,
       role: user.role,
       passwordHash: hashPassword(newPassword),
+      tokenVersion: (user.tokenVersion || 0) + 1,
       updatedAt: nowIso()
     });
     return { ok: true };
