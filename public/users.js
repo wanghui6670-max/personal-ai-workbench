@@ -5,15 +5,105 @@ async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type'
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+let allUsers=[];
+let selectedIds=new Set();
+
 async function loadUsers(){
   try{
     const data=await api('/api/users');
-    const list=document.getElementById('users-list');
-    if(!data.users||data.users.length===0){list.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px">暂无用户</p>';return;}
-    list.innerHTML=data.users.map(u=>`<div class="user-card"><div class="user-avatar">${esc(u.username.charAt(0).toUpperCase())}</div><div class="user-info"><div class="name">${esc(u.username)}<span class="role-badge ${u.role}">${u.role==='admin'?'管理员':'用户'}</span></div><div class="meta">${esc(u.displayName||'')} · 创建于 ${esc(u.createdAt||'')}</div></div><div class="user-actions"><button class="btn" data-action="view-data" data-uid="${esc(u.id)}" data-uname="${esc(u.username)}" data-dname="${esc(u.displayName||'')}">查看数据</button><button class="btn" data-action="change-password" data-uid="${esc(u.id)}">改密码</button><button class="btn" data-action="edit" data-uid="${esc(u.id)}">编辑</button>${u.role!=='admin'||data.users.filter(x=>x.role==='admin').length>1?`<button class="btn danger" data-action="delete" data-uid="${esc(u.id)}" data-uname="${esc(u.username)}">删除</button>`:''}</div></div>`).join('');
+    allUsers=data.users||[];
+    selectedIds.clear();
+    renderUsers();
   }catch(e){toast(e.message,true);}
 }
 
+function getFilteredUsers(){
+  const q=document.getElementById('search-input').value.trim().toLowerCase();
+  if(!q)return allUsers;
+  return allUsers.filter(u=>(u.username||'').toLowerCase().includes(q)||(u.displayName||'').toLowerCase().includes(q));
+}
+
+function renderUsers(){
+  const list=document.getElementById('users-list');
+  const filtered=getFilteredUsers();
+  const adminCount=allUsers.filter(x=>x.role==='admin').length;
+
+  if(filtered.length===0){
+    list.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px">'+(allUsers.length===0?'暂无用户':'无匹配结果')+'</p>';
+    updateBatchBar();
+    return;
+  }
+
+  list.innerHTML=filtered.map(u=>{
+    const canDelete=u.role!=='admin'||adminCount>1;
+    return `<div class="user-card" data-uid="${esc(u.id)}">
+      <input type="checkbox" class="user-checkbox" data-uid="${esc(u.id)}" ${selectedIds.has(u.id)?'checked':''}>
+      <div class="user-avatar">${esc(u.username.charAt(0).toUpperCase())}</div>
+      <div class="user-info">
+        <div class="name">${esc(u.username)}<span class="role-badge ${u.role}">${u.role==='admin'?'管理员':'用户'}</span></div>
+        <div class="meta">${esc(u.displayName||'')} · 创建于 ${esc((u.createdAt||'').slice(0,10))}</div>
+      </div>
+      <div class="user-actions">
+        <button class="btn" data-action="view-data" data-uid="${esc(u.id)}" data-uname="${esc(u.username)}" data-dname="${esc(u.displayName||'')}">查看数据</button>
+        <button class="btn" data-action="change-password" data-uid="${esc(u.id)}">改密码</button>
+        <button class="btn" data-action="edit" data-uid="${esc(u.id)}" data-dname="${esc(u.displayName||'')}" data-role="${esc(u.role)}">编辑</button>
+        ${canDelete?`<button class="btn danger" data-action="delete" data-uid="${esc(u.id)}" data-uname="${esc(u.username)}">删除</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // 绑定 checkbox 事件
+  list.querySelectorAll('.user-checkbox').forEach(cb=>{
+    cb.addEventListener('change',e=>{
+      const uid=e.target.dataset.uid;
+      if(e.target.checked)selectedIds.add(uid);else selectedIds.delete(uid);
+      updateBatchBar();
+    });
+  });
+
+  updateBatchBar();
+}
+
+function updateBatchBar(){
+  const bar=document.getElementById('batch-bar');
+  const count=selectedIds.size;
+  if(count>0){
+    bar.style.display='flex';
+    bar.querySelector('.batch-count').textContent=`已选择 ${count} 个用户`;
+  }else{
+    bar.style.display='none';
+  }
+}
+
+// 搜索
+document.getElementById('search-input').addEventListener('input',()=>renderUsers());
+
+// 全选/取消全选
+document.getElementById('select-all-btn').addEventListener('click',()=>{
+  const filtered=getFilteredUsers();
+  if(selectedIds.size>=filtered.length){
+    selectedIds.clear();
+  }else{
+    filtered.forEach(u=>selectedIds.add(u.id));
+  }
+  renderUsers();
+});
+
+// 批量删除
+document.getElementById('batch-delete-btn').addEventListener('click',async()=>{
+  if(selectedIds.size===0)return;
+  if(!confirm(`确认删除选中的 ${selectedIds.size} 个用户？此操作不可恢复。`))return;
+  const errors=[];
+  for(const uid of selectedIds){
+    try{await api(`/api/users/${uid}`,{method:'DELETE'});}
+    catch(e){errors.push(uid+': '+e.message);}
+  }
+  if(errors.length){toast(`${errors.length} 个用户删除失败`,true);}
+  else{toast(`已删除 ${selectedIds.size} 个用户`);}
+  await loadUsers();
+});
+
+// 添加用户
 document.getElementById('add-user-btn').addEventListener('click',async()=>{
   const username=document.getElementById('new-username').value.trim();
   const displayName=document.getElementById('new-display-name').value.trim();
@@ -38,16 +128,17 @@ document.getElementById('users-list').addEventListener('click',async(e)=>{
   const uid=btn.dataset.uid;
   const uname=btn.dataset.uname;
   const dname=btn.dataset.dname;
+  const role=btn.dataset.role;
   if(action==='view-data'){viewUserData(uid,uname,dname);}
   else if(action==='change-password'){changePassword(uid);}
-  else if(action==='edit'){editUser(uid);}
+  else if(action==='edit'){editUser(uid,dname,role);}
   else if(action==='delete'){deleteUser(uid,uname);}
 });
 
 async function changePassword(userId){
   const modal=document.createElement('div');
   modal.className='modal-overlay';
-  modal.innerHTML=`<div class="modal-box"><h3>修改密码</h3><input id="mp-old" type="password" placeholder="旧密码"><input id="mp-new" type="password" placeholder="新密码"><input id="mp-confirm" type="password" placeholder="确认新密码"><div class="modal-actions"><button class="btn" id="mp-cancel">取消</button><button class="btn primary" id="mp-save">保存</button></div></div>`;
+  modal.innerHTML=`<div class="modal-box"><h3>修改密码</h3><input id="mp-old" type="password" placeholder="旧密码"><input id="mp-new" type="password" placeholder="新密码（至少8位，含字母和数字）"><input id="mp-confirm" type="password" placeholder="确认新密码"><div class="modal-actions"><button class="btn" id="mp-cancel">取消</button><button class="btn primary" id="mp-save">保存</button></div></div>`;
   document.body.appendChild(modal);
   modal.querySelector('#mp-cancel').addEventListener('click',()=>modal.remove());
   modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
@@ -57,6 +148,8 @@ async function changePassword(userId){
     const confirmP=modal.querySelector('#mp-confirm').value;
     if(newP!==confirmP){toast('两次输入的新密码不一致',true);return;}
     if(!newP){toast('请输入新密码',true);return;}
+    if(newP.length<8){toast('密码至少 8 个字符',true);return;}
+    if(!/[a-zA-Z]/.test(newP)||!/[0-9]/.test(newP)){toast('密码必须包含字母和数字',true);return;}
     try{
       await api(`/api/users/${userId}/password`,{method:'POST',body:JSON.stringify({oldPassword:oldP,newPassword:newP})});
       modal.remove();
@@ -65,14 +158,32 @@ async function changePassword(userId){
   });
 }
 
-async function editUser(userId){
-  const newName=prompt('新的显示名称：');
-  if(newName===null)return;
-  try{
-    await api(`/api/users/${userId}`,{method:'PATCH',body:JSON.stringify({displayName:newName})});
-    toast('用户信息已更新');
-    await loadUsers();
-  }catch(e){toast(e.message,true);}
+async function editUser(userId,displayName,role){
+  const modal=document.createElement('div');
+  modal.className='modal-overlay';
+  modal.innerHTML=`<div class="modal-box"><h3>编辑用户</h3>
+    <label class="field-label">显示名称</label>
+    <input id="eu-dname" type="text" value="${esc(displayName)}" placeholder="显示名称">
+    <label class="field-label">角色</label>
+    <select id="eu-role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px">
+      <option value="member" ${role==='member'?'selected':''}>普通用户</option>
+      <option value="admin" ${role==='admin'?'selected':''}>管理员</option>
+    </select>
+    <div class="modal-actions"><button class="btn" id="eu-cancel">取消</button><button class="btn primary" id="eu-save">保存</button></div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#eu-cancel').addEventListener('click',()=>modal.remove());
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  modal.querySelector('#eu-save').addEventListener('click',async()=>{
+    const newName=modal.querySelector('#eu-dname').value.trim();
+    const newRole=modal.querySelector('#eu-role').value;
+    try{
+      await api(`/api/users/${userId}`,{method:'PATCH',body:JSON.stringify({displayName:newName,role:newRole})});
+      modal.remove();
+      toast('用户信息已更新');
+      await loadUsers();
+    }catch(e){toast(e.message,true);}
+  });
 }
 
 async function deleteUser(userId,username){
