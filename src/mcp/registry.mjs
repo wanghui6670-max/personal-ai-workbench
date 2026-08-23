@@ -45,9 +45,10 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
   const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
   const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createProjectKnowledgeTools(),...createContentTools(),...joycrewTools];
 
-  async function context(){
-    const [state,config]=await Promise.all([store.readState(),store.readConfig()]);
-    return {...contextFrom({appRoot,store,state,config,aiEnabled:aiEnabled()}),joycrewClient,joycrewActions};
+  async function context(overrideStore){
+    const effectiveStore=overrideStore||store;
+    const [state,config]=await Promise.all([effectiveStore.readState(),effectiveStore.readConfig()]);
+    return {...contextFrom({appRoot,store:effectiveStore,state,config,aiEnabled:aiEnabled()}),joycrewClient,joycrewActions};
   }
 
   function list(options={}){
@@ -70,13 +71,14 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
       throw mcpError(`工具 ${name} 会改变工作台状态，必须先展示影响范围并获得确认。`,'MCP_CONFIRMATION_REQUIRED',409);
     }
     const input=validateArguments(tool,args);
-    const result=await tool.execute(await context(),input);
-    const after=await context();
+    const ctx=await context(options.store);
+    const result=await tool.execute(ctx,input);
+    const after=await context(options.store);
     return {result,state:deriveState(after.appRoot,after.state,after.config,after.aiEnabled),tool:publicTool(tool)};
   }
 
-  async function plan(message,route={}){
-    const current=await context();
+  async function plan(message,route={},options={}){
+    const current=await context(options.store);
     const derived=deriveState(current.appRoot,current.state,current.config,current.aiEnabled);
     const modelState=scopedInboxReviewState(derived,route);
     const modelTools=scopedInboxReviewTools(list(),route);
@@ -100,7 +102,7 @@ export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycre
     planned=enforceInboxReviewPlan(planned,route);
     const tool=planned.toolName?findTool(tools,planned.toolName):null;
     if(planned.toolName&&!tool){
-      return {kind:'clarification',message:'这个入口当前不可用。个人待办同步只读取飞书云文档中的明确待办；得到大脑只保留“自媒体”内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
+      return {kind:'clarification',message:'这个入口当前不可用。个人待办同步只读取飞书云文档中的明确待办；得到大脑只保留"自媒体"内容采集；企业 AI 员工能力需要先配置 Joycrew。',toolName:null,args:{},reason:'目标工具未在当前白名单中注册。',tool:null,state:derived,confirmationRequired:false,planner,plannerModel,analysis:planned.analysis||null,category:planned.category||null,destination:planned.destination||null,confidence:planned.confidence??null};
     }
     let input=planned.args||{};
     if(tool){

@@ -48,6 +48,10 @@ const arbitraryObject={type:'object',schema:{fields:{},allowUnknown:true}};
 export const requestSchemas={
   empty:{fields:{}},
   login:{fields:{password:nonEmptyString},required:['password'],allowEmpty:false},
+  loginMultiUser:{fields:{username:nonEmptyString,password:nonEmptyString},required:['username','password'],allowEmpty:false},
+  userCreate:{fields:{username:nonEmptyString,password:nonEmptyString,displayName:string,role:string},required:['username','password'],allowEmpty:false,allowUnknown:false},
+  userUpdate:{fields:{displayName:string,role:string,password:nonEmptyString},allowEmpty:false,allowUnknown:false},
+  userPassword:{fields:{oldPassword:nonEmptyString,newPassword:nonEmptyString},required:['oldPassword','newPassword'],allowEmpty:false},
   capture:{fields:{captureId:nonEmptyString,text:nonEmptyString,source:nonEmptyString},required:['text'],allowEmpty:false},
   config:{fields:{workspaceRoot:nonEmptyString,settings,dataSource},allowEmpty:false},
   business:{fields:{name:nonEmptyString},required:['name'],allowEmpty:false},

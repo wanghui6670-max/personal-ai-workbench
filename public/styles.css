@@ -9,3 +9,9 @@
 .nav-title.nav-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}.nav-title.nav-toggle:hover{color:#e8ebf0}.nav-title.nav-toggle .count{margin-left:auto;text-transform:none}.cleanup-group{display:none}.cleanup-group.open{display:block}
 .sidebar-foot{margin-top:8px;border-top:1px solid #2a303a;padding:10px}.sidebar-foot .settings-link{display:flex;align-items:center;gap:9px;width:100%;background:none;border:none;color:#aeb6c2;padding:9px 10px;border-radius:9px;font-size:13px;cursor:pointer;text-align:left;font-family:inherit}.sidebar-foot .settings-link:hover{background:var(--side2);color:#fff}
 .login-error{color:var(--danger);font-size:12px;margin-top:8px;line-height:1.5}
+.login-card input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;margin-bottom:12px}
+.login-card .form-label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.user-info{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-top:6px;border-radius:9px;background:var(--side2)}
+.user-info .user-name{font-size:12px;color:#e8ebf0;font-weight:600}
+.user-info .user-role{font-size:10px;color:#7e8794;background:#2a303a;border-radius:999px;padding:2px 6px}
+.user-info .btn{margin-left:auto;font-size:11px;padding:4px 10px}

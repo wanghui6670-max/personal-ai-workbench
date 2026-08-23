@@ -32,5 +32,8 @@
   },
   "devDependencies": {
     "puppeteer-core": "24.16.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
   }
 }

@@ -59,7 +59,13 @@ export function createHarnessHttp({
   mcpRegistry,
   toolBroker=null,
   driver=null,
-  sessionRefResolver=null
+  sessionRefResolver=null,
+  /**
+   * Per-user harness context resolver.
+   * If provided, called as resolveUserDriver(userId) to return a {driver,sessionManager} object.
+   * Falls back to the shared driver if userId is null or resolveUserDriver returns null.
+   */
+  resolveUserDriver=null
 }={}){
   if(!navigator||!mcpRegistry)throw new Error('createHarnessHttp requires navigator and mcpRegistry');
   // The exposed tools either read external state or create an expiring local
@@ -71,22 +77,24 @@ export function createHarnessHttp({
     return navigator.status();
   }
 
-  async function callTool(params){
+  async function callTool(params,scopedStore=null){
     if(typeof params.name!=='string'||!params.name.trim()){
       throw Object.assign(new Error('tools/call 需要 name。'),{code:'MCP_INVALID_PARAMS'});
     }
     const args=params.arguments||{};
-    if(!toolBroker)return mcpRegistry.call(params.name,args,toolOptions);
+    const opts={...toolOptions};
+    if(scopedStore)opts.store=scopedStore;
+    if(!toolBroker)return mcpRegistry.call(params.name,args,opts);
     return toolBroker.call({
       name:params.name,
       arguments:args,
-      options:toolOptions,
+      options:opts,
       trigger:'harness-http',
       sessionRef:resolveSessionRef(params,sessionRefResolver)
     });
   }
 
-  async function handleBridge(req,res,pathname){
+  async function handleBridge(req,res,pathname,bridgeStore=null){
     if(pathname!=='/api/harness/mcp')return false;
     if(req.method!=='POST'){methodNotAllowed(res,'POST');return true;}
     if(!harnessBridgeAuthorized(req,navigator.bridgeToken)){
@@ -116,7 +124,7 @@ export function createHarnessHttp({
         return true;
       }
       if(body.method==='tools/call'){
-        const outcome=await callTool(params);
+        const outcome=await callTool(params,bridgeStore);
         sendJson(res,200,jsonRpcResult(id,{
           content:[{type:'text',text:JSON.stringify(outcome.result)}],
           structuredContent:{result:outcome.result,readback:true}
@@ -130,7 +138,7 @@ export function createHarnessHttp({
     }
   }
 
-  async function handleUser(req,res,pathname,{rateLimit}={}){
+  async function handleUser(req,res,pathname,{rateLimit}={},userId=null,scopedStore=null){
     if(pathname==='/api/harness/status'){
       if(req.method!=='GET'){methodNotAllowed(res,'GET');return true;}
       sendJson(res,200,{navigator:await checkedStatus(),capabilityMode:'read_and_preview'});
@@ -141,8 +149,14 @@ export function createHarnessHttp({
       const body=await requestBody(req,requestSchemas.harnessNavigator);
       if(typeof rateLimit==='function'&&rateLimit())return true;
       const route={view:body.view||'today',id:body.id??null};
-      const result=driver
-        ?await driver.run({message:body.message,sessionId:body.sessionId??null,route})
+      // Resolve per-user driver if available
+      let activeDriver=driver;
+      if(userId&&resolveUserDriver){
+        const userCtx=resolveUserDriver(userId);
+        if(userCtx?.driver)activeDriver=userCtx.driver;
+      }
+      const result=activeDriver
+        ?await activeDriver.run({message:body.message,sessionId:body.sessionId??null,route})
         :await navigator.run({message:body.message,sessionId:body.sessionId??null,route});
       sendJson(res,200,{ok:true,navigator:result,status:await checkedStatus(),capabilityMode:'read_and_preview'});
       return true;

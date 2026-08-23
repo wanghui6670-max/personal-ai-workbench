@@ -1,3 +1,4 @@
+export { createSqliteSessionStore, createSqliteExecutionStore } from './harness-store-sqlite.mjs';
 export { createCapabilityRegistry } from './capability-registry.mjs';
 export { createLegacyMcpProvider } from './legacy-mcp-provider.mjs';
 export { createToolBroker } from './tool-broker.mjs';

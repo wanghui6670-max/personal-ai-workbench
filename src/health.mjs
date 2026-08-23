@@ -28,13 +28,17 @@ async function inspectPath(target,{type,access}){
 
 export async function inspectReadiness({appRoot,store}){
   const dataRoot=path.resolve(store.dataDir);
-  const realDataRoot=await inspectPath(dataRoot,{type:'directory',access:DIRECTORY_ACCESS});
-  for(const file of [store.stateFile,store.configFile]){
-    const realFile=await inspectPath(file,{type:'file',access:FILE_ACCESS});
-    if(!isInside(realDataRoot,realFile))throw new Error('readiness data file escapes data directory');
+
+  // SQLite 模式跳过文件级检查
+  if(store.stateFile&&store.configFile){
+    const realDataRoot=await inspectPath(dataRoot,{type:'directory',access:DIRECTORY_ACCESS});
+    for(const file of [store.stateFile,store.configFile]){
+      const realFile=await inspectPath(file,{type:'file',access:FILE_ACCESS});
+      if(!isInside(realDataRoot,realFile))throw new Error('readiness data file escapes data directory');
+    }
+    const realBackupRoot=await inspectPath(store.backupDir,{type:'directory',access:DIRECTORY_ACCESS});
+    if(!isInside(realDataRoot,realBackupRoot))throw new Error('readiness backup directory escapes data directory');
   }
-  const realBackupRoot=await inspectPath(store.backupDir,{type:'directory',access:DIRECTORY_ACCESS});
-  if(!isInside(realDataRoot,realBackupRoot))throw new Error('readiness backup directory escapes data directory');
 
   // JsonStore readers validate both JSON documents without normalizing or writing them.
   const config=await store.readConfig();

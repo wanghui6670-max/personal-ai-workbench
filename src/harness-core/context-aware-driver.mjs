@@ -1,7 +1,7 @@
 export function createHarnessRunScope(){
   let active=null;
 
-  function enter(sessionRef=null){
+  function enter(sessionRef=null,userId=null){
     if(active){
       throw Object.assign(new Error('已有 Navigator 任务正在执行，请等待本轮结束。'),{
         code:'HARNESS_RUN_BUSY',
@@ -9,7 +9,7 @@ export function createHarnessRunScope(){
       });
     }
     const token=Symbol('harness-run');
-    active={token,sessionRef};
+    active={token,sessionRef,userId};
     return token;
   }
 
@@ -21,10 +21,14 @@ export function createHarnessRunScope(){
     return active?.sessionRef??null;
   }
 
-  return Object.freeze({enter,leave,currentSessionRef});
+  function currentUserId(){
+    return active?.userId??null;
+  }
+
+  return Object.freeze({enter,leave,currentSessionRef,currentUserId});
 }
 
-export function createContextAwareDriver({sessionManager,runtime,runScope=null}={}){
+export function createContextAwareDriver({sessionManager,runtime,runScope=null,userId=null}={}){
   if(!sessionManager||!runtime)throw new Error('createContextAwareDriver requires sessionManager and runtime');
 
   async function run({message,sessionId=null,route={}}={}){
@@ -37,7 +41,7 @@ export function createContextAwareDriver({sessionManager,runtime,runScope=null}=
       working=await sessionManager.hydrate(trustedSessionRef);
       context={...route,projectId:route.id,sessionId:trustedSessionRef,working};
     }
-    const scopeToken=runScope?.enter(trustedSessionRef)??null;
+    const scopeToken=runScope?.enter(trustedSessionRef,userId)??null;
     try{
       const result=await runtime.run({message,sessionId,context});
       return {...result,readOnly:true,working};

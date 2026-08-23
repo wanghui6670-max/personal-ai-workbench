@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>用户管理 - 动觉 AI 工作台</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    body{background:var(--bg);padding:32px 20px}
+    .users-wrap{max-width:720px;margin:0 auto}
+    .users-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+    .users-head h1{font-size:22px;margin:0}
+    .users-head .back{font-size:13px;color:var(--accent);text-decoration:none}
+    .user-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;gap:16px}
+    .user-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:700;font-size:16px;flex:none}
+    .user-info{flex:1;min-width:0}
+    .user-info .name{font-size:15px;font-weight:600}
+    .user-info .meta{font-size:12px;color:var(--muted);margin-top:2px}
+    .user-info .role-badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:999px;margin-left:6px}
+    .role-badge.admin{background:#fee;color:var(--danger)}
+    .role-badge.user{background:var(--accent-soft);color:var(--accent)}
+    .user-actions{display:flex;gap:8px;flex:none}
+    .form-row{display:flex;gap:12px;margin-bottom:16px}
+    .form-row input{flex:1;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+    .form-row select{padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+    .add-user-form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:20px}
+    .add-user-form h3{margin:0 0 16px;font-size:16px}
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:999;opacity:0;transition:opacity .2s}
+    .toast.show{opacity:1}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:grid;place-items:center;z-index:100}
+    .modal-box{background:#fff;border-radius:16px;padding:24px;width:min(400px,90vw);box-shadow:var(--shadow)}
+    .modal-box h3{margin:0 0 12px;font-size:17px}
+    .modal-box input{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px}
+    .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  </style>
+</head>
+<body>
+  <div class="users-wrap">
+    <div class="users-head">
+      <h1>用户管理</h1>
+      <a class="back" href="/">&larr; 返回工作台</a>
+    </div>
+    <div id="users-list"></div>
+    <div class="add-user-form">
+      <h3>添加用户</h3>
+      <div class="form-row">
+        <input id="new-username" placeholder="用户名" autocomplete="off">
+        <input id="new-display-name" placeholder="显示名称（可选）" autocomplete="off">
+        <input id="new-password" type="password" placeholder="密码" autocomplete="new-password">
+        <select id="new-role">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+        <button class="btn primary" id="add-user-btn">添加</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const toastEl=document.getElementById('toast');
+    function toast(msg,error=false){toastEl.textContent=msg;toastEl.className='toast show'+(error?' error':'');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.className='toast',2600);}
+    async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'请求失败');return data;}
+
+    async function loadUsers(){
+      try{
+        const data=await api('/api/users');
+        const list=document.getElementById('users-list');
+        if(!data.users||data.users.length===0){list.innerHTML='<p style="color:var(--muted);text-align:center;padding:20px">暂无用户</p>';return;}
+        list.innerHTML=data.users.map(u=>`<div class="user-card"><div class="user-avatar">${esc(u.username.charAt(0).toUpperCase())}</div><div class="user-info"><div class="name">${esc(u.username)}<span class="role-badge ${u.role}">${u.role==='admin'?'管理员':'用户'}</span></div><div class="meta">${esc(u.displayName||'')} · 创建于 ${esc(u.createdAt||'')}</div></div><div class="user-actions"><button class="btn" onclick="changePassword('${esc(u.id)}')">改密码</button><button class="btn" onclick="editUser('${esc(u.id)}')">编辑</button>${u.role!=='admin'||data.users.filter(x=>x.role==='admin').length>1?`<button class="btn danger" onclick="deleteUser('${esc(u.id)}','${esc(u.username)}')">删除</button>`:''}</div></div>`).join('');
+      }catch(e){toast(e.message,true);}
+    }
+
+    function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+    document.getElementById('add-user-btn').addEventListener('click',async()=>{
+      const username=document.getElementById('new-username').value.trim();
+      const displayName=document.getElementById('new-display-name').value.trim();
+      const password=document.getElementById('new-password').value;
+      const role=document.getElementById('new-role').value;
+      if(!username||!password){toast('请输入用户名和密码',true);return;}
+      try{
+        await api('/api/users',{method:'POST',body:JSON.stringify({username,password,displayName,role})});
+        document.getElementById('new-username').value='';
+        document.getElementById('new-display-name').value='';
+        document.getElementById('new-password').value='';
+        toast('用户已创建');
+        await loadUsers();
+      }catch(e){toast(e.message,true);}
+    });
+
+    async function changePassword(userId){
+      const modal=document.createElement('div');
+      modal.className='modal-overlay';
+      modal.innerHTML=`<div class="modal-box"><h3>修改密码</h3><input id="mp-old" type="password" placeholder="旧密码"><input id="mp-new" type="password" placeholder="新密码"><input id="mp-confirm" type="password" placeholder="确认新密码"><div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">取消</button><button class="btn primary" id="mp-save">保存</button></div></div>`;
+      document.body.appendChild(modal);
+      modal.querySelector('#mp-save').addEventListener('click',async()=>{
+        const oldP=modal.querySelector('#mp-old').value;
+        const newP=modal.querySelector('#mp-new').value;
+        const confirmP=modal.querySelector('#mp-confirm').value;
+        if(newP!==confirmP){toast('两次输入的新密码不一致',true);return;}
+        if(!newP){toast('请输入新密码',true);return;}
+        try{
+          await api(`/api/users/${userId}/password`,{method:'POST',body:JSON.stringify({oldPassword:oldP,newPassword:newP})});
+          modal.remove();
+          toast('密码已修改');
+        }catch(e){toast(e.message,true);}
+      });
+    }
+
+    async function editUser(userId){
+      const newName=prompt('新的显示名称：');
+      if(newName===null)return;
+      try{
+        await api(`/api/users/${userId}`,{method:'PATCH',body:JSON.stringify({displayName:newName})});
+        toast('用户信息已更新');
+        await loadUsers();
+      }catch(e){toast(e.message,true);}
+    }
+
+    async function deleteUser(userId,username){
+      if(!confirm(`确认删除用户 "${username}"？此操作不可恢复。`))return;
+      try{
+        await api(`/api/users/${userId}`,{method:'DELETE'});
+        toast('用户已删除');
+        await loadUsers();
+      }catch(e){toast(e.message,true);}
+    }
+
+    loadUsers();
+  </script>
+</body>
+</html>
