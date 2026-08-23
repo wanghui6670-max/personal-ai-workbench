@@ -436,7 +436,7 @@ const server=http.createServer(async(req,rawRes)=>{
     const currentUserId=sessionUser?sessionUser.uid:LEGACY_USER_ID;
     const scopedStore=storeAdapter.scope(currentUserId);
 
-    if(await harnessHttp.handleUser(req,res,pathname,{rateLimit:()=>rateLimited(req,res,'navigator')},currentUserId,scopedStore))return;
+    if(await harnessHttp.handleUser(req,res,pathname,{rateLimit:()=>rateLimited(req,res,'navigator')},currentUserId,scopedStore,sessionUser))return;
 
     if(pathname==='/api/joycrew/status'){
       if(req.method!=='GET')return methodNotAllowed(res,'GET');

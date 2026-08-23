@@ -354,6 +354,14 @@ export function routeContext(route={}){
     view:compactText(rawView,80),
     id:rawId?compactText(rawId,160):null
   };
+  // 多用户上下文：注入当前操作用户信息
+  if(route.user&&typeof route.user==='object'){
+    context.user={
+      username:compactText(route.user.username||'',64),
+      displayName:compactText(route.user.displayName||'',64),
+      role:compactText(route.user.role||'',16)
+    };
+  }
   const working=summarizeWorking(route.working);
   if(working)context.working=working;
   return context;

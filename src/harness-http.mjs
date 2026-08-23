@@ -138,7 +138,7 @@ export function createHarnessHttp({
     }
   }
 
-  async function handleUser(req,res,pathname,{rateLimit}={},userId=null,scopedStore=null){
+  async function handleUser(req,res,pathname,{rateLimit}={},userId=null,scopedStore=null,sessionUser=null){
     if(pathname==='/api/harness/status'){
       if(req.method!=='GET'){methodNotAllowed(res,'GET');return true;}
       sendJson(res,200,{navigator:await checkedStatus(),capabilityMode:'read_and_preview'});
@@ -149,6 +149,14 @@ export function createHarnessHttp({
       const body=await requestBody(req,requestSchemas.harnessNavigator);
       if(typeof rateLimit==='function'&&rateLimit())return true;
       const route={view:body.view||'today',id:body.id??null};
+      // 注入当前用户上下文，供 Copilot 系统提示词感知多用户
+      if(sessionUser){
+        route.user={
+          username:sessionUser.username||sessionUser.name||sessionUser.uid||'',
+          displayName:sessionUser.name||'',
+          role:sessionUser.role||''
+        };
+      }
       // Resolve per-user driver if available
       let activeDriver=driver;
       if(userId&&resolveUserDriver){

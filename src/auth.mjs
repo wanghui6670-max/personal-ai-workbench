@@ -180,10 +180,11 @@ function parseCookies(req) {
   );
 }
 
-export function createSessionCookie(userId, displayName, role, tokenVersion = 0) {
+export function createSessionCookie(userId, displayName, role, tokenVersion = 0, username = null) {
   const payload = {
     uid: userId,
     name: displayName || userId,
+    username: username || displayName || userId,
     role: role || 'member',
     v: tokenVersion,
     exp: Math.floor(Date.now() / 1000) + MAX_AGE
@@ -239,7 +240,7 @@ export function getSessionUser(req, store = null) {
         if (payload.v !== currentVersion) return null; // token 已被吊销
       }
     }
-    return { uid: payload.uid, name: payload.name, role: payload.role };
+    return { uid: payload.uid, name: payload.name, username: payload.username || payload.name, role: payload.role };
   } else {
     if (legacyVerify(token)) return { uid: LEGACY_USER_ID, name: 'Admin', role: 'admin' };
     return null;
@@ -266,7 +267,7 @@ export async function login(params) {
     if (!verifyPassword(password, user.passwordHash)) return { ok: false };
     return {
       ok: true,
-      cookie: createSessionCookie(user.id, user.displayName, user.role, user.tokenVersion || 0),
+      cookie: createSessionCookie(user.id, user.displayName, user.role, user.tokenVersion || 0, user.username),
       user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role }
     };
   } else {
