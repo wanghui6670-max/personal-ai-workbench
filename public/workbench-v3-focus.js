@@ -75,7 +75,7 @@ function attachMainObserver(){
   mainObserver=new MutationObserver(schedule);mainObserver._target=main;
   mainObserver.observe(main,{childList:true,subtree:true});
 }
-function renderWorkSurface(){polishDashboard();renderFocusPanel();attachMainObserver();}
+function renderWorkSurface(){polishDashboard();}
 
 document.addEventListener('click',event=>{
   const forward=event.target.closest?.('[data-focus-forward]');
@@ -90,6 +90,6 @@ document.addEventListener('click',event=>{
 },true);
 
 const app=document.querySelector('#app');
-if(app)new MutationObserver(()=>{attachMainObserver();schedule();}).observe(app,{childList:true});
+if(app)new MutationObserver(()=>{schedule();}).observe(app,{childList:true});
 window.addEventListener('hashchange',schedule);
-requestAnimationFrame(()=>{attachMainObserver();renderWorkSurface();});
+requestAnimationFrame(()=>{renderWorkSurface();});

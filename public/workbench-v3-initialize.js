@@ -1,14 +1,9 @@
 (()=>{
+  const {toast:notify}=window.WB;
   let scheduled=false;
   let statePromise=null;
   let busy=false;
 
-  function notify(message,error=false){
-    const toast=document.querySelector('#toast');
-    if(!toast){if(error)alert(message);return;}
-    toast.textContent=message;toast.className=`toast show${error?' error':''}`;
-    clearTimeout(toast._initTimer);toast._initTimer=setTimeout(()=>toast.className='toast',4200);
-  }
   async function currentState(){
     if(statePromise)return statePromise;
     statePromise=fetch('/api/state',{headers:{'Content-Type':'application/json'}}).then(async response=>response.ok?response.json():null).finally(()=>{statePromise=null;});

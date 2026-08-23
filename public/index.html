@@ -22,7 +22,8 @@
 </head>
 <body>
   <div id="app"><div class="boot">正在打开动觉 AI 工作台…</div></div>
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/utils.js"></script>
   <script src="/workbench-v3-review-migration.js"></script>
   <script src="/workbench-v3-manual-control.js"></script>
   <script type="module" src="/app.js"></script>
@@ -30,7 +31,10 @@
   <script type="module" src="/project-knowledge.js"></script>
   <script type="module" src="/ux-enhancements.js"></script>
   <script type="module" src="/getnote-integration.js"></script>
-  <script type="module" src="/harness-navigator.js"></script>
+  <script type="module" src="/harness-nav-markdown.js"></script>
+  <script type="module" src="/harness-nav-session.js"></script>
+  <script type="module" src="/harness-nav-input.js"></script>
+  <script type="module" src="/harness-nav-ui.js"></script>
   <script type="module" src="/joycrew-integration.js"></script>
   <script type="module" src="/theme-focus.js"></script>
   <script type="module" src="/workbench-v3.js"></script>

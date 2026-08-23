@@ -1,192 +1,13 @@
-/* harness-navigator.js — DSH Navigator 面板（15 项增强版）
- * 增强：Markdown 渲染、停止生成、Think 区块、时间戳、复制、会话持久化、
- *       会话列表/搜索/分支、性能指标、Token 统计、反馈按钮、GenUI 卡片、
- *       轨迹标签页、Skill 标签、模型选择
+/* harness-nav-ui.js — UI 渲染、面板挂载、事件绑定、初始化
+ * 从 harness-navigator.js 拆分而来
  */
-const nativeFetch=window.fetch.bind(window);
-const navigatorState={
-  status:null,statusLoading:false,busy:false,abortController:null,
-  error:'',sessionId:null,messages:[],trajectory:[],thinkBlocks:[],skillCalls:[],
-  metrics:null,activeTab:'chat',
-  sessions:[],currentSessionId:null,
-  recording:false,speechRecognition:null,
-  crewAgents:[],crewAgentsLoaded:false,crewAgentsLoading:false
-};
-const DEFAULT_PANEL_WIDTH=500;
-/* ─── @ AI 员工提及状态 ─── */
-const mentionState={open:false,query:'',selectedIndex:0,filtered:[],startPos:0,popupEl:null};
-let scheduled=false;
-let lastMountedHtml='';
+import {navigatorState,DEFAULT_PANEL_WIDTH,mentionState,scheduled,lastMountedHtml,setScheduled,setLastMountedHtml,scheduleMount,setScheduleMount,jsonRequest,currentRoute,loadSessions,saveSessions,createSession,switchSession,deleteSession,updateCurrentSession,branchSession} from './harness-nav-session.js';
+import {escapeHtml,compact,formatTime,formatElapsed,formatTokens,renderMarkdown,renderGenUI,extractGenUI,stripGenUI} from './harness-nav-markdown.js';
+import {loadCrewAgents,detectMention,openMention,updateMentionFilter,closeMention,renderMentionPopup,positionMentionPopup,selectMention,navigateMention,toggleVoiceInput,stopVoiceInput,switchModel} from './harness-nav-input.js';
 
-/* ─── 工具函数 ─── */
-function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
-function compact(value,max=280){const text=String(value??'').replace(/\s+/g,' ').trim();return text.length<=max?text:`${text.slice(0,max-1)}…`;}
-function formatTime(date){const d=new Date(date);const pad=n=>String(n).padStart(2,'0');return `${pad(d.getMonth()+1)}月${pad(d.getDate())}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;}
-function formatElapsed(ms){if(ms<1000)return `${ms}ms`;const s=ms/1000;return s<60?`${s.toFixed(1)}秒`:`${Math.floor(s/60)}分${Math.round(s%60)}秒`;}
-function formatTokens(n){if(n==null)return '—';if(n<1000)return `${n}`;if(n<1000000)return `${(n/1000).toFixed(1)}K`;return `${(n/1000000).toFixed(1)}M`;}
-
-/* ─── Markdown 渲染器 ─── */
-function renderMarkdown(text){
-  if(!text)return '';
-  let html=escapeHtml(text);
-  // 代码块 ```
-  html=html.replace(/```(\w*)\n?([\s\S]*?)```/g,(m,lang,code)=>{
-    return `<pre class="md-code-block"><code>${code.replace(/^\n/,'')}</code></pre>`;
-  });
-  // 行内代码
-  html=html.replace(/`([^`]+)`/g,'<code class="md-inline-code">$1</code>');
-  // 标题
-  html=html.replace(/^### (.+)$/gm,'<h4 class="md-h4">$1</h4>');
-  html=html.replace(/^## (.+)$/gm,'<h3 class="md-h3">$1</h3>');
-  html=html.replace(/^# (.+)$/gm,'<h2 class="md-h2">$1</h2>');
-  // 粗体和斜体
-  html=html.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
-  html=html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g,'<em>$1</em>');
-  // 链接
-  html=html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" class="md-link">$1</a>');
-  // 无序列表
-  const lines=html.split('\n');
-  const result=[];
-  let inList=false,inOrder=false;
-  for(let line of lines){
-    if(/^\s*[-*] (.+)/.test(line)){
-      if(!inList){result.push('<ul class="md-list">');inList=true;}
-      result.push(`<li>${line.replace(/^\s*[-*] /,'')}</li>`);
-    }else if(/^\s*\d+\. (.+)/.test(line)){
-      if(!inOrder){result.push('<ol class="md-list">');inOrder=true;}
-      result.push(`<li>${line.replace(/^\s*\d+\. /,'')}</li>`);
-    }else if(line.match(/^<pre|^<h[234]|^<div/)){
-      if(inList){result.push('</ul>');inList=false;}
-      if(inOrder){result.push('</ol>');inOrder=false;}
-      result.push(line);
-    }else if(line.trim()){
-      if(inList){result.push('</ul>');inList=false;}
-      if(inOrder){result.push('</ol>');inOrder=false;}
-      result.push(`<p class="md-p">${line}</p>`);
-    }
-  }
-  if(inList)result.push('</ul>');
-  if(inOrder)result.push('</ol>');
-  return result.join('');
-}
-
-/* ─── GenUI 渲染器 ─── */
-function renderGenUI(spec){
-  if(!spec||typeof spec!=='object')return '';
-  const title=spec.title?`<div class="genui-title">${escapeHtml(spec.title)}</div>`:'';
-  let items='';
-  if(Array.isArray(spec.items)){
-    for(const item of spec.items){
-      if(item.type==='callout'){
-        items+=`<div class="genui-callout genui-${item.tone||'info'}"><strong>${escapeHtml(item.title||'')}</strong><p>${escapeHtml(item.content||'')}</p></div>`;
-      }else if(item.type==='grid'){
-        const cols=item.cols||3;
-        let cells='';
-        for(const c of(item.items||[])){
-          if(c.type==='stat')cells+=`<div class="genui-stat"><span class="label">${escapeHtml(c.label||'')}</span><span class="value">${escapeHtml(c.value||'')}</span></div>`;
-          else cells+=`<div class="genui-cell">${escapeHtml(String(c.content||c.value||''))}</div>`;
-        }
-        items+=`<div class="genui-grid" style="--genui-cols:${cols}">${cells}</div>`;
-      }else if(item.type==='list'){
-        let lis='';
-        for(const li of(item.items||[]))lis+=`<div class="genui-list-item"><strong>${escapeHtml(li.title||'')}</strong><span>${escapeHtml(li.desc||'')}</span></div>`;
-        items+=`<div class="genui-list">${lis}</div>`;
-      }else if(item.type==='text'){
-        items+=`<p class="genui-text">${escapeHtml(item.content||'')}</p>`;
-      }
-    }
-  }
-  return `<div class="genui-card">${title}<div class="genui-body" style="gap:${spec.gap||14}px">${items}</div></div>`;
-}
-
-function extractGenUI(text){
-  const blocks=[];
-  const regex=/```dsh-ui\n([\s\S]*?)```/g;
-  let match;
-  while((match=regex.exec(text))!==null){
-    try{blocks.push(JSON.parse(match[1].trim()));}catch{}
-  }
-  return blocks;
-}
-function stripGenUI(text){
-  return text.replace(/```dsh-ui\n[\s\S]*?```/g,'');
-}
-
-/* ─── 会话管理（内存模式，不做客户端持久化） ─── */
-function loadSessions(){
-  return [];
-}
-function saveSessions(){
-  /* no-op: 会话状态仅保存在模块内存中，不写入客户端存储 */
-}
-function createSession(title){
-  const now=Date.now();
-  const sid=`s_${now.toString(36)}_${Math.random().toString(36).slice(2,8)}`;
-  const session={id:sid,title:title||'新对话',createdAt:now,messages:[]};
-  navigatorState.sessions.push(session);
-  navigatorState.currentSessionId=sid;
-  navigatorState.sessionId=null;
-  navigatorState.messages=[];
-  navigatorState.trajectory=[];
-  navigatorState.thinkBlocks=[];
-  navigatorState.metrics=null;
-  saveSessions();
-  return session;
-}
-function switchSession(sid){
-  const session=navigatorState.sessions.find(s=>s.id===sid);
-  if(!session)return;
-  navigatorState.currentSessionId=sid;
-  navigatorState.messages=session.messages||[];
-  navigatorState.trajectory=[];
-  navigatorState.thinkBlocks=[];
-  navigatorState.metrics=null;
-  navigatorState.sessionId=null;
-  scheduleMount();
-}
-function deleteSession(sid){
-  navigatorState.sessions=navigatorState.sessions.filter(s=>s.id!==sid);
-  if(navigatorState.currentSessionId===sid){
-    navigatorState.currentSessionId=null;
-    navigatorState.messages=[];
-    navigatorState.trajectory=[];
-    navigatorState.thinkBlocks=[];
-    navigatorState.metrics=null;
-    navigatorState.sessionId=null;
-  }
-  saveSessions();
-  scheduleMount();
-}
-function updateCurrentSession(){
-  if(!navigatorState.currentSessionId)return;
-  const session=navigatorState.sessions.find(s=>s.id===navigatorState.currentSessionId);
-  if(!session)return;
-  session.messages=navigatorState.messages.slice();
-  if(session.title==='新对话'&&navigatorState.messages.length){
-    const firstUser=navigatorState.messages.find(m=>m.role==='user');
-    if(firstUser)session.title=compact(firstUser.text,28);
-  }
-  saveSessions();
-}
-function branchSession(fromIdx){
-  const now=Date.now();
-  const sid=`s_${now.toString(36)}_${Math.random().toString(36).slice(2,8)}`;
-  const branchMessages=navigatorState.messages.slice(0,fromIdx+1).map(m=>({...m}));
-  const session={id:sid,title:'分支对话',createdAt:now,messages:branchMessages};
-  navigatorState.sessions.push(session);
-  navigatorState.currentSessionId=sid;
-  navigatorState.messages=branchMessages;
-  navigatorState.trajectory=[];
-  navigatorState.thinkBlocks=[];
-  navigatorState.metrics=null;
-  navigatorState.sessionId=null;
-  saveSessions();
-  scheduleMount();
-}
-
-/* ─── 路由与网络 ─── */
-function currentRoute(){const raw=(location.hash||'#today').slice(1);const [view,encodedId]=raw.split('/');let id=null;try{id=encodedId?decodeURIComponent(encodedId):null;}catch{}return{view:view||'today',id};}
-async function jsonRequest(url,options={},signal){const response=await nativeFetch(url,{...options,headers:{'content-type':'application/json',...(options.headers||{})},signal:signal});const payload=await response.json().catch(()=>({}));if(!response.ok){const error=new Error(payload.error||`请求失败 ${response.status}`);error.code=payload.code;throw error;}return payload;}
+/* ─── 实现并注册 scheduleMount ─── */
+function _scheduleMount(){if(scheduled)return;setScheduled(true);queueMicrotask(()=>{setScheduled(false);mount();});}
+setScheduleMount(_scheduleMount);
 
 /* ─── 状态显示 ─── */
 function statusTone(status){if(status?.available&&status?.state!=='error')return'ready';if(status?.enabled)return'warning';return'muted';}
@@ -202,9 +23,9 @@ function messageHtml(message,idx){
   const genui=genUIBlocks.length?genUIBlocks.map(renderGenUI).join(''):'';
   const thinkHtml=message.think?`<details class="harness-nav-think"><summary>Think</summary><div>${escapeHtml(message.think)}</div></details>`:'';
   const skillsHtml=message.skills&&message.skills.length?`<div class="harness-nav-skills">${message.skills.map(s=>`<span class="skill-tag">Skill ${escapeHtml(s)}</span>`).join('')}</div>`:'';
-  const copyBtn=message.role==='assistant'?`<button type="button" class="msg-copy" data-copy-idx="${idx}" title="复制">复制</button>`:'';
-  const branchBtn=message.role==='assistant'?`<button type="button" class="msg-branch" data-branch-idx="${idx}" title="在新对话中分支">分支</button>`:'';
-  const feedbackBtn=message.role==='assistant'?`<span class="msg-feedback"><button type="button" class="fb-good" data-fb-idx="${idx}" data-fb="good" title="好的回答">👍</button><button type="button" class="fb-bad" data-fb-idx="${idx}" data-fb="bad" title="有问题的回答">👎</button></span>`:'';
+  const copyBtn=message.role==='assistant'?`<button type="button" class="msg-copy" data-copy-idx="${idx}" title="复制" aria-label="复制回复内容">复制</button>`:'';
+  const branchBtn=message.role==='assistant'?`<button type="button" class="msg-branch" data-branch-idx="${idx}" title="在新对话中分支" aria-label="在新对话中分支">分支</button>`:'';
+  const feedbackBtn=message.role==='assistant'?`<span class="msg-feedback"><button type="button" class="fb-good" data-fb-idx="${idx}" data-fb="good" title="好的回答" aria-label="好的回答">👍</button><button type="button" class="fb-bad" data-fb-idx="${idx}" data-fb="bad" title="有问题的回答" aria-label="有问题的回答">👎</button></span>`:'';
   return`<div class="harness-nav-message ${message.role}" data-msg-idx="${idx}"><div class="msg-header"><span class="msg-label">${label}</span>${time?`<span class="msg-time">${time}</span>`:''}${copyBtn}${branchBtn}${feedbackBtn}</div>${thinkHtml}${skillsHtml}<div class="msg-body">${mdHtml}</div>${genui}</div>`;
 }
 
@@ -242,7 +63,7 @@ function sessionListHtml(){
   const items=sessions.slice().reverse().map(s=>{
     const active=s.id===navigatorState.currentSessionId;
     const time=formatTime(s.createdAt);
-    return`<div class="session-item ${active?'active':''}" data-session-id="${s.id}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-time">${time}</span><button type="button" class="session-del" data-del-session="${s.id}" title="删除">×</button></div>`;
+    return`<div class="session-item ${active?'active':''}" data-session-id="${s.id}" tabindex="0" role="button" aria-label="切换到会话：${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-time">${time}</span><button type="button" class="session-del" data-del-session="${s.id}" title="删除" aria-label="删除会话：${escapeHtml(s.title)}">×</button></div>`;
   }).join('');
   return`<div class="session-list">${items}</div>`;
 }
@@ -327,11 +148,10 @@ function mount(){
   panel.classList.add('harness-primary');
   panel.classList.toggle('harness-native',Boolean(webUrl));
   let root=panel.querySelector('[data-harness-navigator-mount]');
-  if(!root){root=document.createElement('div');root.dataset.harnessNavigatorMount='';const anchor=panel.querySelector('.ai-chat')||panel.querySelector('.ai-foot');if(anchor)panel.insertBefore(root,anchor);else panel.append(root);lastMountedHtml='';}
+  if(!root){root=document.createElement('div');root.dataset.harnessNavigatorMount='';const anchor=panel.querySelector('.ai-chat')||panel.querySelector('.ai-foot');if(anchor)panel.insertBefore(root,anchor);else panel.append(root);setLastMountedHtml('');}
   const html=webUrl?`<iframe class="harness-embed" src="${escapeHtml(webUrl)}" title="DeepSeek Harness" allow="clipboard-write" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer"></iframe>`:cardHtml();
-  if(lastMountedHtml!==html){closeMention();root.innerHTML=html;lastMountedHtml=html;autoScroll();}
+  if(lastMountedHtml!==html){closeMention();root.innerHTML=html;setLastMountedHtml(html);autoScroll();}
 }
-function scheduleMount(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;mount();});}
 function autoScroll(){requestAnimationFrame(()=>{const el=document.querySelector('[data-tab-content="chat"]');if(el)el.scrollTop=el.scrollHeight;});}
 
 /* ─── 状态加载 ─── */
@@ -345,100 +165,6 @@ async function loadStatus(force=false){
     if(String(error.message).includes('请先登录')||error.message==='未登录'){navigatorState.status={enabled:false,available:false,state:'auth',reason:'auth_required',message:'登录后将检查 Harness Navigator。'};return;}
     navigatorState.status={enabled:false,available:false,state:'error',message:'无法读取 Harness 状态。'};navigatorState.error=error.message;
   }finally{navigatorState.statusLoading=false;scheduleMount();}
-}
-
-/* ─── AI 员工列表 ─── */
-async function loadCrewAgents(){
-  if(navigatorState.crewAgentsLoaded||navigatorState.crewAgentsLoading)return;
-  navigatorState.crewAgentsLoading=true;
-  try{
-    const payload=await jsonRequest('/api/crew');
-    navigatorState.crewAgents=Array.isArray(payload.agents)?payload.agents:[];
-    navigatorState.crewAgentsLoaded=true;
-  }catch{
-    navigatorState.crewAgents=[];navigatorState.crewAgentsLoaded=true;
-  }finally{
-    navigatorState.crewAgentsLoading=false;
-  }
-}
-
-/* ─── @ AI 员工提及 ─── */
-function detectMention(textarea){
-  const text=textarea.value;const pos=textarea.selectionStart;
-  const before=text.slice(0,pos);
-  const match=before.match(/(?:^|\s)@([^\s@\n]*)$/);
-  if(!match)return false;
-  mentionState.startPos=match.index+(match[0][0]==='@'?0:1);
-  mentionState.query=match[1];
-  return true;
-}
-function openMention(textarea){
-  mentionState.open=true;
-  if(!navigatorState.crewAgentsLoaded&&!navigatorState.crewAgentsLoading){
-    void loadCrewAgents().then(()=>{if(mentionState.open){updateMentionFilter();renderMentionPopup(textarea);}});
-  }
-  updateMentionFilter();renderMentionPopup(textarea);
-}
-function updateMentionFilter(){
-  const q=mentionState.query.toLowerCase();
-  mentionState.filtered=q?navigatorState.crewAgents.filter(a=>{
-    const title=(a.title||a.name||'').toLowerCase();
-    const dept=(a.dept||'').toLowerCase();
-    return title.includes(q)||dept.includes(q);
-  }):navigatorState.crewAgents.slice();
-  mentionState.selectedIndex=0;
-}
-function closeMention(){
-  mentionState.open=false;mentionState.query='';mentionState.filtered=[];mentionState.selectedIndex=0;
-  if(mentionState.popupEl){mentionState.popupEl.remove();mentionState.popupEl=null;}
-}
-function renderMentionPopup(textarea){
-  if(!mentionState.open)return;
-  let popup=mentionState.popupEl;
-  if(!popup){popup=document.createElement('div');popup.className='harness-mention-popup';popup.setAttribute('role','listbox');document.body.appendChild(popup);mentionState.popupEl=popup;}
-  if(!navigatorState.crewAgentsLoaded){
-    popup.innerHTML='<div class="harness-mention-hint">正在加载 AI 员工列表…</div>';
-  }else if(!navigatorState.crewAgents.length){
-    popup.innerHTML='<div class="harness-mention-hint">没有可用的 AI 员工</div>';
-  }else if(!mentionState.filtered.length){
-    popup.innerHTML='<div class="harness-mention-hint">没有匹配的 AI 员工</div>';
-  }else{
-    popup.innerHTML=mentionState.filtered.slice(0,8).map((a,i)=>{
-      const title=escapeHtml(a.title||a.name||a.id||'');
-      const dept=a.dept?escapeHtml(a.dept):'';
-      const desc=a.description?escapeHtml(compact(a.description,60)):'';
-      return `<div class="harness-mention-item${i===mentionState.selectedIndex?' selected':''}" data-mention-idx="${i}" role="option"><span class="mention-title">${title}</span>${dept?`<span class="mention-dept">${dept}</span>`:''}${desc?`<span class="mention-desc">${desc}</span>`:''}</div>`;
-    }).join('');
-  }
-  positionMentionPopup(textarea);
-}
-function positionMentionPopup(textarea){
-  const popup=mentionState.popupEl;if(!popup)return;
-  const rect=textarea.getBoundingClientRect();
-  const popupHeight=popup.offsetHeight||200;
-  const spaceAbove=rect.top;const spaceBelow=window.innerHeight-rect.bottom;
-  if(spaceAbove>popupHeight+8&&spaceAbove>=spaceBelow){popup.style.top=`${rect.top-popupHeight-4}px`;}
-  else{popup.style.top=`${rect.bottom+4}px`;}
-  popup.style.left=`${rect.left}px`;
-  popup.style.width=`${Math.min(rect.width,320)}px`;
-}
-function selectMention(textarea){
-  const agent=mentionState.filtered[mentionState.selectedIndex];if(!agent)return;
-  const title=agent.title||agent.name||agent.id||'';
-  const insertText=`@${title} `;
-  const before=textarea.value.slice(0,mentionState.startPos);
-  const after=textarea.value.slice(textarea.selectionStart);
-  textarea.value=before+insertText+after;
-  const newCursor=before.length+insertText.length;
-  textarea.setSelectionRange(newCursor,newCursor);
-  textarea.style.height='auto';textarea.style.height=`${Math.min(textarea.scrollHeight,180)}px`;
-  closeMention();textarea.focus();
-}
-function navigateMention(direction){
-  const len=mentionState.filtered.length;if(!len)return;
-  mentionState.selectedIndex=(mentionState.selectedIndex+direction+len)%len;
-  const popup=mentionState.popupEl;
-  if(popup)popup.querySelectorAll('.harness-mention-item').forEach((el,i)=>el.classList.toggle('selected',i===mentionState.selectedIndex));
 }
 
 /* ─── 导航 ─── */
@@ -493,71 +219,6 @@ function stopGeneration(){
   navigatorState.busy=false;scheduleMount();
 }
 
-/* ─── 语音输入 ─── */
-function toggleVoiceInput(){
-  if(navigatorState.recording){stopVoiceInput();return;}
-  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SpeechRecognition){
-    navigatorState.error='当前浏览器不支持语音输入（需要 Chrome 或 Edge）';scheduleMount();
-    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
-    return;
-  }
-  const textarea=document.querySelector('[data-harness-form] textarea[name="message"]');
-  if(!textarea||textarea.disabled)return;
-  const recognition=new SpeechRecognition();
-  recognition.lang='zh-CN';
-  recognition.continuous=true;
-  recognition.interimResults=true;
-  const baseText=textarea.value;
-  let finalBuffer='';
-  recognition.onresult=event=>{
-    let interim='';
-    for(let i=event.resultIndex;i<event.results.length;i++){
-      const result=event.results[i];
-      if(result.isFinal){finalBuffer+=result[0].transcript;}
-      else{interim+=result[0].transcript;}
-    }
-    textarea.value=baseText+finalBuffer+interim;
-    textarea.style.height='auto';textarea.style.height=`${Math.min(textarea.scrollHeight,180)}px`;
-  };
-  recognition.onerror=event=>{
-    navigatorState.recording=false;navigatorState.speechRecognition=null;
-    if(event.error==='no-speech'||event.error==='aborted')return;
-    navigatorState.error='语音识别出错：'+event.error;scheduleMount();
-    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
-  };
-  recognition.onend=()=>{
-    if(navigatorState.recording){
-      navigatorState.recording=false;navigatorState.speechRecognition=null;scheduleMount();
-    }
-  };
-  try{
-    recognition.start();
-    navigatorState.recording=true;navigatorState.speechRecognition=recognition;scheduleMount();
-  }catch(e){
-    navigatorState.error='启动语音输入失败';scheduleMount();
-    setTimeout(()=>{navigatorState.error='';scheduleMount();},3000);
-  }
-}
-function stopVoiceInput(){
-  if(navigatorState.speechRecognition){try{navigatorState.speechRecognition.stop();}catch(e){}}
-  navigatorState.recording=false;navigatorState.speechRecognition=null;scheduleMount();
-}
-
-/* ─── 切换模型 ─── */
-async function switchModel(model){
-  if(!model||navigatorState.busy)return;
-  navigatorState.busy=true;scheduleMount();
-  try{
-    const payload=await jsonRequest('/api/harness/switch-model',{method:'POST',body:JSON.stringify({model})});
-    if(payload.status)navigatorState.status=payload.status;
-  }catch(error){
-    navigatorState.error=error.message||'模型切换失败';
-  }finally{
-    navigatorState.busy=false;scheduleMount();
-  }
-}
-
 /* ─── 调整大小 ─── */
 function beginResize(event){
   const handle=event.target.closest?.('[data-harness-resize]');
@@ -605,6 +266,13 @@ document.addEventListener('keydown',event=>{
   }
   if(event.key!=='Enter'||event.shiftKey||event.isComposing)return;
   event.preventDefault();input.form?.requestSubmit();
+});
+
+// Keyboard activation for session items (Enter/Space)
+document.addEventListener('keydown',event=>{
+  if((event.key==='Enter'||event.key===' ')&&event.target?.dataset?.sessionId){
+    event.preventDefault();switchSession(event.target.dataset.sessionId);
+  }
 });
 
 document.addEventListener('input',event=>{

@@ -11,18 +11,13 @@ let crewBusy=false;
 let rendered=false;
 let scheduled=false;
 
-const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const attr=esc;
-const shellQuote=value=>`'${String(value??'').replaceAll("'","'\"'\"'")}'`;
-const routePart=value=>encodeURIComponent(String(value??''));
-const fmtTime=value=>value?new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+const {esc,attr,routePart,fmtTime,json,currentView,setTop,hideLegacyMain}=window.WB;
+const shellQuote=value=>`'${String(value??'').replaceAll("'","'\"'\"")}'`;
 
 function notify(message,error=false){
-  const toast=document.querySelector('#toast');if(!toast)return;
-  toast.textContent=message;toast.className=`toast show${error?' error':''}`;
-  clearTimeout(toast._crewTimer);toast._crewTimer=setTimeout(()=>toast.className='toast',3000);
+  window.WB.toast(message,error,3000);
 }
-function currentView(){return (location.hash||'#today').slice(1).split('/')[0]||'today';}
+// currentView provided by window.WB
 function copyText(text){
   if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text).then(()=>true).catch(()=>false);
   try{const el=document.createElement('textarea');el.value=text;document.body.appendChild(el);el.select();const ok=document.execCommand('copy');el.remove();return Promise.resolve(ok);}catch{return Promise.resolve(false);}
@@ -35,13 +30,6 @@ function saveFavorites(set){try{localStorage.setItem(FAV_KEY,JSON.stringify([...
 function favoriteKeys(){return loadFavorites();}
 function toggleFavorite(key){
   const set=loadFavorites();if(set.has(key))set.delete(key);else set.add(key);saveFavorites(set);return set;
-}
-
-async function json(url,options={}){
-  const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
-  return data;
 }
 
 async function loadCrew(force=false){
@@ -177,17 +165,7 @@ function skillCard(s){
 }
 
 // ---------- 渲染与路由 ----------
-function setTop(title,desc){
-  const h=document.querySelector('.top-left h1');if(h&&h.textContent!==title)h.textContent=title;
-  const p=document.querySelector('.top-left p');if(p&&p.textContent!==desc)p.textContent=desc;
-}
-function hideLegacyMain(main,keepCapture=true){
-  for(const child of [...main.children]){
-    if(child.id==='crew-center'||child.id==='skills-center')continue;
-    if(keepCapture&&child.classList.contains('capture')){if(child.classList.contains('v3-hidden'))child.classList.remove('v3-hidden');continue;}
-    if(!child.classList.contains('v3-hidden'))child.classList.add('v3-hidden');
-  }
-}
+// setTop and hideLegacyMain provided by window.WB
 function enhanceSidebar(){
   const nav=document.querySelector('.nav');if(!nav)return;
   let crew=nav.querySelector('a[href="#crew"]');
@@ -296,6 +274,11 @@ document.addEventListener('click',event=>{
   const target=event.target.closest?.('[data-crew-action]');
   if(target){event.preventDefault();void handleCrewAction(target);}
 },true);
+
+// Expose render functions for app.js direct calls
+window.WB.renderCrew=renderCrew;
+window.WB.renderSkills=renderSkills;
+window.WB.crewLoad=()=>loadCrew(true);
 
 window.addEventListener('hashchange',()=>{schedule();void renderEnhancements();});
 const appRoot=document.querySelector('#app')||document.body;

@@ -1,20 +1,10 @@
+const {esc:escapeHtml,compact,json:requestJson}=window.WB;
 const nativeFetch=window.fetch.bind(window);
 const PANEL_MODE_KEY='personal-ai-workbench.ai-panel-mode';
 const PANEL_MODES=new Set(['open','rail','closed']);
 const morning={open:false,busy:false,error:'',sessionId:null,messages:[],candidates:[],state:null};
 let scheduled=false;
 let receipt=null;
-
-function escapeHtml(value){
-  return String(value??'').replace(/[&<>"']/g,char=>({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[char]));
-}
-
-function compact(value,max=180){
-  const text=String(value??'').replace(/\s+/g,' ').trim();
-  return text.length>max?`${text.slice(0,max-1)}…`:text;
-}
 
 function readPanelMode(){
   try{
@@ -91,16 +81,6 @@ window.fetch=async function observedFetch(input,init={}){
   return response;
 };
 
-async function requestJson(url,options={}){
-  const response=await nativeFetch(url,{
-    ...options,
-    headers:{'Content-Type':'application/json',...(options.headers||{})}
-  });
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
-  return data;
-}
-
 function panelButton(label,action,title){
   const button=document.createElement('button');
   button.type='button';
@@ -148,24 +128,16 @@ function normalizeModelStatus(panel){
   }
 }
 
-function ensureMorningTriggers(panel){
-  const suggestions=panel.querySelector('.ai-suggestions');
-  if(suggestions&&!suggestions.querySelector('[data-ux-action="morning-focus"]')){
+function ensureMorningTrigger(){
+  // Inject morning focus button into topbar actions (not AI panel)
+  const actions=document.querySelector('.topbar .actions');
+  if(actions&&!actions.querySelector('[data-ux-action="morning-focus"]')){
     const button=document.createElement('button');
     button.type='button';
     button.className='btn small ux-morning-trigger';
     button.dataset.uxAction='morning-focus';
     button.textContent='早晨对焦';
-    suggestions.prepend(button);
-  }
-  const decisionHead=document.querySelector('.human-decision-card .card-head');
-  if(decisionHead&&!decisionHead.querySelector('[data-ux-action="morning-focus"]')){
-    const button=document.createElement('button');
-    button.type='button';
-    button.className='btn small primary ux-morning-trigger';
-    button.dataset.uxAction='morning-focus';
-    button.textContent='开始早晨对焦';
-    decisionHead.append(button);
+    actions.prepend(button);
   }
 }
 
@@ -192,27 +164,26 @@ function morningPanelHtml(){
     :'';
   const status=morning.busy?'<div class="ux-morning-status">正在读取最近 3 天和临近截止事项…</div>':'';
   const error=morning.error?`<div class="ux-morning-error">${escapeHtml(morning.error)}</div>`:'';
-  return `<div class="ux-morning-head"><div><strong>早晨对焦</strong><span>只讨论，不自动安排</span></div><button type="button" class="ux-morning-close" data-ux-action="morning-close" aria-label="关闭早晨对焦">×</button></div><div class="ux-morning-messages">${messages||'<div class="ux-morning-empty">点击开始后，AI 会根据最近 3 天、临近截止项目和待办与你对焦。</div>'}</div>${candidates}${status}${error}<form id="ux-morning-form" class="ux-morning-form"><input id="ux-morning-input" autocomplete="off" maxlength="2000" placeholder="继续讨论，最后由你决定哪些进入今日"><button class="btn small primary" ${morning.busy?'disabled':''}>发送</button></form>`;
+  return `<div class="ux-morning-head"><div><strong>早晨对焦</strong><span>只讨论，不自动安排</span></div><button type="button" class="ux-morning-close" data-ux-action="morning-close" aria-label="关闭早晨对焦">×</button></div><div class="ux-morning-messages">${messages||'<div class="ux-morning-empty">点击开始后，AI 会根据最近 3 天、临近截止项目和待办与你对焦。</div>'}</div>${candidates}${status}${error}<form id="ux-morning-form" class="ux-morning-form"><input id="ux-morning-input" autocomplete="off" maxlength="2000" placeholder="继续讨论，最后由你决定哪些进入今日" aria-label="早晨对焦讨论输入"><button class="btn small primary" ${morning.busy?'disabled':''}>发送</button></form>`;
 }
 
-function renderMorningPanel(panel){
-  let container=panel.querySelector('.ux-morning-panel');
-  if(!morning.open){container?.remove();return;}
-  if(!container){
-    container=document.createElement('section');
-    container.className='ux-morning-panel';
-    const anchor=panel.querySelector('.ai-context');
-    if(anchor)anchor.insertAdjacentElement('afterend',container);
-    else panel.prepend(container);
+function renderMorningOverlay(){
+  if(!morning.open)return;
+  let overlay=document.querySelector('#ux-morning-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='ux-morning-overlay';
+    overlay.className='ux-morning-overlay';
+    overlay.setAttribute('role','dialog');
+    overlay.setAttribute('aria-modal','true');
+    overlay.setAttribute('aria-label','早晨对焦');
+    document.body.append(overlay);
+    overlay.addEventListener('click',e=>{if(e.target===overlay){morning.open=false;scheduleEnhance();}});
   }
-  const key=JSON.stringify({
-    busy:morning.busy,error:morning.error,sessionId:morning.sessionId,
-    messages:morning.messages,candidates:morning.candidates,
-    todayPlan:morning.state?.todayPlan,todos:(morning.state?.todos||[]).map(todo=>[todo.id,todo.done])
-  });
-  if(container.dataset.renderKey!==key){
-    container.dataset.renderKey=key;
-    container.innerHTML=morningPanelHtml();
+  const key=JSON.stringify({busy:morning.busy,error:morning.error,sessionId:morning.sessionId,messages:morning.messages,candidates:morning.candidates,todayPlan:morning.state?.todayPlan,todos:(morning.state?.todos||[]).map(todo=>[todo.id,todo.done])});
+  if(overlay.dataset.renderKey!==key){
+    overlay.dataset.renderKey=key;
+    overlay.innerHTML=`<div class="ux-morning-dialog">${morningPanelHtml()}</div>`;
   }
 }
 
@@ -303,15 +274,14 @@ async function runMorning(message){
 
 function enhance(){
   ensureReopenButton();
+  ensureMorningTrigger();
   const panel=document.querySelector('.ai-panel');
   if(panel){
     ensurePanelControls(panel);
-    normalizeModelStatus(panel);
-    ensureMorningTriggers(panel);
-    renderMorningPanel(panel);
     makeResultsReadable(panel);
   }
   renderActionReceipt();
+  renderMorningOverlay();
 }
 
 function scheduleEnhance(){

@@ -1,3 +1,4 @@
+const {element,json:jsonRequest,projectIdFromHash,resolveProject}=window.WB;
 const INDEX_ID='project-knowledge-index';
 const CHIPS_ID='project-knowledge-chips';
 const CHAPTERS=Object.freeze([
@@ -10,34 +11,6 @@ const CHAPTERS=Object.freeze([
 
 let activeProjectId=null;
 let scheduled=false;
-
-function projectIdFromHash(){
-  const match=(location.hash||'').match(new RegExp('^#project/([^/]+)$'));
-  if(!match)return null;
-  try{return decodeURIComponent(match[1]);}catch{return null;}
-}
-
-function element(tag,className,text){
-  const node=document.createElement(tag);
-  if(className)node.className=className;
-  if(text!==undefined)node.textContent=text;
-  return node;
-}
-
-async function jsonRequest(url,options={}){
-  const response=await fetch(url,{
-    ...options,
-    headers:{'Content-Type':'application/json',...(options.headers||{})}
-  });
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||`请求失败 ${response.status}`);
-  return data;
-}
-
-async function resolveProject(projectId){
-  const state=await jsonRequest('/api/state');
-  return Array.isArray(state.projects)?state.projects.find(project=>project.id===projectId)||null:null;
-}
 
 function hideGlobalNav(nav,hide){
   if(!nav)return;

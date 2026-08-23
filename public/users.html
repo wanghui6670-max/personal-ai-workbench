@@ -71,7 +71,7 @@
       <a class="back" href="/">&larr; 返回工作台</a>
     </div>
     <div class="search-bar">
-      <input id="search-input" placeholder="搜索用户名或显示名称…" autocomplete="off">
+      <input id="search-input" placeholder="搜索用户名或显示名称…" autocomplete="off" aria-label="搜索用户">
       <button class="btn" id="select-all-btn">全选</button>
     </div>
     <div class="batch-bar" id="batch-bar">
@@ -82,10 +82,10 @@
     <div class="add-user-form">
       <h3>添加用户</h3>
       <div class="form-row">
-        <input id="new-username" placeholder="用户名" autocomplete="off">
-        <input id="new-display-name" placeholder="显示名称（可选）" autocomplete="off">
-        <input id="new-password" type="password" placeholder="密码" autocomplete="new-password">
-        <select id="new-role">
+        <input id="new-username" placeholder="用户名" autocomplete="off" aria-label="用户名">
+        <input id="new-display-name" placeholder="显示名称（可选）" autocomplete="off" aria-label="显示名称">
+        <input id="new-password" type="password" placeholder="密码" autocomplete="new-password" aria-label="密码">
+        <select id="new-role" aria-label="角色">
           <option value="member">普通用户</option>
           <option value="admin">管理员</option>
         </select>
@@ -93,7 +93,8 @@
       </div>
     </div>
   </div>
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/utils.js"></script>
   <script src="/users.js"></script>
 </body>
 </html>

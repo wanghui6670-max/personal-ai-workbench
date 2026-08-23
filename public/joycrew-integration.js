@@ -1,3 +1,4 @@
+const {esc:jcEscape,attr:jcAttr,compact:jcCompact,fmtTime:jcTime}=window.WB;
 const joycrewFetch=window.fetch.bind(window);
 const operationsState={
   status:null,
@@ -14,12 +15,8 @@ const operationsState={
 };
 let operationsScheduled=false;
 
-function jcEscape(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));}
-function jcAttr(value){return jcEscape(value);}
-function jcCompact(value,max=180){const text=String(value??'').replace(/\s+/g,' ').trim();return text.length<=max?text:`${text.slice(0,max-1)}…`;}
-function jcTime(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?'—':date.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}
 function jcDate(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?'—':date.toLocaleDateString('zh-CN',{year:'numeric',month:'numeric',day:'numeric'});}
-function jcRoute(){return(location.hash||'#today').slice(1).split('/')[0]||'today';}
+function jcRoute(){return window.WB.currentView();}
 function isOperations(){return jcRoute()==='operations';}
 function markOperationsDirty(){operationsState.revision+=1;scheduleOperationsMount();}
 
@@ -202,12 +199,23 @@ function projectDetailHtml(detail){
   return`<section class="jc-card jc-detail"><div class="jc-section-head"><div><small>项目详情</small><h2>${jcEscape(project.title||project.id)}</h2><p>${jcEscape(project.stage||'')}</p></div><button class="btn small" type="button" data-joycrew-action="close-project">关闭</button></div><div class="jc-context-grid"><div><span>上次完成</span><p>${jcEscape(project.lastCompleted||'以飞书项目文档为长期叙事真源')}</p></div><div><span>当前判断</span><p>${jcEscape(project.currentThinking||'按需读取')}</p></div><div><span>下一步</span><p>${jcEscape(project.nextAction||'尚未记录')}</p></div><div><span>阻塞</span><p>${jcEscape(project.blocker||'无')}</p></div></div><div class="jc-section-head"><strong>Run 与 Evidence</strong><span>${(detail.runs||[]).length}</span></div>${runHtml(detail.runs||[],{detail:true})}<div class="jc-two-col"><section><div class="jc-section-head"><strong>项目审批</strong></div>${approvalHtml(detail.approvals||[])}</section><section><div class="jc-section-head"><strong>项目交付</strong></div>${deliverableHtml(detail.deliverables||[])}</section></div></section>`;
 }
 
+let jcOperationsTab='main';
+
 function operationsHtml(){
   const data=operationsData();
   const status=operationsState.status;
   const connected=Boolean(status?.available&&operationsState.overview);
   const pending=operationsState.actions.filter(action=>['pending','executing','uncertain'].includes(action.status));
-  return`<div class="jc-page">${operationsState.error?`<div class="jc-banner error">${jcEscape(operationsState.error)}<button type="button" data-joycrew-action="dismiss-error">×</button></div>`:''}${operationsState.notice?`<div class="jc-banner success">${jcEscape(operationsState.notice)}<button type="button" data-joycrew-action="dismiss-notice">×</button></div>`:''}${statusCard()}${connected?`<section class="jc-metrics">${metricCard('企业项目',data.projects.length,'Joycrew Workspace')}${metricCard('可用 AI 员工',data.employees.filter(item=>item.readiness==='ready').length,'Employee Grant 后可见')}${metricCard('待审批写回',data.approvals.filter(item=>item.status==='pending').length,'仍需人工确认')}${metricCard('正式交付',data.deliverables.length,'可回链到 Run/Evidence')}</section><section class="jc-grid-main"><div class="jc-stack"><section class="jc-card"><div class="jc-section-head"><div><strong>企业项目</strong><p>业务执行上下文；个人今日仍由 Workbench 管理。</p></div><span>${data.projects.length}</span></div>${projectListHtml(data.projects)}</section><section class="jc-card"><div class="jc-section-head"><div><strong>运行 AI 员工</strong><p>先生成预览，确认后才创建 Joycrew Run。</p></div></div>${runComposer(data.projects,data.employees)}</section></div><aside class="jc-stack"><section class="jc-card"><div class="jc-section-head"><strong>AI 员工</strong><span>${data.employees.length}</span></div>${employeeHtml(data.employees)}</section><section class="jc-card"><div class="jc-section-head"><strong>最近 Run</strong><span>${data.runs.length}</span></div>${runHtml(data.runs)}</section></aside></section>${projectDetailHtml(operationsState.detail)}<section class="jc-card jc-pending"><div class="jc-section-head"><div><strong>等待你确认</strong><p>Harness 与页面只会生成预览；这里是唯一执行入口。</p></div><span>${pending.length}</span></div>${actionHtml(pending)}</section><section class="jc-two-col"><div class="jc-card"><div class="jc-section-head"><strong>写回审批</strong><span>${data.approvals.length}</span></div>${approvalHtml(data.approvals)}</div><div class="jc-card"><div class="jc-section-head"><strong>正式交付</strong><span>${data.deliverables.length}</span></div>${deliverableHtml(data.deliverables)}</div></section><section class="jc-card"><div class="jc-section-head"><div><strong>客户与业务任务</strong><p>此处为 Joycrew 当前业务视图；个人收件箱不在此复制。</p></div></div>${businessHtml(data.customers,data.tasks)}</section>`:'<section class="jc-card"><div class="jc-empty"><strong>个人工作台已正常运行。</strong><p>配置并启动 Joycrew 后，这里会原生显示企业项目、AI 员工、Run、Evidence、审批和交付，不需要打开第二套工作台。</p></div></section>'}</div>`;
+  const tabBtn=(key,label,count)=>`<button type="button" class="jc-tab ${jcOperationsTab===key?'on':''}" data-jc-tab="${key}">${label}${count!=null?`<span class="jc-tab-count">${count}</span>`:''}</button>`;
+  const pendingCount=pending.length;
+  const tabHtml=`<div class="jc-tabs">${tabBtn('main','项目与运行',data.projects.length)}${tabBtn('crew','AI 员工与 Run',null)}${tabBtn('pending','待确认',pendingCount)}${tabBtn('review','审批与交付',null)}${tabBtn('business','客户任务',null)}</div>`;
+  let tabContent='';
+  if(jcOperationsTab==='main')tabContent=`<section class="jc-grid-main"><div class="jc-stack"><section class="jc-card"><div class="jc-section-head"><div><strong>企业项目</strong><p>业务执行上下文；个人今日仍由 Workbench 管理。</p></div><span>${data.projects.length}</span></div>${projectListHtml(data.projects)}</section><section class="jc-card"><div class="jc-section-head"><div><strong>运行 AI 员工</strong><p>先生成预览，确认后才创建 Joycrew Run。</p></div></div>${runComposer(data.projects,data.employees)}</section></div><aside class="jc-stack"><section class="jc-card"><div class="jc-section-head"><strong>最近 Run</strong><span>${data.runs.length}</span></div>${runHtml(data.runs)}</section></aside></section>${projectDetailHtml(operationsState.detail)}`;
+  else if(jcOperationsTab==='crew')tabContent=`<section class="jc-grid-main"><aside class="jc-stack"><section class="jc-card"><div class="jc-section-head"><strong>AI 员工</strong><span>${data.employees.length}</span></div>${employeeHtml(data.employees)}</section><section class="jc-card"><div class="jc-section-head"><strong>Run 历史</strong><span>${data.runs.length}</span></div>${runHtml(data.runs,{detail:true})}</section></aside></section>${projectDetailHtml(operationsState.detail)}`;
+  else if(jcOperationsTab==='pending')tabContent=`<section class="jc-card jc-pending"><div class="jc-section-head"><div><strong>等待你确认</strong><p>Harness 与页面只会生成预览；这里是唯一执行入口。</p></div><span>${pending.length}</span></div>${actionHtml(pending)}</section>`;
+  else if(jcOperationsTab==='review')tabContent=`<section class="jc-two-col"><div class="jc-card"><div class="jc-section-head"><strong>写回审批</strong><span>${data.approvals.length}</span></div>${approvalHtml(data.approvals)}</div><div class="jc-card"><div class="jc-section-head"><strong>正式交付</strong><span>${data.deliverables.length}</span></div>${deliverableHtml(data.deliverables)}</div></section>`;
+  else if(jcOperationsTab==='business')tabContent=`<section class="jc-card"><div class="jc-section-head"><div><strong>客户与业务任务</strong><p>此处为 Joycrew 当前业务视图；个人收件箱不在此复制。</p></div></div>${businessHtml(data.customers,data.tasks)}</section>`;
+  return`<div class="jc-page" id="jc-operations-page">${operationsState.error?`<div class="jc-banner error">${jcEscape(operationsState.error)}<button type="button" data-joycrew-action="dismiss-error">×</button></div>`:''}${operationsState.notice?`<div class="jc-banner success">${jcEscape(operationsState.notice)}<button type="button" data-joycrew-action="dismiss-notice">×</button></div>`:''}${statusCard()}${connected?`<section class="jc-metrics">${metricCard('企业项目',data.projects.length,'Joycrew Workspace')}${metricCard('可用 AI 员工',data.employees.filter(item=>item.readiness==='ready').length,'Employee Grant 后可见')}${metricCard('待审批写回',data.approvals.filter(item=>item.status==='pending').length,'仍需人工确认')}${metricCard('正式交付',data.deliverables.length,'可回链到 Run/Evidence')}</section>${tabHtml}${tabContent}`:'<section class="jc-card"><div class="jc-empty"><strong>个人工作台已正常运行。</strong><p>配置并启动 Joycrew 后，这里会原生显示企业项目、AI 员工、Run、Evidence、审批和交付，不需要打开第二套工作台。</p></div></section>'}</div>`;
 }
 
 function mountOperationsPage(force=false){
@@ -357,11 +365,23 @@ document.addEventListener('click',event=>{
   void handleOperationsAction(element);
 },true);
 
+document.addEventListener('click',event=>{
+  const tab=event.target.closest?.('[data-jc-tab]');
+  if(!tab)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  jcOperationsTab=tab.dataset.jcTab;
+  markOperationsDirty();
+},true);
+
 document.addEventListener('change',event=>{
   const select=event.target.closest?.('[data-joycrew-project-select]');
   if(!select)return;
   operationsState.selectedProjectId=select.value;markOperationsDirty();
 });
+
+// Expose render function for app.js direct calls
+window.WB.renderOperations=()=>mountOperationsPage(true);
+window.WB.operationsLoad=loadOperations;
 
 window.addEventListener('hashchange',()=>{
   mountOperationsNavigation();

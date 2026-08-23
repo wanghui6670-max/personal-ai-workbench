@@ -1,3 +1,4 @@
+const {esc,attr,routePart,fmtDate,fmtTime,json,currentView,setTop,hideLegacyMain}=window.WB;
 let v3State=null;
 let scheduled=false;
 let rendering=false;
@@ -12,24 +13,7 @@ const AUTO_ANALYZE_QUEUE_LIMIT=100;
 const REVIEW_CACHE_KEY='workbench-v3-inbox-reviews-v1';
 const REVIEW_CACHE_MAX_AGE_MS=9*60*1000;
 
-const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const attr=esc;
-const routePart=value=>encodeURIComponent(String(value??''));
-const fmtDate=value=>value?new Date(`${value}T00:00:00`).toLocaleDateString('zh-CN',{month:'short',day:'numeric'}):'—';
-const fmtTime=value=>value?new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
-
-async function json(url,options={}){
-  const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
-  return data;
-}
-function currentView(){return (location.hash||'#today').slice(1).split('/')[0]||'today';}
-function notify(message,error=false){
-  const toast=document.querySelector('#toast');if(!toast)return;
-  toast.textContent=message;toast.className=`toast show${error?' error':''}`;
-  clearTimeout(toast._v3Timer);toast._v3Timer=setTimeout(()=>toast.className='toast',3000);
-}
+function notify(message,error=false){window.WB.toast(message,error,3000);}
 function stateSignature(state){
   return JSON.stringify({
     today:state?.todayPlan||[],todos:(state?.todos||[]).map(todo=>[todo.id,todo.dueDate,todo.done]),inbox:(state?.inbox||[]).map(item=>[item.id,item.text,item.source,item.suggestedDueDate,item.suggestedProjectId]),
@@ -87,7 +71,7 @@ function sourceHtml(state){
 }
 function todoRow(todo,state){
   const inToday=(state.todayPlan||[]).includes(todo.id);
-  return `<div class="todo ${todo.done?'done':''}"><button class="check ${todo.done?'checked':''}" data-action="toggle-todo" data-id="${attr(todo.id)}" title="完成/恢复"></button><div class="todo-main"><div class="name">${esc(todo.title)}</div><div class="summary">${esc(todo.context||'')}</div><div class="meta"><span class="pill">截止 ${fmtDate(todo.dueDate)}</span>${todo.project?`<span class="pill blue">${esc(todo.project)}</span>`:'<span class="pill">独立待办</span>'}</div></div><div class="toolbar"><button class="btn small" data-action="edit-todo" data-id="${attr(todo.id)}">编辑</button>${!todo.done?`<button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(todo.id)}" data-add="${inToday?'0':'1'}">${inToday?'移出今日':'加入今日'}</button>`:''}</div></div>`;
+  return `<div class="todo ${todo.done?'done':''}"><button class="check ${todo.done?'checked':''}" data-action="toggle-todo" data-id="${attr(todo.id)}" role="checkbox" aria-checked="${todo.done}" aria-label="${todo.done?'标记为未完成':'标记为已完成'}：${esc(todo.title)}"></button><div class="todo-main"><div class="name">${esc(todo.title)}</div><div class="summary">${esc(todo.context||'')}</div><div class="meta"><span class="pill">截止 ${fmtDate(todo.dueDate)}</span>${todo.project?`<span class="pill blue">${esc(todo.project)}</span>`:'<span class="pill">独立待办</span>'}</div></div><div class="toolbar"><button class="btn small" data-action="edit-todo" data-id="${attr(todo.id)}">编辑</button>${!todo.done?`<button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(todo.id)}" data-add="${inToday?'0':'1'}">${inToday?'移出今日':'加入今日'}</button>`:''}</div></div>`;
 }
 function reviewIsExecutable(item,entry){
   const plan=entry?.plan;if(entry?.reviewKey!==reviewKey(item))return false;
@@ -165,7 +149,7 @@ function calendarHtml(state){
     const todoCount=items?items.todos.length:0,projCount=items?items.projects.length:0;
     const hasItems=todoCount+projCount>0;
     const allDone=items&&items.todos.length>0&&items.todos.every(t=>t.done);
-    cells+=`<div class="v3-cal-cell${isToday?' today':''}${isSelected?' selected':''}${hasItems?' has-items':''}${allDone?' all-done':''}" data-cal-date="${dateStr}"><div class="v3-cal-day">${d}</div>`;
+    cells+=`<div class="v3-cal-cell${isToday?' today':''}${isSelected?' selected':''}${hasItems?' has-items':''}${allDone?' all-done':''}" data-cal-date="${dateStr}" tabindex="0" role="button" aria-label="${dateStr}${hasItems?`，${todoCount}个待办${projCount?`，${projCount}个项目里程碑`:''}`:''}"><div class="v3-cal-day">${d}</div>`;
     if(hasItems){cells+='<div class="v3-cal-badges">';if(todoCount)cells+=`<span class="v3-cal-badge ${allDone?'done':''}">${todoCount}</span>`;if(projCount)cells+=`<span class="v3-cal-badge project">${projCount}</span>`;cells+='</div>';}
     cells+='</div>';
   }
@@ -181,7 +165,7 @@ function calendarDetailHtml(state){
   html+=`</div>`;
   for(const t of todos){
     const inToday=(state.todayPlan||[]).includes(t.id);
-    html+=`<div class="v3-cal-item todo ${t.done?'done':''}"><button class="check ${t.done?'checked':''}" data-action="toggle-todo" data-id="${attr(t.id)}" title="完成/恢复"></button><div class="v3-cal-item-main"><div class="v3-cal-item-title">${esc(t.title)}</div><div class="v3-cal-item-meta">${t.project?`<span class="pill blue">${esc(t.project)}</span>`:'<span class="pill">独立待办</span>'}</div></div><div class="toolbar"><button class="btn small" data-action="edit-todo" data-id="${attr(t.id)}">编辑</button>${!t.done?`<button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(t.id)}" data-add="${inToday?'0':'1'}">${inToday?'移出今日':'加入今日'}</button>`:''}</div></div>`;
+    html+=`<div class="v3-cal-item todo ${t.done?'done':''}"><button class="check ${t.done?'checked':''}" data-action="toggle-todo" data-id="${attr(t.id)}" role="checkbox" aria-checked="${t.done}" aria-label="${t.done?'标记为未完成':'标记为已完成'}：${esc(t.title)}"></button><div class="v3-cal-item-main"><div class="v3-cal-item-title">${esc(t.title)}</div><div class="v3-cal-item-meta">${t.project?`<span class="pill blue">${esc(t.project)}</span>`:'<span class="pill">独立待办</span>'}</div></div><div class="toolbar"><button class="btn small" data-action="edit-todo" data-id="${attr(t.id)}">编辑</button>${!t.done?`<button class="btn small ${inToday?'':'primary'}" data-action="today-toggle" data-id="${attr(t.id)}" data-add="${inToday?'0':'1'}">${inToday?'移出今日':'加入今日'}</button>`:''}</div></div>`;
   }
   for(const p of projects){
     const percent=Math.max(0,Math.min(100,Math.round(Number(p.progress?.percent||0))));
@@ -206,10 +190,7 @@ function dashboardHtml(state){
   const attention=Number(state.stats?.confirmations||0)+Number(state.stats?.overdue||0)+Number(state.stats?.unclassified||0);
   return `<div id="v3-dashboard" class="v3-dashboard" data-signature="${attr(stateSignature(state))}"><div class="v3-hero"><div class="v3-metric"><strong>${today.length}</strong><span>今天要做</span></div><div class="v3-metric"><strong>${inbox.length}</strong><span>待办待处理</span></div><div class="v3-metric"><strong>${aiPending}</strong><span>AI 建议中</span></div><div class="v3-metric"><strong>${attention}</strong><span>需要留意</span></div></div><section class="v3-card v3-calendar-card"><div class="v3-card-head"><div><h2>月度日历工作台</h2><p>带截止日期的待办和项目结束日期自动出现在日历上；点击日期查看详情。</p></div></div><div class="v3-calendar-wrap">${calendarHtml(state)}${calendarDetailHtml(state)}</div></section><section class="v3-card"><div class="v3-card-head"><div><h2>飞书待办 · AI 处理队列</h2><p>只同步飞书云文档中的明确待办；普通日记、复盘、分析和项目进展不会进入这里。</p></div></div>${sourceHtml(state)}${inbox.length?inbox.map(inboxItemHtml).join(''):'<div class="v3-empty">没有待处理的飞书待办。</div>'}</section></div>`;
 }
-function hideLegacyMain(main,keepCapture=true){
-  for(const child of [...main.children]){if(child.id==='v3-dashboard'||child.id==='v3-scene'||child.id==='v3-media-page')continue;if(keepCapture&&child.classList.contains('capture')){if(child.classList.contains('v3-hidden'))child.classList.remove('v3-hidden');continue;}if(!child.classList.contains('v3-hidden'))child.classList.add('v3-hidden');}
-}
-function setTop(title,desc){const h=document.querySelector('.top-left h1');if(h&&h.textContent!==title)h.textContent=title;const p=document.querySelector('.top-left p');if(p&&p.textContent!==desc)p.textContent=desc;}
+// hideLegacyMain and setTop are now provided by window.WB
 function enhanceToday(){
   if(!v3State)return;const main=document.querySelector('.main');if(!main)return;setTop('首页','月度日历工作台 · 飞书待办同步 · 今天做什么仍由你确认。');hideLegacyMain(main,true);
   const signature=stateSignature(v3State);let dashboard=main.querySelector('#v3-dashboard');if(dashboard?.dataset.signature===signature)return;dashboard?.remove();
@@ -287,6 +268,14 @@ document.addEventListener('click',event=>{
   const target=event.target.closest?.('[data-v3-action]');
   if(target)void handleV3Action(event,target);
 },true);
+document.addEventListener('keydown',event=>{
+  if((event.key==='Enter'||event.key===' ')&&event.target?.dataset?.calDate){event.preventDefault();handleCalSelect(event.target.dataset.calDate);}
+});
+// Render dispatch — exposed for app.js direct calls
+window.WB.renderToday=enhanceToday;
+window.WB.renderScene=enhanceScene;
+window.WB.v3Refresh=()=>void refresh(true);
+
 window.addEventListener('hashchange',()=>{if(currentView()==='inbox'){location.hash='#today';return;}schedule();void refresh(true);});
 const appRoot=document.querySelector('#app')||document.body;new MutationObserver(schedule).observe(appRoot,{childList:true});
 function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;renderEnhancements();void refresh();});}

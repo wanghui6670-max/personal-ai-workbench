@@ -1,16 +1,11 @@
 (()=>{
+  const {toast:notify}=window.WB;
   const selectedIds=new Set();
   let busy=false;
   let scheduled=false;
   let observer=null;
   let statePromise=null;
 
-  function notify(message,error=false){
-    const toast=document.querySelector('#toast');
-    if(!toast){if(error)alert(message);return;}
-    toast.textContent=message;toast.className=`toast show${error?' error':''}`;
-    clearTimeout(toast._batchTimer);toast._batchTimer=setTimeout(()=>toast.className='toast',3500);
-  }
   async function currentState(){
     if(statePromise)return statePromise;
     statePromise=fetch('/api/state',{headers:{'Content-Type':'application/json'}}).then(async response=>response.ok?response.json():null).finally(()=>{statePromise=null;});
@@ -26,7 +21,7 @@
 
   function ensureItemCheckbox(node,id){
     if(!id)return;node.dataset.batchId=id;node.classList.add('v3-batch-selectable');let label=node.querySelector('.v3-batch-check');
-    if(!label){label=document.createElement('label');label.className='v3-batch-check';label.title='选择这条记录进行批量处理';const input=document.createElement('input');input.type='checkbox';input.dataset.batchSelect=id;label.appendChild(input);node.prepend(label);}
+    if(!label){label=document.createElement('label');label.className='v3-batch-check';label.title='选择这条记录进行批量处理';const input=document.createElement('input');input.type='checkbox';input.dataset.batchSelect=id;input.setAttribute('aria-label','选择此记录进行批量处理');label.appendChild(input);node.prepend(label);}
     const input=label.querySelector('input');input.dataset.batchSelect=id;input.checked=selectedIds.has(id);input.disabled=busy;
   }
   function batchBarHost(){const source=document.querySelector('#v3-dashboard .v3-source');if(!source)return null;const filters=source.parentElement?.querySelector('.v3-pool-filters');return filters||source;}
@@ -35,7 +30,7 @@
     const nodes=inboxNodes(),existingIds=new Set(nodes.map(node=>node.dataset.batchId).filter(Boolean));for(const id of [...selectedIds])if(!existingIds.has(id))selectedIds.delete(id);
     const visible=visibleNodes().map(node=>node.dataset.batchId).filter(Boolean),selectedCount=selectedIds.size,allVisible=visible.length>0&&visible.every(id=>selectedIds.has(id));
     const executable=[...selectedIds].filter(id=>Boolean(confirmButton(itemNode(id)))).length;const disabled=busy||selectedCount===0;
-    const html=`<label class="v3-batch-all"><input type="checkbox" data-batch-all ${allVisible?'checked':''} ${busy?'disabled':''}> 全选当前</label><span class="v3-batch-count">已选 ${selectedCount}</span><button class="btn small" data-batch-action="reanalyze" ${disabled?'disabled':''}>批量重新分析</button><button class="btn small primary" data-batch-action="confirm" ${busy||executable===0?'disabled':''}>批量确认可执行 ${executable}</button><button class="btn small" data-batch-action="delete" ${disabled?'disabled':''}>批量删除本地</button>${busy?'<span class="v3-batch-busy">处理中…</span>':''}`;
+    const html=`<label class="v3-batch-all"><input type="checkbox" data-batch-all aria-label="全选当前页所有记录" ${allVisible?'checked':''} ${busy?'disabled':''}> 全选当前</label><span class="v3-batch-count">已选 ${selectedCount}</span><button class="btn small" data-batch-action="reanalyze" ${disabled?'disabled':''}>批量重新分析</button><button class="btn small primary" data-batch-action="confirm" ${busy||executable===0?'disabled':''}>批量确认可执行 ${executable}</button><button class="btn small" data-batch-action="delete" ${disabled?'disabled':''}>批量删除本地</button>${busy?'<span class="v3-batch-busy">处理中…</span>':''}`;
     if(bar.innerHTML!==html)bar.innerHTML=html;
   }
   async function enhance(){scheduled=false;observer?.disconnect();try{const state=await currentState();const inbox=Array.isArray(state?.inbox)?state.inbox:[];const nodes=inboxNodes();nodes.forEach((node,index)=>{const id=stableItemId(node,inbox[index]);if(id)ensureItemCheckbox(node,id);});renderBatchBar();}finally{attachObserver();}}

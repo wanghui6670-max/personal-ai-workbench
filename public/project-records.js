@@ -1,3 +1,4 @@
+const {element,json:jsonRequest,projectIdFromHash,resolveProject}=window.WB;
 const PANEL_ID='project-records-panel';
 const PAGE_SIZE=10;
 let activeProjectId=null;
@@ -7,12 +8,6 @@ let nextCursor=null;
 let loading=false;
 let scheduled=false;
 
-function projectIdFromHash(){
-  const match=(location.hash||'').match(/^#project\/([^/]+)$/);
-  if(!match)return null;
-  try{return decodeURIComponent(match[1]);}catch{return null;}
-}
-
 function validFeishuUrl(value){
   try{
     const url=new URL(String(value||''));
@@ -20,21 +15,6 @@ function validFeishuUrl(value){
     const official=['feishu.cn','larksuite.com','larkoffice.com'].some(root=>host===root||host.endsWith(`.${root}`));
     return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash&&official&&/^\/(?:wiki|docx|docs)\/[A-Za-z0-9_-]+\/?$/.test(url.pathname);
   }catch{return false;}
-}
-
-async function jsonRequest(url,options={}){
-  const response=await fetch(url,{
-    ...options,
-    headers:{'Content-Type':'application/json',...(options.headers||{})}
-  });
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||`请求失败 ${response.status}`);
-  return data;
-}
-
-async function resolveProject(projectId){
-  const state=await jsonRequest('/api/state');
-  return Array.isArray(state.projects)?state.projects.find(project=>project.id===projectId)||null:null;
 }
 
 async function callProjectRecords(projectId,{beforeBlockId=null}={}){
@@ -54,13 +34,6 @@ async function callProjectRecords(projectId,{beforeBlockId=null}={}){
   const result=response.result?.structuredContent?.result;
   if(!result||!Array.isArray(result.records))throw new Error('飞书项目记录返回格式不完整。');
   return result;
-}
-
-function element(tag,className,text){
-  const node=document.createElement(tag);
-  if(className)node.className=className;
-  if(text!==undefined)node.textContent=text;
-  return node;
 }
 
 function setStatus(message,{error=false}={}){

@@ -1,24 +1,15 @@
+const {esc,fmtTime,json}=window.WB;
 let mediaStatus=null;
 let mediaBusy=false;
 let scheduled=false;
 
-const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const attr=esc;
-const fmtTime=value=>value?new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
-
-async function json(url,options={}){
-  const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(data.error||data.question||`请求失败 ${response.status}`);
-  return data;
-}
+function notify(message,error=false){window.WB.toast(message,error,3200);}
 async function rpc(name,args={},confirmed=false){
   const data=await json('/api/mcp',{method:'POST',body:JSON.stringify({jsonrpc:'2.0',id:`media-${Date.now()}`,method:'tools/call',params:{name,arguments:args,confirmed}})});
   if(data.error)throw new Error(data.error.message||'MCP 工具执行失败');
   return data.result?.structuredContent?.result??data.result;
 }
 function currentView(){return(location.hash||'#today').slice(1).split('/')[0]||'today';}
-function notify(message,error=false){const toast=document.querySelector('#toast');if(!toast)return;toast.textContent=message;toast.className=`toast show${error?' error':''}`;clearTimeout(toast._mediaTimer);toast._mediaTimer=setTimeout(()=>toast.className='toast',3200);}
 
 function ensureNav(){
   const cleanup=document.querySelector('[data-action="toggle-cleanup"]');if(!cleanup||document.querySelector('.v3-nav-media'))return;

@@ -1,9 +1,4 @@
-const toastEl=document.getElementById('toast');
-function toast(msg,error=false){toastEl.textContent=msg;toastEl.className='toast show'+(error?' error':'');clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.className='toast',2600);}
-
-async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'请求失败');return data;}
-
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+const {esc,json:api,toast,setupModal}=window.WB;
 
 let allUsers=[];
 let selectedIds=new Set();
@@ -37,7 +32,7 @@ function renderUsers(){
   list.innerHTML=filtered.map(u=>{
     const canDelete=u.role!=='admin'||adminCount>1;
     return `<div class="user-card" data-uid="${esc(u.id)}">
-      <input type="checkbox" class="user-checkbox" data-uid="${esc(u.id)}" ${selectedIds.has(u.id)?'checked':''}>
+      <input type="checkbox" class="user-checkbox" id="user-check-${esc(u.id)}" data-uid="${esc(u.id)}" aria-label="选择用户 ${esc(u.username)}" ${selectedIds.has(u.id)?'checked':''}>
       <div class="user-avatar">${esc(u.username.charAt(0).toUpperCase())}</div>
       <div class="user-info">
         <div class="name">${esc(u.username)}<span class="role-badge ${u.role}">${u.role==='admin'?'管理员':'用户'}</span></div>
@@ -138,10 +133,11 @@ document.getElementById('users-list').addEventListener('click',async(e)=>{
 async function changePassword(userId){
   const modal=document.createElement('div');
   modal.className='modal-overlay';
-  modal.innerHTML=`<div class="modal-box"><h3>修改密码</h3><input id="mp-old" type="password" placeholder="旧密码"><input id="mp-new" type="password" placeholder="新密码（至少8位，含字母和数字）"><input id="mp-confirm" type="password" placeholder="确认新密码"><div class="modal-actions"><button class="btn" id="mp-cancel">取消</button><button class="btn primary" id="mp-save">保存</button></div></div>`;
+  modal.innerHTML=`<div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="mp-title"><h3 id="mp-title">修改密码</h3><label class="field-label" for="mp-old">旧密码</label><input id="mp-old" type="password" placeholder="旧密码" autocomplete="current-password"><label class="field-label" for="mp-new">新密码（至少8位，含字母和数字）</label><input id="mp-new" type="password" placeholder="新密码（至少8位，含字母和数字）" autocomplete="new-password"><label class="field-label" for="mp-confirm">确认新密码</label><input id="mp-confirm" type="password" placeholder="确认新密码" autocomplete="new-password"><div class="modal-actions"><button class="btn" id="mp-cancel">取消</button><button class="btn primary" id="mp-save">保存</button></div></div>`;
   document.body.appendChild(modal);
-  modal.querySelector('#mp-cancel').addEventListener('click',()=>modal.remove());
-  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  const mpCleanup=setupModal(modal,()=>modal.remove());
+  modal.querySelector('#mp-cancel').addEventListener('click',()=>{mpCleanup();modal.remove();});
+  modal.addEventListener('click',e=>{if(e.target===modal){mpCleanup();modal.remove();}});
   modal.querySelector('#mp-save').addEventListener('click',async()=>{
     const oldP=modal.querySelector('#mp-old').value;
     const newP=modal.querySelector('#mp-new').value;
@@ -152,7 +148,7 @@ async function changePassword(userId){
     if(!/[a-zA-Z]/.test(newP)||!/[0-9]/.test(newP)){toast('密码必须包含字母和数字',true);return;}
     try{
       await api(`/api/users/${userId}/password`,{method:'POST',body:JSON.stringify({oldPassword:oldP,newPassword:newP})});
-      modal.remove();
+      mpCleanup();modal.remove();
       toast('密码已修改');
     }catch(e){toast(e.message,true);}
   });
@@ -161,10 +157,10 @@ async function changePassword(userId){
 async function editUser(userId,displayName,role){
   const modal=document.createElement('div');
   modal.className='modal-overlay';
-  modal.innerHTML=`<div class="modal-box"><h3>编辑用户</h3>
-    <label class="field-label">显示名称</label>
+  modal.innerHTML=`<div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="eu-title"><h3 id="eu-title">编辑用户</h3>
+    <label class="field-label" for="eu-dname">显示名称</label>
     <input id="eu-dname" type="text" value="${esc(displayName)}" placeholder="显示名称">
-    <label class="field-label">角色</label>
+    <label class="field-label" for="eu-role">角色</label>
     <select id="eu-role" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;margin-bottom:12px">
       <option value="member" ${role==='member'?'selected':''}>普通用户</option>
       <option value="admin" ${role==='admin'?'selected':''}>管理员</option>
@@ -172,14 +168,15 @@ async function editUser(userId,displayName,role){
     <div class="modal-actions"><button class="btn" id="eu-cancel">取消</button><button class="btn primary" id="eu-save">保存</button></div>
   </div>`;
   document.body.appendChild(modal);
-  modal.querySelector('#eu-cancel').addEventListener('click',()=>modal.remove());
-  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  const euCleanup=setupModal(modal,()=>modal.remove());
+  modal.querySelector('#eu-cancel').addEventListener('click',()=>{euCleanup();modal.remove();});
+  modal.addEventListener('click',e=>{if(e.target===modal){euCleanup();modal.remove();}});
   modal.querySelector('#eu-save').addEventListener('click',async()=>{
     const newName=modal.querySelector('#eu-dname').value.trim();
     const newRole=modal.querySelector('#eu-role').value;
     try{
       await api(`/api/users/${userId}`,{method:'PATCH',body:JSON.stringify({displayName:newName,role:newRole})});
-      modal.remove();
+      euCleanup();modal.remove();
       toast('用户信息已更新');
       await loadUsers();
     }catch(e){toast(e.message,true);}
@@ -198,10 +195,11 @@ async function deleteUser(userId,username){
 async function viewUserData(userId,username,displayName){
   const modal=document.createElement('div');
   modal.className='modal-overlay';
-  modal.innerHTML=`<div class="data-modal"><div class="data-modal-head"><h3>${esc(username)} 的数据</h3><button class="close-btn" id="dm-close">✕</button></div><div class="data-modal-body"><div style="text-align:center;padding:20px;color:var(--muted)">加载中…</div></div></div>`;
+  modal.innerHTML=`<div class="data-modal" role="dialog" aria-modal="true" aria-labelledby="dm-title"><div class="data-modal-head"><h3 id="dm-title">${esc(username)} 的数据</h3><button class="close-btn" id="dm-close" aria-label="关闭">✕</button></div><div class="data-modal-body"><div style="text-align:center;padding:20px;color:var(--muted)">加载中…</div></div></div>`;
   document.body.appendChild(modal);
-  modal.querySelector('#dm-close').addEventListener('click',()=>modal.remove());
-  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+  const dmCleanup=setupModal(modal,()=>modal.remove());
+  modal.querySelector('#dm-close').addEventListener('click',()=>{dmCleanup();modal.remove();});
+  modal.addEventListener('click',e=>{if(e.target===modal){dmCleanup();modal.remove();}});
   try{
     const data=await api(`/api/admin/users/${userId}/state`);
     const s=data.state||{};

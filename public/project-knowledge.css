@@ -1,12 +1,12 @@
 .pk-nav-hidden{display:none!important}
 .sidebar:has(#project-knowledge-index) .nav{display:none!important}
 #project-knowledge-index ~ #project-knowledge-index{display:none!important}
-.pk-index{display:grid;gap:12px;padding:4px 2px 12px}
+.pk-index{display:grid;gap:var(--space-3);padding:4px 2px 12px}
 .pk-index-kicker{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#747d89}
-.pk-index-title{font-size:15px;font-weight:750;color:#e8ebf0;line-height:1.4;word-break:break-word}
+.pk-index-title{font-size:var(--text-md);font-weight:750;color:#e8ebf0;line-height:1.4;word-break:break-word}
 .pk-chips{display:flex;flex-wrap:wrap;gap:6px}
-.pk-chip{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border-radius:999px;background:#2a303a;color:#c7ced8;font-size:10px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pk-chapters{display:grid;gap:4px}
+.pk-chip{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border-radius:var(--radius-pill);background:#2a303a;color:#c7ced8;font-size:var(--text-xs);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk-chapters{display:grid;gap:var(--space-1)}
 .pk-chapter{display:flex;width:100%;border:0;background:transparent;color:#aeb6c2;text-align:left;padding:9px 10px;border-radius:9px;font-size:13px;cursor:pointer;font-family:inherit}
 .pk-chapter:hover{background:var(--side2,#1b2028);color:#fff}
 .pk-back{display:flex;align-items:center;margin-top:6px;padding:9px 10px;border-radius:9px;color:#8ab8ff;text-decoration:none;font-size:13px}
