@@ -1,12 +1,25 @@
 /**
  * SQLite 数据库初始化与表结构定义
  * 多用户改造：所有业务表增加 userId 字段实现数据隔离
+ *
+ * Schema 版本管理：
+ * - _schema_version 表记录当前数据库版本号
+ * - SCHEMA_SQL 包含最新全量建表语句（用于全新数据库）
+ * - migrations 数组记录增量迁移步骤（用于已有数据库升级）
+ * - 启动时自动检测并执行未完成的迁移
  */
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 
 const SCHEMA_SQL = `
+-- Schema 版本追踪表
+CREATE TABLE IF NOT EXISTS _schema_version (
+  version INTEGER PRIMARY KEY,
+  description TEXT NOT NULL,
+  appliedAt TEXT NOT NULL
+);
+
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -194,6 +207,77 @@ CREATE TABLE IF NOT EXISTS businesses (
 CREATE INDEX IF NOT EXISTS idx_businesses_user ON businesses(userId);
 `;
 
+/**
+ * 增量迁移定义
+ * 每个迁移从上一个版本升级到 version 指定的版本
+ * migrations[0] = v0→v1, migrations[1] = v1→v2, ...
+ *
+ * 新增迁移时只需在数组末尾追加一项，并更新 CURRENT_SCHEMA_VERSION
+ */
+const migrations = [
+  {
+    version: 1,
+    description: 'Add tokenVersion column to users table (v3.1 security)',
+    up: (db) => {
+      const cols = db.pragma('table_info(users)');
+      if (cols.length > 0 && !cols.some(c => c.name === 'tokenVersion')) {
+        db.exec('ALTER TABLE users ADD COLUMN tokenVersion INTEGER NOT NULL DEFAULT 0');
+      }
+    }
+  },
+  {
+    version: 2,
+    description: 'Add lastSeenAt column to users table (v3.1 activity tracking)',
+    up: (db) => {
+      const cols = db.pragma('table_info(users)');
+      if (cols.length > 0 && !cols.some(c => c.name === 'lastSeenAt')) {
+        db.exec('ALTER TABLE users ADD COLUMN lastSeenAt TEXT');
+      }
+    }
+  }
+];
+
+/** 当前 schema 版本（等于 migrations 数组中最后一个 version） */
+export const CURRENT_SCHEMA_VERSION = migrations.length > 0
+  ? migrations[migrations.length - 1].version
+  : 0;
+
+/**
+ * 获取数据库当前 schema 版本
+ */
+function getSchemaVersion(db) {
+  try {
+    const row = db.prepare('SELECT MAX(version) as v FROM _schema_version').get();
+    return row?.v ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 执行待应用的迁移
+ */
+function runMigrations(db) {
+  const currentVersion = getSchemaVersion(db);
+  const pending = migrations.filter(m => m.version > currentVersion);
+
+  if (pending.length === 0) {
+    return currentVersion;
+  }
+
+  for (const migration of pending) {
+    const tx = db.transaction(() => {
+      migration.up(db);
+      db.prepare('INSERT INTO _schema_version (version, description, appliedAt) VALUES (?, ?, ?)')
+        .run(migration.version, migration.description, new Date().toISOString());
+    });
+    tx();
+    console.log(`[migration] v${migration.version}: ${migration.description}`);
+  }
+
+  return migrations[migrations.length - 1].version;
+}
+
 export function createDatabase(dataDir) {
   const dbPath = path.join(dataDir, 'workbench.db');
   const db = new Database(dbPath);
@@ -202,28 +286,16 @@ export function createDatabase(dataDir) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('synchronous = NORMAL');
+  // 1. 创建全量表结构（全新数据库直接得到最新 schema）
   db.exec(SCHEMA_SQL);
-  // 迁移：为已有 users 表添加 tokenVersion 列（v3.1 新增）
-  try {
-    const cols = db.pragma('table_info(users)');
-    if (cols.length > 0 && !cols.some(c => c.name === 'tokenVersion')) {
-      db.exec('ALTER TABLE users ADD COLUMN tokenVersion INTEGER NOT NULL DEFAULT 0');
-      console.log('[migration] 已为 users 表添加 tokenVersion 列');
-    }
-  } catch (e) {
-    // 首次创建表时无此列也无妨，SCHEMA_SQL 已包含
-  }
-  // 迁移：为已有 users 表添加 lastSeenAt 列（v3.1 新增，用户活跃度追踪）
-  try {
-    const cols = db.pragma('table_info(users)');
-    if (cols.length > 0 && !cols.some(c => c.name === 'lastSeenAt')) {
-      db.exec('ALTER TABLE users ADD COLUMN lastSeenAt TEXT');
-      console.log('[migration] 已为 users 表添加 lastSeenAt 列');
-    }
-  } catch (e) {
-    // 首次创建表时无此列也无妨，后续会在 SCHEMA_SQL 中统一添加
+  // 2. 执行增量迁移（已有数据库升级到最新版本）
+  const finalVersion = runMigrations(db);
+  if (finalVersion < CURRENT_SCHEMA_VERSION) {
+    console.warn(`[db] Schema version ${finalVersion} is below expected ${CURRENT_SCHEMA_VERSION}`);
+  } else if (finalVersion > 0) {
+    console.log(`[db] Schema version: ${finalVersion}`);
   }
   return db;
 }
 
-export { SCHEMA_SQL };
+export { SCHEMA_SQL, migrations };
