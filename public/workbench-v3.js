@@ -202,7 +202,8 @@ function scenePageHtml(state){
 }
 function enhanceScene(){if(!v3State)return;const main=document.querySelector('.main');if(!main)return;setTop('项目现场','最近工作现场与项目进度已经合并。');hideLegacyMain(main,true);const signature=stateSignature(v3State);let node=main.querySelector('#v3-scene');if(node?.dataset.signature===signature)return;node?.remove();const holder=document.createElement('div');holder.innerHTML=scenePageHtml(v3State);const scene=holder.firstElementChild;const capture=main.querySelector('.capture');if(capture)capture.insertAdjacentElement('afterend',scene);else main.prepend(scene);}
 function rewriteTaskSyncButton(){if(currentView()!=='tasks')return;for(const button of document.querySelectorAll('[data-action="sync-feishu"]')){if(button.textContent!=='同步飞书待办')button.textContent='同步飞书待办';button.title='只读取飞书云文档中的明确待办，不读取普通日记正文。';}}
-function renderEnhancements(){if(rendering)return;rendering=true;try{enhanceSidebar();const view=currentView();if(view==='today')enhanceToday();else if(view==='journal')enhanceScene();rewriteTaskSyncButton();}finally{rendering=false;}}
+let enhanceDispatched=false;
+function renderEnhancements(){if(rendering)return;rendering=true;try{enhanceSidebar();const view=currentView();if(view==='today')enhanceToday();else if(view==='journal')enhanceScene();rewriteTaskSyncButton();}finally{rendering=false;}if(!enhanceDispatched){enhanceDispatched=true;requestAnimationFrame(()=>{enhanceDispatched=false;window.dispatchEvent(new CustomEvent('workbench:enhance'));});}}
 
 function acceptedPlan(item,plan){
   if(!plan||plan.kind==='clarification')return plan;
@@ -276,7 +277,7 @@ window.WB.renderToday=enhanceToday;
 window.WB.renderScene=enhanceScene;
 window.WB.v3Refresh=()=>void refresh(true);
 
-window.addEventListener('hashchange',()=>{if(currentView()==='inbox'){location.hash='#today';return;}schedule();void refresh(true);});
-const appRoot=document.querySelector('#app')||document.body;new MutationObserver(schedule).observe(appRoot,{childList:true});
+window.addEventListener('hashchange',()=>{schedule();void refresh(true);});
+window.addEventListener('workbench:enhance',schedule);
 function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;renderEnhancements();void refresh();});}
-loadReviewCache();if(currentView()==='inbox')location.hash='#today';void refresh(true);
+loadReviewCache();void refresh(true);

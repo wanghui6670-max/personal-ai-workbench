@@ -184,7 +184,7 @@ document.addEventListener('click',event=>{
   applyTheme(current==='dark'?'light':'dark',{persist:true});
 });
 window.addEventListener('hashchange',scheduleEnhance);
-new MutationObserver(scheduleEnhance).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',scheduleEnhance);
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',event=>{
   let stored=null;
   try{stored=localStorage.getItem(THEME_KEY);}catch{}

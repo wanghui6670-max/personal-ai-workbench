@@ -1,6 +1,5 @@
 let selectedInboxId=null;
 let scheduled=false;
-let mainObserver=null;
 
 function itemId(node){
   if(node?.dataset?.v3Id)return node.dataset.v3Id;
@@ -68,13 +67,6 @@ function renderFocusPanel(){
   const title=panel.querySelector('.ai-title'),subtitle=panel.querySelector('.ai-subtitle');
   if(info){setText(title,'当前事项助手');setText(subtitle,'只围绕选中的明确待办补充信息或确认处理');}
 }
-function attachMainObserver(){
-  const main=document.querySelector('.main');
-  if(!main||main===mainObserver?._target)return;
-  mainObserver?.disconnect();
-  mainObserver=new MutationObserver(schedule);mainObserver._target=main;
-  mainObserver.observe(main,{childList:true,subtree:true});
-}
 function renderWorkSurface(){polishDashboard();}
 
 document.addEventListener('click',event=>{
@@ -89,7 +81,6 @@ document.addEventListener('click',event=>{
   if(item){selectedInboxId=itemId(item);schedule();}
 },true);
 
-const app=document.querySelector('#app');
-if(app)new MutationObserver(()=>{schedule();}).observe(app,{childList:true});
 window.addEventListener('hashchange',schedule);
+window.addEventListener('workbench:enhance',schedule);
 requestAnimationFrame(()=>{renderWorkSurface();});

@@ -320,5 +320,5 @@ document.addEventListener('submit',event=>{
 });
 
 setPanelMode(readPanelMode());
-new MutationObserver(scheduleEnhance).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',scheduleEnhance);
 scheduleEnhance();

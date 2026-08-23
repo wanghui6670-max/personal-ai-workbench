@@ -82,6 +82,6 @@
   // 兼容旧初始化脚本调用；todo-only 模式不再需要“整篇日记提取”一次性令牌。
   window.__WORKBENCH_ARM_INITIAL_ANALYSIS__=()=>{};
   window.addEventListener('workbench:feishu-sync-complete',scheduleEnhance);
-  const app=document.querySelector('#app');if(app)new MutationObserver(scheduleEnhance).observe(app,{childList:true,subtree:true});
+  window.addEventListener('workbench:enhance',scheduleEnhance);
   requestAnimationFrame(enhance);
 })();

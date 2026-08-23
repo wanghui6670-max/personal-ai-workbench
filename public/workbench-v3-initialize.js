@@ -62,6 +62,5 @@
     }
   }catch{}
 
-  const app=document.querySelector('#app');if(app)new MutationObserver(schedule).observe(app,{childList:true,subtree:true});
-  window.addEventListener('hashchange',schedule);requestAnimationFrame(schedule);
+  window.addEventListener('hashchange',schedule);window.addEventListener('workbench:enhance',schedule);requestAnimationFrame(schedule);
 })();

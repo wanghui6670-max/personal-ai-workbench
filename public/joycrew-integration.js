@@ -387,5 +387,5 @@ window.addEventListener('hashchange',()=>{
   mountOperationsNavigation();
   if(isOperations()){operationsState.error='';scheduleOperationsMount();}
 });
-new MutationObserver(scheduleOperationsMount).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',scheduleOperationsMount);
 scheduleOperationsMount();

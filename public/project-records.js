@@ -166,5 +166,5 @@ document.addEventListener('click',event=>{
 });
 
 window.addEventListener('hashchange',scheduleEnsure);
-new MutationObserver(scheduleEnsure).observe(document.getElementById('app'),{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',scheduleEnsure);
 scheduleEnsure();

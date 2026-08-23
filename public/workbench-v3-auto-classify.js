@@ -59,17 +59,12 @@ function renderClassificationPools(){
   const html=filterBarHtml(counts);if(bar.innerHTML!==html)bar.innerHTML=html;
 }
 
-function schedule(){if(v3AutoScheduled)return;v3AutoScheduled=true;requestAnimationFrame(()=>{v3AutoScheduled=false;renderClassificationPools();attachObserver();});}
-function attachObserver(){
-  const main=document.querySelector('.main');if(!main||v3AutoObserver?._target===main)return;
-  v3AutoObserver?.disconnect();v3AutoObserver=new MutationObserver(schedule);v3AutoObserver._target=main;
-  v3AutoObserver.observe(main,{childList:true});
-}
+function schedule(){if(v3AutoScheduled)return;v3AutoScheduled=true;requestAnimationFrame(()=>{v3AutoScheduled=false;renderClassificationPools();});}
 
 document.addEventListener('click',event=>{
   const button=event.target.closest?.('[data-v3-pool]');if(!button)return;
   event.preventDefault();event.stopPropagation();v3AutoFilter=button.dataset.v3Pool||'active';schedule();
 },true);
 window.addEventListener('hashchange',schedule);
-const app=document.querySelector('#app');if(app)new MutationObserver(schedule).observe(app,{childList:true});
-requestAnimationFrame(()=>{attachObserver();renderClassificationPools();});
+window.addEventListener('workbench:enhance',schedule);
+requestAnimationFrame(()=>{renderClassificationPools();});

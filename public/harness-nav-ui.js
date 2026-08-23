@@ -367,10 +367,9 @@ window.addEventListener('scroll',()=>{if(mentionState.open){const ta=document.qu
 window.addEventListener('resize',()=>applyPanelWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-panel-width'))||DEFAULT_PANEL_WIDTH));
 
 /* ─── 初始化 ─── */
-new MutationObserver(scheduleMount).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
 window.addEventListener('hashchange',scheduleMount);
+window.addEventListener('workbench:enhance',scheduleMount);
 loadPanelWidth();
 navigatorState.sessions=loadSessions();
 loadStatus();
-setInterval(()=>{if(!navigatorState.status||navigatorState.status.reason==='auth_required')void loadStatus(true);},3000);
 scheduleMount();

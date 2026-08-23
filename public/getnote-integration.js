@@ -53,6 +53,6 @@ async function syncContent(target){
 
 document.addEventListener('click',event=>{const target=event.target.closest?.('[data-media-action]');if(!target)return;event.preventDefault();event.stopImmediatePropagation();if(target.dataset.mediaAction==='sync')void syncContent(target);},true);
 window.addEventListener('hashchange',()=>{schedule();if(currentView()==='media')void refreshStatus();});
-new MutationObserver(schedule).observe(document.querySelector('#app')||document.body,{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',schedule);
 function schedule(){if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;ensureNav();renderMedia();});}
 void refreshStatus();schedule();

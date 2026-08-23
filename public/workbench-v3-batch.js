@@ -33,9 +33,8 @@
     const html=`<label class="v3-batch-all"><input type="checkbox" data-batch-all aria-label="全选当前页所有记录" ${allVisible?'checked':''} ${busy?'disabled':''}> 全选当前</label><span class="v3-batch-count">已选 ${selectedCount}</span><button class="btn small" data-batch-action="reanalyze" ${disabled?'disabled':''}>批量重新分析</button><button class="btn small primary" data-batch-action="confirm" ${busy||executable===0?'disabled':''}>批量确认可执行 ${executable}</button><button class="btn small" data-batch-action="delete" ${disabled?'disabled':''}>批量删除本地</button>${busy?'<span class="v3-batch-busy">处理中…</span>':''}`;
     if(bar.innerHTML!==html)bar.innerHTML=html;
   }
-  async function enhance(){scheduled=false;observer?.disconnect();try{const state=await currentState();const inbox=Array.isArray(state?.inbox)?state.inbox:[];const nodes=inboxNodes();nodes.forEach((node,index)=>{const id=stableItemId(node,inbox[index]);if(id)ensureItemCheckbox(node,id);});renderBatchBar();}finally{attachObserver();}}
+  async function enhance(){scheduled=false;try{const state=await currentState();const inbox=Array.isArray(state?.inbox)?state.inbox:[];const nodes=inboxNodes();nodes.forEach((node,index)=>{const id=stableItemId(node,inbox[index]);if(id)ensureItemCheckbox(node,id);});renderBatchBar();}catch{}}
   function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=>void enhance());}
-  function attachObserver(){const main=document.querySelector('.main');if(!main)return;observer?.disconnect();observer=new MutationObserver(schedule);observer.observe(main,{childList:true,subtree:true});}
 
   async function batchReanalyze(){
     const ids=[...selectedIds];const queue=ids.filter(id=>Boolean(itemNode(id)?.querySelector('[data-v3-action="analyze"]')));if(!queue.length)return notify('所选记录当前没有可重新解析的原始日记项。',true);
@@ -69,5 +68,5 @@
     if(event.target.closest?.('.v3-batch-check'))event.stopPropagation();const action=event.target.closest?.('[data-batch-action]')?.dataset?.batchAction;if(!action||busy)return;event.preventDefault();event.stopPropagation();
     if(action==='reanalyze')void batchReanalyze();else if(action==='confirm')void batchConfirm();else if(action==='delete')void batchDelete();
   },true);
-  window.addEventListener('hashchange',schedule);window.addEventListener('workbench:feishu-sync-complete',schedule);requestAnimationFrame(()=>{attachObserver();schedule();});
+  window.addEventListener('hashchange',schedule);window.addEventListener('workbench:enhance',schedule);window.addEventListener('workbench:feishu-sync-complete',schedule);requestAnimationFrame(()=>{schedule();});
 })();

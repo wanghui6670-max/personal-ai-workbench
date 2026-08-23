@@ -281,6 +281,5 @@ window.WB.renderSkills=renderSkills;
 window.WB.crewLoad=()=>loadCrew(true);
 
 window.addEventListener('hashchange',()=>{schedule();void renderEnhancements();});
-const appRoot=document.querySelector('#app')||document.body;
-new MutationObserver(schedule).observe(appRoot,{childList:true,subtree:true});
+window.addEventListener('workbench:enhance',schedule);
 schedule();
