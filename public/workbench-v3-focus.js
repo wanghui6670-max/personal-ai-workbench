@@ -13,7 +13,9 @@ function schedule(){if(scheduled)return;scheduled=true;requestAnimationFrame(()=
 
 function polishDashboard(){
   const dashboard=document.querySelector('#v3-dashboard');if(!dashboard)return;
-  const queue=dashboard.querySelector(':scope > .v3-card');
+  const cards=dashboard.querySelectorAll(':scope > .v3-card');
+  // 日历卡片（含 v3-calendar-card 类）放第一个，待处理工作流放后面
+  const queue=[...cards].find(c=>!c.classList.contains('v3-calendar-card'));
   setText(queue?.querySelector('.v3-card-head h2'),'待处理工作流');
   setText(queue?.querySelector('.v3-card-head p'),'飞书明确待办 → AI 给处理建议 → 你确认 → Todo；普通日记不进入待办同步。');
   const labels=dashboard.querySelectorAll('.v3-hero .v3-metric span');

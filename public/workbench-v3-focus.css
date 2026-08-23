@@ -5,8 +5,8 @@
 .v3-dashboard>.v3-hero .v3-metric:last-child{border-right:0}
 .v3-dashboard>.v3-hero .v3-metric strong{font-size:18px;line-height:1.1}
 .v3-dashboard>.v3-hero .v3-metric span{font-size:10px;margin-top:3px;display:block}
-.v3-dashboard>.v3-card:nth-of-type(1){order:1}
-.v3-dashboard>.v3-calendar-card{order:2}
+.v3-dashboard>.v3-calendar-card{order:1}
+.v3-dashboard>.v3-card:not(.v3-calendar-card){order:2}
 .v3-card{border-radius:14px;padding:14px;box-shadow:none}
 .v3-card-head{margin-bottom:8px;align-items:center}
 .v3-card-head h2{font-size:15px}
