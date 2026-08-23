@@ -14,7 +14,8 @@ import crypto from 'node:crypto';
 import { timingSafeEqualText } from './utils.mjs';
 
 const COOKIE = 'workbench_session';
-const MAX_AGE = 60 * 60 * 24 * 30; // 30 天
+const DEFAULT_MAX_AGE = 60 * 60 * 24 * 30; // 30 天
+const MAX_AGE = process.env.JWT_MAX_AGE ? Math.max(60, parseInt(process.env.JWT_MAX_AGE, 10)) : DEFAULT_MAX_AGE;
 const LEGACY_USER_ID = '__legacy__';
 
 const LOGIN_LIMITER_DEFAULTS = {
@@ -241,4 +242,4 @@ export function captureAuthorized(req) {
   return timingSafeEqualText(supplied, expected);
 }
 
-export { COOKIE, LEGACY_USER_ID };
+export { COOKIE, LEGACY_USER_ID, MAX_AGE };

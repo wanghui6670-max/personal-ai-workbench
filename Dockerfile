@@ -1,5 +1,6 @@
 FROM node:24.19.0-alpine
-RUN apk add --no-cache git
+# better-sqlite3 是原生模块，Alpine 需要编译工具链
+RUN apk add --no-cache git python3 make g++
 WORKDIR /app
 
 COPY --chown=node:node package.json package-lock.json ./

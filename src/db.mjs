@@ -195,8 +195,11 @@ CREATE INDEX IF NOT EXISTS idx_businesses_user ON businesses(userId);
 export function createDatabase(dataDir) {
   const dbPath = path.join(dataDir, 'workbench.db');
   const db = new Database(dbPath);
+  // 并发安全：多用户同时写入时，SQLite 会等待最多 5 秒而不是立即抛 SQLITE_BUSY
+  db.pragma('busy_timeout = 5000');
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  db.pragma('synchronous = NORMAL');
   db.exec(SCHEMA_SQL);
   return db;
 }

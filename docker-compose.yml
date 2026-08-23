@@ -13,25 +13,33 @@ services:
       PORT: "${WORKBENCH_PORT:-4173}"
       DATA_DIR: /data
       WORKSPACE_ROOT: /workspace
-    # Allows JOYCREW_BASE_URL=http://host.docker.internal:4000 when Joycrew
-    # runs on the same host. Authentication remains server-to-server.
+      # 多用户模式默认启用
+      STORE_BACKEND: "${STORE_BACKEND:-sqlite}"
+    # 允许 JOYCREW_BASE_URL=http://host.docker.internal:4000 当 Joycrew
+    # 运行在同一宿主机上。认证仍然是服务间调用。
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - type: bind
         source: ${WORKBENCH_DATA_PATH:-./data}
         target: /data
-      # Read-write is required: the app creates project folders and PROJECT.md files.
+      # 读写权限是必需的：应用会创建项目文件夹和 PROJECT.md 文件。
       - type: bind
         source: ${WORKBENCH_WORKSPACE_PATH:-./workspace}
         target: /workspace
         read_only: false
+    # 资源限制：5-10 人小团队适用
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
     restart: unless-stopped
 
-  # Optional. Start explicitly with:
+  # 可选。显式启动方式：
   # docker compose --profile employee-runtime up -d --build
-  # Joycrew can then use http://host.docker.internal:${EMPLOYEE_HARNESS_PORT:-4300}
-  # (or another approved private route) as DEEPSEEK_HARNESS_URL.
+  # Joycrew 随后可使用 http://host.docker.internal:${EMPLOYEE_HARNESS_PORT:-4300}
+  #（或其他已批准的私有路由）作为 DEEPSEEK_HARNESS_URL。
   employee-harness-runtime:
     profiles: ["employee-runtime"]
     build:

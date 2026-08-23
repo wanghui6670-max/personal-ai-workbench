@@ -1,436 +1,181 @@
-# 部署说明
+# Personal AI Workbench 部署指南
 
-> 当前 R1 部署合同以 `RELEASE_R1_CONTRACT.md` 和 `WORKBENCH_V3_SOURCE_CONTRACT.md` 为准。本文后半保留的 GetNote Task Sync、每日工作日记、VPS 和 Docker 内容只用于历史兼容或开发验证，不能覆盖 v3 来源合同。
+## 1. 本地开发部署
 
-R1 正式运行画像：`local_single_user`。正式服务运行在一台受信任 Mac、一个 macOS 用户、一个 Node 进程和一个独占 `DATA_DIR` 上，由 LaunchAgent 常驻并默认只监听 loopback。
+### 1.1 前置要求
 
-当前个人事项主链固定为：
+- Node.js >= 20.0.0
+- npm
 
-```text
-飞书云文档中的明确待办（个人工作事项主入口）
-→ 用户主动同步
-→ Workbench Inbox
-→ AI 建议或人工处理
-→ 用户确认 Todo
-→ 用户决定 Today
-```
-
-GetNote 只作为经用户确认的自媒体内容来源，不再是个人待办来源。Legacy GetNote Task Sync v2 只为历史数据兼容保留，不属于 R1。
-
-R1 主机必须能访问：
-
-- 持久化数据目录；
-- 真实项目工作区；
-- 当前飞书明确待办来源；
-- 可选：GetNote 内容来源、飞书项目记录、Provider 或 DSH 的受控运行时；
-- 已启用能力所需的本机 CLI，但不把 CLI 登录态打包进仓库或镜像。
-
-普通无状态云函数不能直接读取真实项目工作区，也不能天然持有得到大脑或飞书 CLI 登录态。
-
-## 1. 可选 GetNote 内容来源的两种运行形态
-
-GetNote 内容同步业务层复用 `GetNoteReader`。其中 `fetchTodos` 只供 Legacy Task Sync 回归，不进入当前交互式个人待办主链：
-
-```text
-listNotes
-fetchTodos
-fetchNote
-status
-```
-
-### 本地/原生：`local_cli`
-
-```dotenv
-GETNOTE_RUNTIME_MODE=local_cli
-```
-
-工作台进程所在用户必须安装并授权 `getnote`。
-
-### 历史 VPS/Docker 兼容：`private_http`
-
-```text
-VPS 宿主机 getnote CLI
-        ↓
-只读 GetNote Runtime sidecar
-        ↓ private_http + service token
-Workbench Docker
-```
-
-Workbench 镜像不安装 getnote CLI、不烘焙得到大脑凭证。CLI 登录态留在 VPS 宿主机。
-
-Workbench `.env`：
-
-```dotenv
-GETNOTE_RUNTIME_MODE=private_http
-GETNOTE_RUNTIME_BASE_URL=http://host.docker.internal:4310
-GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
-```
-
-Runtime 只允许 loopback/私网/Docker 内部地址，不允许公网 origin 或 redirect。
-
-## 2. VPS 宿主机 GetNote CLI
-
-安装或更新：
+### 1.2 步骤
 
 ```bash
-npx -y @getnote/cli@latest setup
+# 克隆仓库
+git clone <repo-url> && cd personal-ai-workbench
+
+# 安装依赖
+npm ci
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env，至少设置 SESSION_SECRET（至少 24 字符）
+
+# 启动服务
+npm start
+# 服务默认监听 http://127.0.0.1:4173
 ```
 
-本地 CLI transport 的固定只读命令：
+### 1.3 多用户模式
 
-```text
-getnote notes --limit <20-500> [--cursor <cursor>] -o json
-getnote note todos <note_id> -o json
-getnote note <note_id> -o json
-getnote doctor -o json
-```
+v3.1 默认启用多用户模式（`STORE_BACKEND=sqlite`）：
 
-Workbench 不读取、请求或保存 CLI token、cookie 或登录文件。
+1. 在 `.env` 中设置 `WORKBENCH_ADMIN_USERNAME` 和 `WORKBENCH_ADMIN_PASSWORD`
+2. 首次启动时自动创建管理员账户
+3. 访问 `/login` 登录，之后通过 `/users` 页面管理其他用户
 
-宿主机可做只读验证：
+## 2. Docker 部署（局域网）
+
+适用于团队内部网络，不需要 HTTPS。
+
+### 2.1 配置
 
 ```bash
-getnote doctor -o json
-getnote notes --limit 20 -o json
+cp .env.example .env
+# 编辑 .env：
+#   WORKBENCH_ADMIN_USERNAME=admin
+#   WORKBENCH_ADMIN_PASSWORD=<强密码>
+#   SESSION_SECRET=<至少 24 字符随机字符串>
+#   TRUSTED_ORIGINS=http://your-server-ip:4173
+#   COOKIE_SECURE=0  （局域网 HTTP 时保持 0）
 ```
 
-不要把认证输出、配置目录或登录文件提交到 Git。
-
-## 3. GetNote Runtime sidecar
-
-仓库提供：
+### 2.2 启动
 
 ```bash
-npm run getnote:runtime
-```
-
-sidecar 只提供：
-
-```text
-GET /health
-GET /v1/notes
-GET /v1/notes/:id/todos
-GET /v1/notes/:id
-```
-
-数据路由需要 bearer service token；没有任意 shell、任意 argv 或写 GetNote 接口。
-
-推荐默认绑定：
-
-```dotenv
-GETNOTE_RUNTIME_HOST=127.0.0.1
-GETNOTE_RUNTIME_PORT=4310
-GETNOTE_RUNTIME_SERVICE_TOKEN=<至少 32 字符随机值>
-```
-
-如果 Workbench Docker 必须从 bridge 网络访问宿主机 sidecar，应只在确认 VPS 防火墙和容器网络边界后使用私网 bind，并显式：
-
-```dotenv
-GETNOTE_RUNTIME_ALLOW_PRIVATE_BIND=1
-```
-
-不要把 sidecar 直接暴露到公网。
-
-## 4. Legacy GetNote Task Sync v2（不属于 R1）
-
-本节只描述保留源码的历史行为，不能作为当前部署入口、doctor 成功标准或 R1 现场验收链。当前运行不得把 `external_tasks_sync`、`external_task_integration_update` 或 `daily_summary_publish` 重新注册到交互式 MCP/AI 工具面。
-
-每次用户主动同步读取：
-
-```text
-最近 N 篇笔记
-+
-Workbench 中仍未完成事项对应的旧 sourceNoteId
-```
-
-去重后读取明确 `meeting_todos`。没有明确待办章节时接受空列表，不使用模型猜测。
-
-核心事务：
-
-```text
-GetNote read
-→ Normalize / Reconcile
-→ Workbench state 原子提交
-```
-
-然后才执行：
-
-```text
-Workbench committed
-       ├─→ 飞书每日任务快照（可选）
-       └─→ ICS 原子重建（可选）
-```
-
-飞书或 ICS 失败不回滚 Workbench。
-
-任务配置显式保存 IANA 时区，默认：
-
-```text
-Asia/Shanghai
-```
-
-因此“下午 3 点”等无 offset 时间不依赖 VPS 系统时区。
-
-## 5. Legacy 飞书每日工作日记 sink
-
-本节的“每日工作日记”是旧 GetNote Task Sync 的可选沉淀 sink；它与当前作为个人工作事项主入口的“飞书明确待办文档”不是同一个职责。每日工作日记 sink 不属于 R1 主链，也不是启用 GetNote 内容同步的前置条件。
-
-未配置飞书 URL 时：
-
-- GetNote → Workbench 核心同步正常；
-- `journal.status=not_configured`；
-- 不要求 `lark-cli`；
-- “发布每日总结”不可用，直到用户配置飞书日记目标。
-
-若要启用飞书 sink，设置官方 Feishu/Lark HTTPS 文档，例如：
-
-```text
-https://<tenant>.feishu.cn/wiki/<document-token>
-```
-
-前置条件：
-
-1. 执行飞书 sink 的宿主环境安装 `lark-cli`；
-2. 以飞书用户身份完成授权；
-3. 目标文档可读可写；
-4. 不把授权文件或凭证打包进仓库或镜像。
-
-固定章节和前缀：
-
-```text
-每日工作日记
-[WORKBENCH_DAILY_TODOS]
-[WORKBENCH_DAILY_SUMMARY]
-[WORKBENCH_OP:<operationId>]
-```
-
-写入采用：
-
-```text
-读取 → operationId 查重 → 写入 → operationId 读回
-```
-
-同一 operationId 若已对应不同正文，返回冲突并停止。
-
-详见 [`TASK_SOURCE_PIPELINE.md`](TASK_SOURCE_PIPELINE.md)。
-
-## 6. 私有 ICS 日历
-
-路径：
-
-```text
-<data-dir>/calendar/personal-ai-workbench.ics
-```
-
-规则：
-
-- 目录权限 `0700`；
-- 文件权限 `0600`；
-- 临时文件 + 原子替换；
-- 写失败清理临时文件；
-- 稳定 UID 来自 GetNote 外部待办 ID 哈希；
-- 只包含未完成且已确定日期的事项；
-- 全天事项使用 `VALUE=DATE`；
-- 无 offset 的明确本地时刻使用任务 `TZID`；
-- 只有明确截止时刻时生成瞬时事件，不猜持续时间；
-- 模糊日期事项不进入日历，而是进入 Workbench Inbox。
-
-工作台只生成 ICS，不调用系统日历 API。ICS 失败不回滚 Workbench 核心同步。
-
-## 7. doctor
-
-```bash
-npm run doctor
-```
-
-doctor 必须按当前启用能力分别报告：
-
-- 检查 Node.js、Git、数据目录与工作区；
-- 检查飞书明确待办主入口的配置与所需 `lark-cli`，但不把配置存在冒充真实读写成功；
-- 仅在启用 GetNote 内容来源时检查其只读 Runtime；
-- `local_cli`：运行 `getnote doctor -o json`；
-- `private_http`：通过 Reader 对 sidecar 做只读连通性和鉴权检查，不要求 Workbench 容器内存在 getnote CLI；
-- Legacy 每日工作日记和 ICS 只能作为兼容检查单独显示，不能成为 v3 主链成功的替代证据。
-
-doctor 不执行得到大脑写入、飞书写入或系统日历导入；普通输出和 `--json` 通过都不等于真实业务现场验收。
-
-## 8. Legacy 错误来源配置迁移
-
-如果现有配置包含此前误接入产生的：
-
-```text
-provider = dida_cli
-cliFlavor = ...
-```
-
-新版本会把外部待办管线停用并显示“需要重新配置”。部署者应：
-
-1. 先执行 `npm run backup`；
-2. 在设置中确认 GetNote Runtime、最近笔记扫描数量、任务时区、可选飞书日记和 ICS；
-3. 保存设置；
-4. 用户明确执行一次得到大脑同步。
-
-保存新的得到大脑设置时，只清理 `source=dida_cli` 的机器导入 Todo 和 Inbox。手工事项、Capture、项目、项目飞书记录和其他来源数据不删除。
-
-## 9. 局域网 / Tailscale / 内网
-
-本节不属于默认 R1。启用任何非 loopback 绑定前必须另立 `local_private_mobile` 或远程部署合同，并单独完成身份、Origin、Cookie、网络和回滚验收。
-
-```text
-HOST=0.0.0.0
-WORKBENCH_PASSWORD=<强密码>
-SESSION_SECRET=<至少 24 字符随机字符串>
-TRUSTED_ORIGINS=http://<受信任主机或IP>:4173
-```
-
-HTTPS 时设置：
-
-```text
-COOKIE_SECURE=1
-```
-
-应用校验实际 Host 和 Origin，不采信 `X-Forwarded-*` 自动放宽。
-
-## 10. iPhone Shortcut
-
-默认 loopback 的 R1 不承诺另一台 iPhone 可以访问 Mac。本节只保留 Capture 协议说明；真实手机连接必须先批准并完成上一节的安全私网画像。
-
-`POST /api/capture` 是独立快速采集入口，不是得到大脑主来源。
-
-```text
-CAPTURE_TOKEN=<独立长随机 token>
-```
-
-每条新事项生成 `captureId`；同一次不确定重试复用原 ID。采集只进入 Workbench Inbox，不自动成为正式 Todo 或加入 Today。
-
-详见 [`IPHONE_SHORTCUT.md`](IPHONE_SHORTCUT.md)。
-
-## 11. Docker
-
-Docker 在 R1 中只作为构建和 CI smoke 面，不是正式运行入口。它必须保持 fail closed，不能使用 `ALLOW_INSECURE_PUBLIC=1` 的结果冒充正式部署证据。
-
-```bash
-docker compose config
 docker compose up -d --build
 ```
 
-容器内：
+服务监听 `http://your-server-ip:4173`。
 
-```text
-/data       工作台持久化数据和 ICS
-/workspace  真实项目目录
+### 2.3 资源限制
+
+docker-compose.yml 已配置默认资源限制（512MB 内存 / 1 CPU）。5-10 人团队足够使用，如有 DSH Copilot 等重计算场景，可适当提高：
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 1G
+      cpus: '2.0'
 ```
 
-默认 Workbench 镜像不包含个人 `getnote`、`lark-cli` 或登录状态。
+## 3. 云服务器部署（HTTPS + Nginx 反代）
 
-**推荐不要为了 GetNote 把 CLI 和凭证塞进 Workbench 镜像。** VPS 上使用宿主机 CLI + 只读 sidecar；Workbench 通过 `private_http` 访问。
+适用于公网部署，通过 Nginx 终结 TLS。
 
-Docker Compose 已提供：
+### 3.1 前置要求
 
-```text
-host.docker.internal:host-gateway
-```
+- 一台云服务器（推荐 2C4G 以上）
+- 域名已解析到服务器 IP
+- TLS 证书（可用 Let's Encrypt / certbot 免费获取）
 
-因此宿主机 sidecar 可通过 `host.docker.internal:<port>` 被容器访问；sidecar 是否需要非 loopback bind，必须根据实际 Docker/VPS 网络测试后决定，不能直接公网暴露。
-
-## 12. Readiness
-
-`GET /api/health` 只证明本地 state/config、数据目录和工作区可用，不证明：
-
-- 得到大脑会员或登录仍有效；
-- GetNote Runtime 当前可达；
-- 得到大脑 API 当前可达；
-- 飞书当前可达或有编辑权限；
-- ICS 已被日历客户端成功导入；
-- OpenAI 当前可达；
-- 真实浏览器已验收；默认 R1 不包含 iPhone 远程连接。
-
-飞书主入口和其他已启用依赖由 `npm run doctor` 的独立诊断补充检查，但只有真实 canary 读回才算现场验收。
-
-## 13. AI Provider
-
-默认 Profile：
-
-```text
-OPENAI_API_KEY=<你的 Key>
-OPENAI_MODEL=gpt-5.6-luna
-```
-
-推理档位固定 `xhigh`。Provider 失败时回退本地规则，不自动改变截止日期、Inbox 或 Today。
-
-详见 [`AI_PROVIDER.md`](AI_PROVIDER.md)。
-
-## 14. 数据目录
-
-```text
-state.json   项目、任务、Inbox、Today、确认项和机器指针
-config.json  工作区、业务板块和外部任务管线设置
-calendar/    可重建 ICS 镜像
-backups/     自动与手工 backup v2
-migrations/  升级快照和迁移报告
-captures/    Capture 哈希收据
-recovery/    飞书跨资源事务恢复凭据
-```
-
-ICS 是可重建镜像，不是待办真源。
-
-## 15. backup v2
+### 3.2 配置
 
 ```bash
-npm run backup
+cp .env.example .env
+# 编辑 .env，确保以下配置：
+#   STORE_BACKEND=sqlite
+#   WORKBENCH_ADMIN_USERNAME=admin
+#   WORKBENCH_ADMIN_PASSWORD=<强密码>
+#   SESSION_SECRET=<至少 24 字符随机字符串>
+#   TRUSTED_ORIGINS=https://your-domain.com
+#   COOKIE_SECURE=1          ← HTTPS 时必须设为 1
+#   JWT_MAX_AGE=2592000      ← 可选，默认 30 天
 ```
 
-精确恢复字段：
-
-```json
-{
-  "backupVersion": 2,
-  "state": {},
-  "config": {},
-  "captureReceipts": [],
-  "projectRecordReceipts": []
-}
-```
-
-- `captureReceipts`：正文 SHA-256 和标识符。
-- `projectRecordReceipts`：机器进度、operationId 和飞书指针。
-
-不包含项目工作区、飞书正文、CLI 登录状态、`.env`、ICS 客户端配置或任何凭证。
-
-**旧备份若没有 `captureReceipts` 或 `projectRecordReceipts` 字段时**，恢复时保留当前凭据目录，而不是静默清空。这保证向后兼容，但旧备份不是这些凭据的历史快照。
-
-## 16. 恢复
-
-先停止工作台：
+### 3.3 TLS 证书
 
 ```bash
-npm run restore -- /path/to/backup.json
-npm run doctor
-npm start
+mkdir -p certs
+
+# 方式一：使用 certbot 获取 Let's Encrypt 证书
+# （先临时启动 HTTP 服务以通过 ACME 验证）
+certbot certonly --standalone -d your-domain.com
+cp /etc/letsencrypt/live/your-domain.com/fullchain.pem ./certs/
+cp /etc/letsencrypt/live/your-domain.com/privkey.pem  ./certs/
+
+# 方式二：使用已有证书
+cp /path/to/fullchain.pem ./certs/
+cp /path/to/privkey.pem   ./certs/
 ```
 
-恢复脚本会先创建恢复前安全备份。backup v2 成组替换 state、可选 config、`captureReceipts` 和 `projectRecordReceipts`；恢复任一阶段失败会尝试回滚全部已修改部分。
+### 3.4 启动
 
-恢复后由用户明确执行一次得到大脑同步，重新生成派生 ICS；没有自动后台同步。
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
 
-## 17. 灾备边界
+服务通过 Nginx 暴露在 `https://your-domain.com`。
 
-完整灾备至少保护：
+### 3.5 Nginx 配置说明
 
-1. `/data`；
-2. `/workspace`；
-3. 远端 Git；
-4. 飞书项目文档和已启用的每日工作日记；
-5. 得到大脑账户和宿主机 CLI 恢复方式；
-6. 若使用飞书 sink，飞书 CLI 登录恢复方式；
-7. GetNote Runtime service token 的安全恢复方式。
+`nginx.conf` 已包含：
+- HTTP → HTTPS 自动重定向
+- TLS 1.2/1.3 + 安全密码套件
+- HSTS 头（max-age=31536000）
+- WebSocket 支持（DSH 实时交互）
+- 300 秒读取超时（DSH 长任务）
+- 50MB 上传限制
 
-部署者自行定义加密、保留期、异机复制、RPO/RTO 和恢复演练。
+如需修改域名或添加多个域名，编辑 `nginx.conf` 中的 `server_name`。
 
-## 18. 云部署限制
+## 4. 数据备份
 
-云部署不属于 R1。
+### 4.1 数据目录
 
-无状态 Serverless 环境不能直接读取真实项目目录，也不适合持有个人 CLI 登录态或长期私有数据目录。
+SQLite 数据库和用户数据存储在 `DATA_DIR`（默认 `./data`）：
+- `workbench.db` — SQLite 数据库
+- `workbench.db-wal` — WAL 日志（运行时）
+- `workbench.db-shm` — 共享内存（运行时）
 
-远程部署应使用长期主机：持久化 `/data` 和 `/workspace`，让宿主机承担 CLI 登录环境，再通过受控私网 sidecar 给 Workbench 容器提供最小只读能力。
+### 4.2 备份策略
+
+```bash
+# 在线备份（WAL 模式下安全）
+sqlite3 ./data/workbench.db ".backup './backups/workbench-$(date +%Y%m%d).db'"
+
+# 或直接复制（需暂停服务）
+docker compose stop workbench
+cp ./data/workbench.db ./backups/
+docker compose start workbench
+```
+
+建议配置 cron 定时备份：
+
+```bash
+# 每天凌晨 3 点自动备份
+0 3 * * * sqlite3 /path/to/data/workbench.db ".backup '/path/to/backups/workbench-$(date +\%Y\%m\%d).db'"
+```
+
+## 5. 升级
+
+```bash
+# 拉取最新代码
+git pull origin main
+
+# 重新构建并启动
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+数据库 schema 通过 `CREATE TABLE IF NOT EXISTS` 自动迁移，无需额外操作。
+
+## 6. 故障排查
+
+| 问题 | 原因 | 解决方案 |
+|---|---|---|
+| 启动报 421 | TRUSTED_ORIGINS 未配置或域名不匹配 | 设置 `TRUSTED_ORIGINS=https://your-domain.com` |
+| 启动拒绝：未启用认证 | 公网绑定但无密码 | 设置 `WORKBENCH_ADMIN_PASSWORD` 或 `WORKBENCH_PASSWORD` |
+| 启动拒绝：SESSION_SECRET | 密钥太短或使用了默认值 | 设置至少 24 字符的随机字符串 |
+| SQLite SQLITE_BUSY | 并发写入冲突 | 已通过 busy_timeout=5000 缓解，如仍出现需检查是否有多个进程写入同一数据库 |
+| better-sqlite3 编译失败 | Alpine 缺编译工具链 | Dockerfile 已添加 python3/make/g++，本机需 `apk add python3 make g++` |
+| Cookie 不生效 | HTTPS 下未设 Secure | 确保 `COOKIE_SECURE=1` |

@@ -1,0 +1,53 @@
+# 生产环境 Docker Compose — 含 Nginx 反向代理 + TLS
+# 使用方式：
+#   1. 复制 .env.example → .env 并填写生产配置
+#   2. 将 TLS 证书放到 ./certs/fullchain.pem 和 ./certs/privkey.pem
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#
+# Nginx 监听 443（HTTPS），反代到内部 workbench:4173
+# workbench 不直接暴露端口，仅通过 Nginx 访问
+
+services:
+  workbench:
+    build:
+      context: .
+    user: "${WORKBENCH_UID:-1000}:${WORKBENCH_GID:-1000}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      DATA_DIR: /data
+      WORKSPACE_ROOT: /workspace
+      STORE_BACKEND: sqlite
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ${WORKBENCH_DATA_PATH:-./data}
+        target: /data
+      - type: bind
+        source: ${WORKBENCH_WORKSPACE_PATH:-./workspace}
+        target: /workspace
+        read_only: false
+    expose:
+      - "4173"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - workbench
+    restart: unless-stopped

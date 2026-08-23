@@ -100,12 +100,17 @@ export async function serveStatic(publicDir,pathname,res){
 }
 export function securityHeaders({allowFrame=false,frameSrc=''}={}){
   const frameAncestors=allowFrame?"'self'":"'none'";
-  return{
+  const headers={
     'X-Content-Type-Options':'nosniff',
     'Referrer-Policy':'no-referrer',
     'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
-    'Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self'${frameSrc?` ${frameSrc}`:''}; frame-ancestors ${frameAncestors}; base-uri 'self'; form-action 'self'`,
+    'Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self'${frameSrc?` ${frameSrc}`:''}; frame-ancestors ${frameAncestors}; base-uri 'self'; form-action 'self'; upgrade-insecure-requests`,
     'X-Frame-Options':allowFrame?'SAMEORIGIN':'DENY',
     'Vary':'Origin'
   };
+  // HSTS：仅在 COOKIE_SECURE=1（即 HTTPS 部署）时启用
+  if(process.env.COOKIE_SECURE==='1'){
+    headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains';
+  }
+  return headers;
 }
