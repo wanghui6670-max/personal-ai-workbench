@@ -43,7 +43,7 @@ test('stdio proxy imports the exact reviewed allow-list and blocks unknown calls
   assert.match(source,/import \{ HARNESS_NAVIGATOR_TOOL_ALLOWLIST \} from '\.\.\/src\/harness-policy\.mjs'/);
   assert.match(source,/new Set\(HARNESS_NAVIGATOR_TOOL_ALLOWLIST\)/);
   assert.match(source,/ALLOWED_RAW_NAMES\.has\(String\(message\.params\?\.name/);
-  assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,23);
+  assert.equal(HARNESS_NAVIGATOR_TOOL_ALLOWLIST.length,27);
   assert.match(HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256,/^[a-f0-9]{64}$/);
 });
 

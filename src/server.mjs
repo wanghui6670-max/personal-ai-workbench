@@ -112,7 +112,7 @@ const joycrewClient=createJoycrewClient({env:process.env});
 const joycrewActions=createJoycrewActionBroker({client:joycrewClient});
 // MCP registry 传入 adapter（它的 context() 在运行时会用 store.readState() 不传 userId，
 // 但在多用户模式下 handler 会传 scopedStore 覆盖）
-const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store:globalStore,joycrewClient,joycrewActions});
+const mcpRegistry=createWorkbenchRegistry({appRoot:APP_ROOT,store:globalStore,joycrewClient,joycrewActions,crewCatalog});
 const harnessNavigator=createHarnessNavigator({appRoot:APP_ROOT,bridgeUrl:harnessBridgeBaseUrl(host,port),env:process.env});
 const capabilityRegistry=createCapabilityRegistry();
 capabilityRegistry.registerProvider(createLegacyMcpProvider({

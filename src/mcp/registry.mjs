@@ -39,10 +39,10 @@ function planGuard(tool,args,state){
   return null;
 }
 
-export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycrewActions=null}={}){
+export function createWorkbenchRegistry({appRoot,store,joycrewClient=null,joycrewActions=null,crewCatalog=null}={}){
   if(!appRoot||!store)throw new Error('MCP registry requires appRoot and store');
   const workbenchTools=createWorkbenchTools();
-  const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions}):[];
+  const joycrewTools=joycrewClient&&joycrewActions?createJoycrewTools({client:joycrewClient,actions:joycrewActions,crewCatalog}):[];
   const tools=[...workbenchTools,...createFeishuInitializeTools(),...createInboxBatchTools(),...createProjectRecordTools(),...createProjectKnowledgeTools(),...createContentTools(),...joycrewTools];
 
   async function context(overrideStore){

@@ -21,7 +21,7 @@ const filterSchema={type:'object',additionalProperties:false,properties:{field:s
 const recordSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'records'},sourceId:shortString,entity:shortString,filters:{type:'array',maxItems:20,items:filterSchema}},required:['kind','sourceId','entity']};
 const fileSourceSchema={type:'object',additionalProperties:false,properties:{kind:{const:'file'},sourceId:shortString,relativePath:{type:'string',minLength:1,maxLength:1000}},required:['kind','sourceId','relativePath']};
 
-export function createJoycrewTools({client,actions}={}){
+export function createJoycrewTools({client,actions,crewCatalog=null}={}){
   if(!client||!actions)throw new Error('Joycrew tools require client and action broker');
   return [
     descriptor({
@@ -97,6 +97,46 @@ export function createJoycrewTools({client,actions}={}){
       description:'只生成批准或拒绝 Joycrew 写回审批的操作预览。批准仍会在确认后由 Joycrew 重新检查源状态。',
       inputSchema:{type:'object',additionalProperties:false,properties:{approvalId:shortString,decision:{type:'string',enum:['approve','reject']}},required:['approvalId','decision']},
       execute:async(_context,args)=>actionResult(actions.prepare('approval.decide',object(args),{source:'harness'}))
+    }),
+    descriptor({
+      name:'crew_agent_list',
+      description:'列出可用的 AI 员工（本机 Codex agents 和 Joycrew employees）。返回每个员工的 id、岗位名、部门、描述和来源。',
+      execute:async()=>{
+        const agents=[];
+        // 本机 Codex agents
+        if(crewCatalog){
+          try{
+            const data=await crewCatalog.catalog();
+            for(const a of data.agents||[]){
+              agents.push({id:a.id,name:a.title||a.name,source:'codex',dept:a.dept||'',description:a.description||''});
+            }
+          }catch{/* crewCatalog 读取失败时静默降级 */}
+        }
+        // Joycrew employees（如果可用）
+        try{
+          const overview=await client.overview();
+          for(const e of overview.employees||[]){
+            agents.push({id:e.id,name:e.name,source:'joycrew',dept:e.role||'',description:`${e.version||''} readiness=${e.readiness||'unknown'}`});
+          }
+        }catch{/* Joycrew 不可用时只返回 Codex agents */}
+        return {agents,count:agents.length};
+      }
+    }),
+    descriptor({
+      name:'crew_agent_dispatch',
+      description:'向指定 AI 员工派单。当 Joycrew 可用时生成 Run 操作预览（需用户在业务执行页面确认）；当 Joycrew 不可用时返回 codex 派单命令供用户复制执行。',
+      inputSchema:{type:'object',additionalProperties:false,properties:{agentId:shortString,task:{type:'string',minLength:3,maxLength:4000},projectId:optionalString,sources:{type:'array',maxItems:20,items:{anyOf:[recordSourceSchema,fileSourceSchema]}}},required:['agentId','task']},
+      execute:async(_context,args)=>{
+        const input=object(args);
+        const agentId=string(input.agentId,'agentId');
+        const task=string(input.task,'task');
+        // 优先尝试 Joycrew Run（如果提供了 projectId 和 sources）
+        if(input.projectId&&Array.isArray(input.sources)&&input.sources.length>0){
+          return actionResult(actions.prepare('run.create',{projectId:input.projectId,employeeId:agentId,task,sources:input.sources},{source:'harness-navigator'}));
+        }
+        // Joycrew 不可用或缺少必填参数时，返回 codex 派单命令
+        return{message:`Joycrew 不可用或缺少 projectId/sources 参数。请在终端执行以下命令派单：`,command:`codex exec --agent ${agentId} "${task.replace(/"/g,'\\"')}"`};
+      }
     })
   ];
 }
@@ -113,5 +153,7 @@ export function planJoycrewMessage({message}={}){
   if(containsAny(text,[/客户列表/,/有哪些客户/]))return{kind:'tool',toolName:'joycrew_customer_list',args:{},reason:'读取 Joycrew 客户列表。'};
   if(containsAny(text,[/业务任务/,/团队任务/,/Joycrew.*任务/i]))return{kind:'tool',toolName:'joycrew_task_list',args:{},reason:'读取 Joycrew 业务任务。'};
   if(containsAny(text,[/Joycrew.*项目/i,/企业项目/,/业务项目列表/]))return{kind:'tool',toolName:'joycrew_project_list',args:{},reason:'读取 Joycrew 企业项目。'};
+  if(containsAny(text,[/AI员工.*列表/,/有哪些.*AI员工/,/列出.*AI员工/,/可用.*员工/]))return{kind:'tool',toolName:'crew_agent_list',args:{},reason:'列出可用的 AI 员工。'};
+  if(containsAny(text,[/派单/,/分配.*任务.*员工/,/让.*AI员工.*做/]))return{kind:'tool',toolName:'crew_agent_dispatch',args:{},reason:'向 AI 员工派单。'};
   return null;
 }

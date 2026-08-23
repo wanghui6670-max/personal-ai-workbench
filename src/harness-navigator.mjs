@@ -272,6 +272,8 @@ export function summarizeHarnessEvents(events=[]){
       const name=String(event.data?.name||'').replace(/^joycrew__/,'');
       const args=parseToolArguments(event.data?.arguments);
       if(name==='skill'&&args?.name){skillCalls.push(String(args.name));}
+      if(name==='crew_agent_dispatch'&&args?.agentId){skillCalls.push(`AI员工:${args.agentId}`);}
+      if(name==='crew_agent_list'){skillCalls.push('AI员工列表');}
       trajectory.push({type:'tool_call',callId:String(event.data?.callId||''),name,arguments:args});
     }else if(event.type==='tool/result'){
       const text=toolResultText(event);

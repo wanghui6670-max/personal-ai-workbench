@@ -35,7 +35,9 @@ export const HARNESS_NAVIGATOR_TOOL_ALLOWLIST=Object.freeze([
   'joycrew_pending_action_list',
   'joycrew_run_prepare',
   'joycrew_deliverable_prepare',
-  'joycrew_approval_prepare'
+  'joycrew_approval_prepare',
+  'crew_agent_list',
+  'crew_agent_dispatch'
 ]);
 
 export const HARNESS_NAVIGATOR_TOOL_CATALOG_SHA256=crypto

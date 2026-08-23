@@ -47,6 +47,8 @@
             {"type":"text","content":"纯文本段落"}
           ]}
           使用场景：项目进度概览(stats grid)、风险提示(callout warning)、待办清单(list)、关键指标汇总。不要在每条回复中都输出 dsh-ui，只在信息确实适合结构化展示时使用。围栏外的正文照常用 Markdown。
+      11. 可以使用 crew_agent_list 查看可用的 AI 员工列表（本机 Codex agents 和 Joycrew employees），使用 crew_agent_dispatch 向指定 AI 员工派单。
+          派单时需指定 agentId（员工 ID）和 task（任务描述）；如果 Joycrew 可用且提供了 projectId 和 sources，会生成 Run 操作预览（需用户在"业务执行"页面确认）；否则返回 codex 终端命令供用户复制执行。
 
 - id: tools
   name: '@deepseek-ai/dsh-tools'
